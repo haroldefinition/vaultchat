@@ -1,0 +1,55 @@
+{
+  "expo": {
+    "name": "VaultChat",
+    "slug": "vaultchat",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#080b12"
+    },
+    "ios": {
+      "bundleIdentifier": "com.chatvault.vaultchat",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSCameraUsageDescription": "VaultChat needs camera access to take photos and videos.",
+        "NSMicrophoneUsageDescription": "VaultChat needs microphone access for voice and video calls.",
+        "NSPhotoLibraryUsageDescription": "VaultChat needs photo library access to share photos.",
+        "NSLocationWhenInUseUsageDescription": "VaultChat needs location access to share your location.",
+        "NSFaceIDUsageDescription": "VaultChat uses Face ID to securely unlock the app."
+      }
+    },
+    "android": {
+      "package": "com.chatvault.vaultchat",
+      "versionCode": 1,
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "RECORD_AUDIO",
+        "VIBRATE",
+        "RECEIVE_BOOT_COMPLETED",
+        "USE_BIOMETRIC",
+        "USE_FINGERPRINT"
+      ]
+    },
+    "plugins": [
+      "expo-local-authentication",
+      "expo-image-picker",
+      "expo-document-picker",
+      "expo-location",
+      "expo-av",
+      "expo-notifications"
+    ],
+    "extra": {
+      "serverUrl": "https://vaultchat-server-production.up.railway.app",
+      "eas": {
+        "projectId": "cdcdbb60-34c6-4acb-9728-7c321313ebc6"
+      }
+    },
+    "owner": "chatvault"
+  }
+}
