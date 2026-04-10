@@ -10,9 +10,9 @@
     "preview": {
       "distribution": "internal",
       "android": {
-        "buildType": "apk",
-        "image": "ubuntu-22.04-jdk-11-ndk-r21e"
-      }
+        "buildType": "apk"
+      },
+      "node": "20.0.0"
     },
     "production": {
       "android": {
