@@ -3,6 +3,18 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, TextInput, A
 import { useTheme } from '../services/theme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+function generateGroupRoomId(groupName, timestamp) {
+  const str = groupName + timestamp;
+  let h1 = 0, h2 = 0;
+  for (let i = 0; i < str.length; i++) {
+    h1 = Math.imul(31, h1) + str.charCodeAt(i) | 0;
+    h2 = Math.imul(37, h2) + str.charCodeAt(i) | 0;
+  }
+  const a = Math.abs(h1).toString(16).padStart(8, '0');
+  const b = Math.abs(h2).toString(16).padStart(8, '0');
+  return `${a}-${b.slice(0,4)}-4${b.slice(1,4)}-a${a.slice(0,3)}-${b}${a.slice(0,4)}`;
+}
+
 export default function GroupScreen({ navigation }) {
   const { bg, card, tx, sub, border, inputBg, accent } = useTheme();
   const [groups, setGroups] = useState([]);
@@ -10,6 +22,8 @@ export default function GroupScreen({ navigation }) {
   const [groupName, setGroupName] = useState('');
   const [groupDesc, setGroupDesc] = useState('');
   const [contacts, setContacts] = useState([]);
+  const [actionModal, setActionModal] = useState(false);
+  const [selectedGroup, setSelectedGroup] = useState(null);
   const [selectedMembers, setSelectedMembers] = useState([]);
   const [searchText, setSearchText] = useState('');
 
@@ -39,20 +53,23 @@ export default function GroupScreen({ navigation }) {
 
   async function createGroup() {
     if (!groupName.trim()) { Alert.alert('Error', 'Enter a group name'); return; }
-    if (selectedMembers.length === 0) { Alert.alert('Error', 'Add at least one member'); return; }
+    const timestamp = Date.now();
+    const roomId = generateGroupRoomId(groupName.trim(), timestamp.toString());
     const newGroup = {
-      id: Date.now().toString(),
+      id: roomId,
       name: groupName.trim(),
       desc: groupDesc.trim(),
       members: selectedMembers,
       memberCount: selectedMembers.length + 1,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      lastMessage: 'Group created',
+      lastMessage: 'Group created · 🔒 Encrypted',
+      createdAt: timestamp,
     };
     const updated = [newGroup, ...groups];
     setGroups(updated);
     await AsyncStorage.setItem('vaultchat_groups', JSON.stringify(updated));
     setGroupName(''); setGroupDesc(''); setSelectedMembers([]); setSearchText(''); setModal(false);
+    navigation.navigate('GroupChat', { group: newGroup });
   }
 
   function toggleMember(contact) {
@@ -169,9 +186,56 @@ export default function GroupScreen({ navigation }) {
           </View>
         </View>
       </Modal>
+
+      {/* Long press action modal */}
+      <Modal visible={actionModal} transparent animationType="fade">
+        <TouchableOpacity style={sa.overlay} activeOpacity={1} onPress={() => setActionModal(false)}>
+          <View style={[sa.box, { backgroundColor: card, borderColor: border }]}>
+            <Text style={[sa.title, { color: tx }]}>{selectedGroup?.name}</Text>
+            <TouchableOpacity style={[sa.btn, { borderBottomColor: border }]} onPress={async () => {
+              const updated = groups.map(g => g.id === selectedGroup.id ? { ...g, pinned: !g.pinned } : g)
+                .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+              setGroups(updated);
+              await AsyncStorage.setItem('vaultchat_groups', JSON.stringify(updated));
+              setActionModal(false);
+            }}>
+              <Text style={sa.btnText}>{selectedGroup?.pinned ? '📌 Unpin Group' : '📌 Pin Group'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[sa.btn, { borderBottomColor: border }]} onPress={async () => {
+              const updated = groups.map(g => g.id === selectedGroup.id ? { ...g, hideAlerts: !g.hideAlerts } : g);
+              setGroups(updated);
+              await AsyncStorage.setItem('vaultchat_groups', JSON.stringify(updated));
+              setActionModal(false);
+            }}>
+              <Text style={sa.btnText}>{selectedGroup?.hideAlerts ? '🔔 Unmute Alerts' : '🔕 Hide Alerts'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={sa.btn} onPress={() => {
+              Alert.alert('Delete Group', `Delete "${selectedGroup?.name}"?`, [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Delete', style: 'destructive', onPress: async () => {
+                  const updated = groups.filter(g => g.id !== selectedGroup.id);
+                  setGroups(updated);
+                  await AsyncStorage.setItem('vaultchat_groups', JSON.stringify(updated));
+                  setActionModal(false);
+                }},
+              ]);
+            }}>
+              <Text style={[sa.btnText, { color: '#ff4444' }]}>🗑️ Delete Group</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
+
+const sa = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' },
+  box: { width: '80%', borderRadius: 20, borderWidth: 1, overflow: 'hidden' },
+  title: { fontSize: 16, fontWeight: 'bold', padding: 16, textAlign: 'center' },
+  btn: { padding: 16, borderBottomWidth: 1, alignItems: 'center' },
+  btnText: { fontSize: 16, fontWeight: '500' },
+});
 
 const s = StyleSheet.create({
   container: { flex: 1 },

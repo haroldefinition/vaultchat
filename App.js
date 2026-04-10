@@ -12,6 +12,7 @@ import { StatusBar, Text }             from 'react-native';
 import { ThemeProvider } from './src/services/theme';
 import { setupPushNotifications, addNotificationResponseListener } from './src/services/pushNotifications';
 import PrivacyPolicyScreen from './src/screens/PrivacyPolicyScreen';
+import GroupChatScreen from './src/screens/GroupChatScreen';
 import BiometricLockScreen from './src/screens/BiometricLockScreen';
 import { isBiometricEnabled } from './src/services/biometric';
 
@@ -130,6 +131,7 @@ export default function App() {
             <Stack.Screen name="ActiveCall" component={ActiveCallScreen} options={{ animation: 'slide_from_bottom' }} />
             <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
             <Stack.Screen name="Call"     component={CallScreen} options={{ animation: 'slide_from_bottom' }} />
+            <Stack.Screen name="GroupChat" component={GroupChatScreen} />
           </>
         )}
       </Stack.Navigator>
