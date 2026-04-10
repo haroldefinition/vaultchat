@@ -25,23 +25,13 @@
     "android": {
       "package": "com.chatvault.vaultchat",
       "versionCode": 1,
-      "permissions": [
-        "CAMERA",
-        "READ_EXTERNAL_STORAGE",
-        "WRITE_EXTERNAL_STORAGE",
-        "RECORD_AUDIO",
-        "VIBRATE",
-        "RECEIVE_BOOT_COMPLETED",
-        "USE_BIOMETRIC",
-        "USE_FINGERPRINT"
-      ]
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0057a8"
+      }
     },
     "plugins": [
       "expo-local-authentication",
-      "expo-image-picker",
-      "expo-document-picker",
-      "expo-location",
-      "expo-av",
       "expo-notifications"
     ],
     "extra": {
