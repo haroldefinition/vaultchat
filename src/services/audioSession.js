@@ -1,19 +1,34 @@
-import { Audio } from 'expo-av';
+import { Platform } from 'react-native';
+
+let Audio;
+try {
+  Audio = require('expo-audio');
+} catch(e) {
+  try {
+    Audio = require('expo-av').Audio;
+  } catch(e2) {
+    Audio = null;
+  }
+}
 
 export async function setupAudioSession() {
   try {
-    await Audio.setAudioModeAsync({
-      allowsRecordingIOS: true,
-      playsInSilentModeIOS: true,
-      staysActiveInBackground: true,
-      shouldDuckAndroid: false,
-      playThroughEarpieceAndroid: false,
-    });
-  } catch (e) { console.log('Audio session error:', e); }
+    if (!Audio) return;
+    if (Audio.setAudioModeAsync) {
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: true,
+        shouldDuckAndroid: false,
+        playThroughEarpieceAndroid: false,
+      });
+    }
+  } catch (e) { console.log('Audio session setup skipped:', e.message); }
 }
 
 export async function setEarpieceMode() {
   try {
+    if (!Audio?.setAudioModeAsync) return;
     await Audio.setAudioModeAsync({
       allowsRecordingIOS: true,
       playsInSilentModeIOS: true,
@@ -25,6 +40,7 @@ export async function setEarpieceMode() {
 
 export async function setSpeakerMode() {
   try {
+    if (!Audio?.setAudioModeAsync) return;
     await Audio.setAudioModeAsync({
       allowsRecordingIOS: true,
       playsInSilentModeIOS: true,
@@ -36,6 +52,7 @@ export async function setSpeakerMode() {
 
 export async function releaseAudioSession() {
   try {
+    if (!Audio?.setAudioModeAsync) return;
     await Audio.setAudioModeAsync({
       allowsRecordingIOS: false,
       playsInSilentModeIOS: false,

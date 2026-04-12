@@ -4,6 +4,7 @@ import { supabase } from '../services/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../services/theme';
+import { requestContactsPermission, syncContacts } from '../services/contacts';
 import { checkBiometricSupport } from '../services/biometric';
 import { generateHandle, getMyHandle, saveHandle } from '../services/vaultHandle';
 import { createBackup, restoreBackup } from '../services/backup';
@@ -222,18 +223,28 @@ export default function SettingsScreen({ navigation }) {
 
           <View style={{ marginTop: 16 }}>
             <Text style={[st.fieldLabel, { color: sub }]}>VAULT HANDLE</Text>
-            <View style={[st.fieldBox, { backgroundColor: inputBg, borderColor: border, flexDirection: 'row', alignItems: 'center' }]}>
-              <Text style={{ color: '#5856d6', fontSize: 15, fontWeight: 'bold', flex: 1 }}>{vaultHandle}</Text>
-              <TouchableOpacity style={[st.copyBtn, { backgroundColor: '#5856d6' }]} onPress={async () => {
-                const newHandle = await generateHandle(displayName);
-                setVaultHandle(newHandle);
-                await saveHandle(newHandle);
-                Alert.alert('New Handle', `Your new handle is ${newHandle}`);
+            <View style={[st.fieldBox, { backgroundColor: inputBg, borderColor: border, flexDirection: 'row', alignItems: 'center', padding: 0, paddingLeft: 14 }]}>
+              <Text style={{ color: '#5856d6', fontSize: 18, fontWeight: 'bold', marginRight: 2 }}>@</Text>
+              <TextInput
+                style={{ flex: 1, color: tx, fontSize: 15, fontWeight: 'bold', padding: 14 }}
+                placeholder="yourhandle"
+                placeholderTextColor={sub}
+                value={vaultHandle.replace('@', '')}
+                onChangeText={v => setVaultHandle('@' + v.replace('@', '').replace(/[^a-zA-Z0-9_]/g, '').toLowerCase())}
+                autoCapitalize="none"
+                autoCorrect={false}
+                maxLength={20}
+              />
+              <TouchableOpacity style={[st.copyBtn, { backgroundColor: '#5856d6', margin: 8 }]} onPress={async () => {
+                if (!vaultHandle || vaultHandle.length < 2) { Alert.alert('Error', 'Enter a valid handle'); return; }
+                await saveHandle(vaultHandle);
+                await AsyncStorage.setItem('vaultchat_vault_id', vaultHandle);
+                Alert.alert('Handle Updated! ✓', `Your handle is now ${vaultHandle}`);
               }}>
-                <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>Regenerate</Text>
+                <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>Save</Text>
               </TouchableOpacity>
             </View>
-            <Text style={[st.hint, { color: sub }]}>Share your handle so others can message you without your phone number.</Text>
+            <Text style={[st.hint, { color: sub }]}>Your phone number stays private. Others find you with {vaultHandle || '@yourhandle'}.</Text>
           </View>
 
           <View style={{ marginTop: 16 }}>
@@ -322,6 +333,25 @@ export default function SettingsScreen({ navigation }) {
           </View>
           <Text style={[st.chevron, { color: sub }]}>›</Text>
         </TouchableOpacity>
+
+        <Section title="CONTACTS">
+          <Row icon="👥" label="Sync Phone Contacts" subText="Import from address book, iCloud, Google" onPress={async () => {
+            const granted = await requestContactsPermission();
+            if (!granted) {
+              Alert.alert('Permission needed', 'Go to Settings → Expo Go → Contacts → Allow');
+              return;
+            }
+            const contacts = await syncContacts();
+            Alert.alert('Synced! ✓', `${contacts.length} contacts imported successfully.`);
+          }} />
+          <Row icon="☁️" label="iCloud Contacts" subText="Sync via iPhone Settings → iCloud → Contacts" onPress={() => Alert.alert('iCloud Sync', 'Enable iCloud Contacts in iPhone Settings → Apple ID → iCloud → Contacts to sync automatically.')} />
+          <Row icon="🔍" label="Find Friends on VaultChat" subText="See which contacts use the app" onPress={async () => {
+            const granted = await requestContactsPermission();
+            if (!granted) { Alert.alert('Permission needed', 'Allow contacts access first'); return; }
+            const contacts = await syncContacts();
+            Alert.alert('Friends Found', `Synced ${contacts.length} contacts. Friends using VaultChat will appear in your Calls tab.`);
+          }} />
+        </Section>
 
         <Section title="ACCOUNT">
           <Row icon="📲" label="Linked Devices" subText="iPhone 17 Pro (This device)" onPress={() => Alert.alert('Linked Devices', 'iPhone 17 Pro — Active now\nMacBook Pro — Last active 2h ago')} />

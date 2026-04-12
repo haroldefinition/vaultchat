@@ -13,6 +13,9 @@ import { ThemeProvider } from './src/services/theme';
 import { setupPushNotifications, addNotificationResponseListener } from './src/services/pushNotifications';
 import PrivacyPolicyScreen from './src/screens/PrivacyPolicyScreen';
 import GroupChatScreen from './src/screens/GroupChatScreen';
+import NewCallScreen from './src/screens/NewCallScreen';
+import NewMessageScreen from './src/screens/NewMessageScreen';
+import ContactPickerScreen from './src/screens/ContactPickerScreen';
 import BiometricLockScreen from './src/screens/BiometricLockScreen';
 import { isBiometricEnabled } from './src/services/biometric';
 
@@ -62,21 +65,26 @@ function MainTabs() {
         tabBarStyle: {
           backgroundColor: tabBg,
           borderTopColor: tabBorder,
-          borderTopWidth: 1,
-          height: 88,
-          paddingBottom: 14,
-          paddingTop: 10,
+          borderTopWidth: 0.5,
+          height: 80,
+          paddingBottom: 16,
+          paddingTop: 8,
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: -1 },
+          shadowOpacity: 0.12,
+          shadowRadius: 4,
+          elevation: 8,
         },
         tabBarActiveTintColor: activeColor,
         tabBarInactiveTintColor: inactiveColor,
-        tabBarLabelStyle: { fontSize: 13, fontWeight: '700', marginTop: 4 },
-        tabBarIconStyle: { marginBottom: 0 },
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '600', marginTop: 2 },
+        tabBarIconStyle: { marginTop: 2 },
       }}
     >
-      <Tab.Screen name="Chats"    component={ChatsScreen}    options={{ tabBarIcon: () => <Text style={{ fontSize: 28 }}>💬</Text>, tabBarLabel: 'Chats'    }} />
-      <Tab.Screen name="Calls"    component={CallScreen}     options={{ tabBarIcon: () => <Text style={{ fontSize: 28 }}>📞</Text>, tabBarLabel: 'Calls'    }} />
-      <Tab.Screen name="Groups"   component={GroupScreen}    options={{ tabBarIcon: () => <Text style={{ fontSize: 28 }}>👥</Text>, tabBarLabel: 'Groups'   }} />
-      <Tab.Screen name="Settings" component={SettingsScreen} options={{ tabBarIcon: () => <Text style={{ fontSize: 28 }}>⚙️</Text>, tabBarLabel: 'Settings' }} />
+      <Tab.Screen name="Chats"    component={ChatsScreen}    options={{ tabBarIcon: ({ focused }) => <Text style={{ fontSize: 26, opacity: focused ? 1 : 0.6 }}>💬</Text>, tabBarLabel: 'Chats'    }} />
+      <Tab.Screen name="Calls"    component={CallScreen}     options={{ tabBarIcon: ({ focused }) => <Text style={{ fontSize: 26, opacity: focused ? 1 : 0.6 }}>📞</Text>, tabBarLabel: 'Calls'    }} />
+      <Tab.Screen name="Groups"   component={GroupScreen}    options={{ tabBarIcon: ({ focused }) => <Text style={{ fontSize: 26, opacity: focused ? 1 : 0.6 }}>👥</Text>, tabBarLabel: 'Groups'   }} />
+      <Tab.Screen name="Settings" component={SettingsScreen} options={{ tabBarIcon: ({ focused }) => <Text style={{ fontSize: 26, opacity: focused ? 1 : 0.6 }}>⚙️</Text>, tabBarLabel: 'Settings' }} />
     </Tab.Navigator>
   );
 }
@@ -119,8 +127,9 @@ export default function App() {
       <StatusBar barStyle="light-content" backgroundColor={COLORS.bg} />
       <Stack.Navigator screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
         {!isLoggedIn ? (
-          <Stack.Screen name="Register" component={RegisterScreen}
-            initialParams={{ onLogin: () => setIsLoggedIn(true) }} />
+          <Stack.Screen name="Register">
+            {props => <RegisterScreen {...props} onLoginCallback={() => setIsLoggedIn(true)} />}
+          </Stack.Screen>
         ) : (
           <>
             <Stack.Screen name="Main"     component={MainTabs}    />
@@ -132,6 +141,9 @@ export default function App() {
             <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
             <Stack.Screen name="Call"     component={CallScreen} options={{ animation: 'slide_from_bottom' }} />
             <Stack.Screen name="GroupChat" component={GroupChatScreen} />
+            <Stack.Screen name="NewCall" component={NewCallScreen} />
+            <Stack.Screen name="NewMessage" component={NewMessageScreen} />
+            <Stack.Screen name="ContactPicker" component={ContactPickerScreen} />
           </>
         )}
       </Stack.Navigator>

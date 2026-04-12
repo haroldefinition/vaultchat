@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, Vibration } from 'react-native';
 import { useTheme } from '../services/theme';
-import { setupCallKit, displayIncomingCall } from '../services/callkit';
+import { setupCallKit } from '../services/callkit';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const SAMPLE_CALLS = [
@@ -14,7 +14,7 @@ export default function CallScreen({ navigation }) {
   const { bg, card, tx, sub, border, inputBg, accent } = useTheme();
   const [calls, setCalls] = useState(SAMPLE_CALLS);
   const [user, setUser] = useState(null);
-  const [tab, setTab] = useState('recent'); // 'recent' or 'keypad'
+  const [tab, setTab] = useState('recent');
   const [dialInput, setDialInput] = useState('');
 
   useEffect(() => {
@@ -44,34 +44,40 @@ export default function CallScreen({ navigation }) {
   const typeColor = type => type === 'missed' ? '#ff4444' : tx;
   const typeIcon = type => type === 'incoming' ? '↙' : type === 'outgoing' ? '↗' : '✗';
 
+  const PlusButton = () => (
+    <TouchableOpacity
+      style={[s.plusCircleBtn, { backgroundColor: accent }]}
+      onPress={() => navigation.navigate('NewCall')}
+    >
+      <Text style={s.plusCircleText}>+</Text>
+    </TouchableOpacity>
+  );
+
   return (
     <View style={[s.container, { backgroundColor: bg }]}>
       {/* Header */}
       <View style={[s.header, { borderBottomColor: border }]}>
         <Text style={[s.title, { color: accent }]}>Calls</Text>
-        <View style={[s.tabToggle, { backgroundColor: card, borderColor: border }]}>
-          <TouchableOpacity
-            style={[s.tabBtn, tab === 'recent' && { backgroundColor: accent }]}
-            onPress={() => setTab('recent')}
-          >
-            <Text style={[s.tabBtnText, { color: tab === 'recent' ? '#fff' : sub }]}>Recent</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[s.tabBtn, tab === 'keypad' && { backgroundColor: accent }]}
-            onPress={() => setTab('keypad')}
-          >
-            <Text style={[s.tabBtnText, { color: tab === 'keypad' ? '#fff' : sub }]}>Keypad</Text>
-          </TouchableOpacity>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <View style={[s.tabToggle, { backgroundColor: card, borderColor: border }]}>
+            <TouchableOpacity style={[s.tabBtn, tab === 'recent' && { backgroundColor: accent }]} onPress={() => setTab('recent')}>
+              <Text style={[s.tabBtnText, { color: tab === 'recent' ? '#fff' : sub }]}>Recent</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[s.tabBtn, tab === 'keypad' && { backgroundColor: accent }]} onPress={() => setTab('keypad')}>
+              <Text style={[s.tabBtnText, { color: tab === 'keypad' ? '#fff' : sub }]}>Keypad</Text>
+            </TouchableOpacity>
+          </View>
+          <PlusButton />
         </View>
       </View>
 
       {tab === 'keypad' ? (
-        /* ── KEYPAD TAB ── */
         <View style={s.keypadPage}>
-          {/* Display */}
           <View style={s.displayBox}>
             <Text style={[s.displayText, { color: tx }]}>
-              {dialInput ? `+1 ${dialInput.slice(0,3)}${dialInput.length > 3 ? ' ' : ''}${dialInput.slice(3,6)}${dialInput.length > 6 ? ' ' : ''}${dialInput.slice(6)}` : 'Enter number'}
+              {dialInput
+                ? `+1 ${dialInput.slice(0,3)}${dialInput.length > 3 ? ' ' : ''}${dialInput.slice(3,6)}${dialInput.length > 6 ? ' ' : ''}${dialInput.slice(6)}`
+                : 'Enter number'}
             </Text>
             {dialInput.length > 0 && (
               <TouchableOpacity onPress={deleteDigit} style={s.deleteBtn}>
@@ -80,7 +86,6 @@ export default function CallScreen({ navigation }) {
             )}
           </View>
 
-          {/* Keypad grid */}
           <View style={s.keypadGrid}>
             {[
               [{ d: '1', s: '' }, { d: '2', s: 'ABC' }, { d: '3', s: 'DEF' }],
@@ -99,10 +104,9 @@ export default function CallScreen({ navigation }) {
             ))}
           </View>
 
-          {/* Call buttons */}
           <View style={s.callBtnRow}>
             <TouchableOpacity
-              style={[s.greenCallBtn, { backgroundColor: '#34C759' }]}
+              style={[s.greenCallBtn, { backgroundColor: '#34C759', opacity: dialInput.length >= 10 ? 1 : 0.4 }]}
               onPress={() => makeCall('', dialInput, 'voice')}
               disabled={dialInput.length < 10}
             >
@@ -119,12 +123,10 @@ export default function CallScreen({ navigation }) {
           </TouchableOpacity>
         </View>
       ) : (
-        /* ── RECENT CALLS TAB ── */
         <View style={{ flex: 1 }}>
           <View style={[s.featureBanner, { backgroundColor: card, borderColor: border }]}>
             <Text style={[s.featureText, { color: accent }]}>✓ Background Persist  ✓ Hold/Swap  ✓ Never Drop  ✓ Noise Cancel</Text>
           </View>
-
           <FlatList
             data={calls}
             keyExtractor={i => i.id}
@@ -154,7 +156,7 @@ export default function CallScreen({ navigation }) {
               <View style={s.empty}>
                 <Text style={s.emptyIcon}>📞</Text>
                 <Text style={[s.emptyText, { color: tx }]}>No recent calls</Text>
-                <Text style={[s.emptySub, { color: sub }]}>Tap Keypad to make a call</Text>
+                <Text style={[s.emptySub, { color: sub }]}>Tap + to make a call</Text>
               </View>
             }
           />
@@ -168,6 +170,8 @@ const s = StyleSheet.create({
   container: { flex: 1 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 60, paddingBottom: 14, borderBottomWidth: 1 },
   title: { fontSize: 24, fontWeight: 'bold' },
+  plusCircleBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  plusCircleText: { color: '#fff', fontSize: 24, fontWeight: '300', lineHeight: 28 },
   tabToggle: { flexDirection: 'row', borderRadius: 20, borderWidth: 1, overflow: 'hidden' },
   tabBtn: { paddingHorizontal: 16, paddingVertical: 8 },
   tabBtnText: { fontSize: 13, fontWeight: 'bold' },
@@ -186,8 +190,6 @@ const s = StyleSheet.create({
   callDuration: { fontSize: 12, marginTop: 2 },
   callActions: { flexDirection: 'row', gap: 8 },
   callBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
-
-  // Keypad
   keypadPage: { flex: 1, alignItems: 'center', paddingTop: 20, paddingBottom: 20 },
   displayBox: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', minHeight: 60, paddingHorizontal: 40, marginBottom: 24, position: 'relative', width: '100%' },
   displayText: { fontSize: 28, fontWeight: '300', textAlign: 'center', letterSpacing: 2 },
@@ -198,7 +200,7 @@ const s = StyleSheet.create({
   dialDigit: { fontSize: 28, fontWeight: '300' },
   dialSub: { fontSize: 10, fontWeight: 'bold', letterSpacing: 1 },
   callBtnRow: { flexDirection: 'row', justifyContent: 'center', marginTop: 28, gap: 24 },
-  greenCallBtn: { width: 72, height: 72, borderRadius: 36, alignItems: 'center', justifyContent: 'center', shadowColor: '#34C759', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 8 },
+  greenCallBtn: { width: 72, height: 72, borderRadius: 36, alignItems: 'center', justifyContent: 'center' },
   greenCallIcon: { fontSize: 32 },
   facetimeCallBtn: { marginTop: 16, paddingHorizontal: 32, paddingVertical: 14, borderRadius: 28, alignItems: 'center' },
 });
