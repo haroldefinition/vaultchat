@@ -1,445 +1,235 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, TextInput, Alert, ScrollView, Image } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, FlatList, TouchableOpacity, TextInput, Modal, StyleSheet, Alert, StatusBar, SafeAreaView, KeyboardAvoidingView, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../services/theme';
-import { getCachedContacts } from '../services/contacts';
 
-const GROUPS_KEY = 'vaultchat_groups';
-const BACKEND = 'https://vaultchat-production-3a96.up.railway.app';
+const STORAGE_KEY = 'vaultchat_groups';
 
-function makeRoomId(name, ts) {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = Math.imul(31, h) + name.charCodeAt(i) | 0;
-  return `grp-${Math.abs(h).toString(16)}-${ts}`;
+function generateRoomId(name, ts) {
+  let h1 = 0, h2 = 0;
+  const str = name + ts;
+  for (let i = 0; i < str.length; i++) {
+    h1 = (Math.imul(31, h1) + str.charCodeAt(i)) | 0;
+    h2 = (Math.imul(37, h2) + str.charCodeAt(i)) | 0;
+  }
+  const a = Math.abs(h1).toString(16).padStart(8, '0');
+  const b = Math.abs(h2).toString(16).padStart(8, '0');
+  return `${a}-${b.slice(0,4)}-4${b.slice(1,4)}-a${a.slice(0,3)}-${b}${a.slice(0,4)}`;
 }
 
 export default function GroupScreen({ navigation }) {
-  const { bg, card, tx, sub, border, inputBg, accent } = useTheme();
+  const theme = useTheme();
+  const { bg, card, tx, sub, border, inputBg, accent } = theme;
   const [groups, setGroups] = useState([]);
-  const [contacts, setContacts] = useState([]);
-  const [search, setSearch] = useState('');
   const [createModal, setCreateModal] = useState(false);
   const [actionModal, setActionModal] = useState(false);
-  const [membersModal, setMembersModal] = useState(false);
-  const [selected, setSelected] = useState(null);
+  const [selectedGroup, setSelectedGroup] = useState(null);
   const [groupName, setGroupName] = useState('');
   const [groupDesc, setGroupDesc] = useState('');
-  const [picked, setPicked] = useState([]);
-  const [contactSearch, setContactSearch] = useState('');
 
   useEffect(() => {
+    loadGroups();
     const unsub = navigation.addListener('focus', loadGroups);
-    loadContacts();
     return unsub;
   }, [navigation]);
 
-  async function loadGroups() {
-    const s = await AsyncStorage.getItem(GROUPS_KEY);
-    if (s) setGroups(JSON.parse(s));
-  }
+  const loadGroups = useCallback(async () => {
+    try {
+      const raw = await AsyncStorage.getItem(STORAGE_KEY);
+      if (raw) setGroups(JSON.parse(raw));
+    } catch (e) { console.warn('loadGroups error:', e); }
+  }, []);
 
-  async function loadContacts() {
-    const s = await AsyncStorage.getItem('vaultchat_chats');
-    const app = s ? JSON.parse(s).map(c => ({ ...c, onApp: true })) : [];
-    const ph = await getCachedContacts();
-    setContacts([...app, ...ph.filter(p => !app.find(a => a.phone === p.phone)).map(p => ({ ...p, onApp: false }))]);
-  }
-
-  async function save(updated) {
+  const saveGroups = async (updated) => {
     setGroups(updated);
-    await AsyncStorage.setItem(GROUPS_KEY, JSON.stringify(updated));
-  }
+    try { await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated)); }
+    catch (e) { console.warn('saveGroups error:', e); }
+  };
 
-  async function createGroup() {
-    if (!groupName.trim()) { Alert.alert('Error', 'Enter a group name'); return; }
-    const ts = Date.now();
-    const group = {
-      id: makeRoomId(groupName.trim(), ts),
-      name: groupName.trim(),
-      desc: groupDesc.trim(),
-      members: picked,
-      memberCount: picked.length + 1,
-      createdAt: ts,
-      pinned: false,
-      archived: false,
-      lastMessage: '🔒 Group created',
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
+  const handleCreate = async () => {
+    const name = groupName.trim();
+    if (!name) { Alert.alert('Error', 'Please enter a group name.'); return; }
+    const ts = Date.now().toString();
+    const id = generateRoomId(name, ts);
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const newGroup = { id, name, desc: groupDesc.trim(), memberCount: 1, lastMessage: 'Group created', time, pinned: false, hideAlerts: false, createdAt: Date.now() };
+    const updated = [newGroup, ...groups];
+    await saveGroups(updated);
+    setGroupName(''); setGroupDesc(''); setCreateModal(false);
+    navigation.navigate('GroupChat', { groupId: id, groupName: name });
+  };
 
-    // Send SMS invite to non-app members
-    const nonApp = picked.filter(m => !m.onApp);
-    for (const m of nonApp) {
-      try {
-        await fetch(`${BACKEND}/messages`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            room_id: '550e8400-e29b-41d4-a716-446655440000',
-            sender_id: 'system',
-            content: `You've been invited to join "${group.name}" on VaultChat! Download the app to join.`,
-          }),
-        });
-      } catch (e) {}
-    }
+  const openActionMenu = (group) => { setSelectedGroup(group); setActionModal(true); };
 
-    const updated = [group, ...groups];
-    await save(updated);
-    setGroupName(''); setGroupDesc(''); setPicked([]); setContactSearch('');
-    setCreateModal(false);
-    navigation.navigate('GroupChat', { group });
-  }
-
-  async function pinGroup() {
-    const updated = groups
-      .map(g => g.id === selected.id ? { ...g, pinned: !g.pinned } : g)
-      .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
-    await save(updated);
+  const handlePin = async () => {
+    const updated = groups.map(g => g.id === selectedGroup.id ? { ...g, pinned: !g.pinned } : g);
+    updated.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+    await saveGroups(updated);
     setActionModal(false);
-  }
+    Alert.alert(selectedGroup.pinned ? 'Unpinned' : 'Pinned', `"${selectedGroup.name}" has been ${selectedGroup.pinned ? 'unpinned' : 'pinned'}.`);
+  };
 
-  async function archiveGroup() {
-    const updated = groups.map(g => g.id === selected.id ? { ...g, archived: !g.archived } : g);
-    await save(updated);
+  const handleHideAlerts = async () => {
+    const updated = groups.map(g => g.id === selectedGroup.id ? { ...g, hideAlerts: !g.hideAlerts } : g);
+    await saveGroups(updated);
     setActionModal(false);
-  }
+    Alert.alert(selectedGroup.hideAlerts ? 'Alerts On' : 'Alerts Off', `Notifications for "${selectedGroup.name}" are now ${selectedGroup.hideAlerts ? 'enabled' : 'muted'}.`);
+  };
 
-  async function deleteGroup() {
-    Alert.alert('Delete Group', `Delete "${selected?.name}"?`, [
-      { text: 'Cancel', style: 'cancel' },
+  const handleDelete = () => {
+    Alert.alert('Delete Group', `Delete "${selectedGroup.name}"? This cannot be undone.`, [
+      { text: 'Cancel', style: 'cancel', onPress: () => setActionModal(false) },
       { text: 'Delete', style: 'destructive', onPress: async () => {
-        await save(groups.filter(g => g.id !== selected.id));
+        const updated = groups.filter(g => g.id !== selectedGroup.id);
+        await saveGroups(updated);
         setActionModal(false);
       }},
     ]);
-  }
+  };
 
-  async function addMember(contact) {
-    if (!selected) return;
-    const already = selected.members?.find(m => m.phone === contact.phone);
-    if (already) { Alert.alert('Already added', `${contact.name} is already in this group`); return; }
-    if (!contact.onApp) {
-      Alert.alert('Not on VaultChat', `${contact.name} hasn't installed the app. Send them an invite?`, [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Send Invite', onPress: async () => {
-          try {
-            await fetch(`${BACKEND}/messages`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ room_id: '550e8400-e29b-41d4-a716-446655440000', sender_id: 'system', content: `Join "${selected.name}" on VaultChat!` }),
-            });
-          } catch (e) {}
-          Alert.alert('Invite Sent', `${contact.name} was invited to download VaultChat.`);
-        }},
-      ]);
-      return;
-    }
-    const updatedMembers = [...(selected.members || []), contact];
-    const updatedGroup = { ...selected, members: updatedMembers, memberCount: updatedMembers.length + 1 };
-    const updated = groups.map(g => g.id === selected.id ? updatedGroup : g);
-    await save(updated);
-    setSelected(updatedGroup);
-    Alert.alert('Added ✓', `${contact.name} added to ${selected.name}`);
-  }
+  const renderGroup = ({ item }) => (
+    <TouchableOpacity
+      style={[s.row, { backgroundColor: card, borderBottomColor: border }]}
+      activeOpacity={0.7}
+      onPress={() => navigation.navigate('GroupChat', { groupId: item.id, groupName: item.name })}
+      onLongPress={() => openActionMenu(item)}
+      delayLongPress={400}
+    >
+      <View style={[s.avatar, { backgroundColor: accent + '22' }]}>
+        <Text style={s.avatarEmoji}>👥</Text>
+        {item.pinned && <View style={[s.pinBadge, { backgroundColor: accent }]}><Text style={s.pinText}>📌</Text></View>}
+      </View>
+      <View style={s.info}>
+        <View style={s.topRow}>
+          <Text style={[s.name, { color: tx }]} numberOfLines={1}>{item.name}</Text>
+          <Text style={[s.time, { color: sub }]}>{item.time || ''}</Text>
+        </View>
+        <View style={s.bottomRow}>
+          <Text style={[s.preview, { color: sub }]} numberOfLines={1}>{item.hideAlerts ? '🔕 ' : '🔒 '}{item.lastMessage || 'Tap to open'}</Text>
+          <Text style={[s.members, { color: sub }]}>{item.memberCount || 1} {(item.memberCount || 1) === 1 ? 'member' : 'members'}</Text>
+        </View>
+      </View>
+      <Text style={[s.chevron, { color: sub }]}>›</Text>
+    </TouchableOpacity>
+  );
 
-  async function removeMember(member) {
-    Alert.alert('Remove Member', `Remove ${member.name} from "${selected?.name}"?`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Remove', style: 'destructive', onPress: async () => {
-        const updatedMembers = selected.members.filter(m => m.phone !== member.phone);
-        const updatedGroup = { ...selected, members: updatedMembers, memberCount: updatedMembers.length + 1 };
-        const updated = groups.map(g => g.id === selected.id ? updatedGroup : g);
-        await save(updated);
-        setSelected(updatedGroup);
-      }},
-    ]);
-  }
-
-  const visible = groups
-    .filter(g => !g.archived)
-    .filter(g => !search || g.name?.toLowerCase().includes(search.toLowerCase()))
-    .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
-
-  const filteredContacts = contacts.filter(c =>
-    !contactSearch ||
-    c.name?.toLowerCase().includes(contactSearch.toLowerCase()) ||
-    c.phone?.includes(contactSearch) ||
-    c.handle?.toLowerCase().includes(contactSearch.toLowerCase())
+  const renderEmpty = () => (
+    <View style={s.empty}>
+      <Text style={s.emptyEmoji}>👥</Text>
+      <Text style={[s.emptyTitle, { color: tx }]}>No groups yet</Text>
+      <Text style={[s.emptySub, { color: sub }]}>Create a group to start an encrypted conversation.</Text>
+      <TouchableOpacity style={[s.emptyBtn, { backgroundColor: accent }]} onPress={() => setCreateModal(true)}>
+        <Text style={s.emptyBtnText}>+ Create Group</Text>
+      </TouchableOpacity>
+    </View>
   );
 
   return (
-    <View style={[s.container, { backgroundColor: bg }]}>
-      {/* Header */}
-      <View style={[s.header, { borderBottomColor: border }]}>
-        <Text style={[s.title, { color: accent }]}>Groups</Text>
-        <TouchableOpacity style={[s.newBtn, { backgroundColor: accent }]} onPress={() => setCreateModal(true)}>
-          <Text style={s.newBtnText}>+ New</Text>
+    <SafeAreaView style={[s.safe, { backgroundColor: bg }]}>
+      <StatusBar barStyle="light-content" backgroundColor={bg} />
+      <View style={[s.header, { backgroundColor: bg, borderBottomColor: border }]}>
+        <Text style={[s.headerTitle, { color: tx }]}>Groups</Text>
+        <TouchableOpacity style={[s.newBtn, { backgroundColor: accent }]} onPress={() => setCreateModal(true)} activeOpacity={0.8}>
+          <Text style={s.newBtnText}>+ New Group</Text>
         </TouchableOpacity>
       </View>
-
-      {/* Search */}
-      <View style={[s.searchBar, { backgroundColor: inputBg, borderColor: border }]}>
-        <Text style={s.searchIcon}>🔍</Text>
-        <TextInput
-          style={[s.searchInput, { color: tx }]}
-          placeholder="Search groups..."
-          placeholderTextColor={sub}
-          value={search}
-          onChangeText={setSearch}
-          autoCapitalize="none"
-        />
-        {search.length > 0 && (
-          <TouchableOpacity onPress={() => setSearch('')}>
-            <Text style={[{ color: sub, fontSize: 16, paddingHorizontal: 8 }]}>✕</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {/* Group List */}
       <FlatList
-        data={visible}
-        keyExtractor={(item, i) => item.id || i.toString()}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={[s.row, { borderBottomColor: border }, item.pinned && { backgroundColor: card }]}
-            onPress={() => navigation.navigate('GroupChat', { group: item })}
-            onLongPress={() => { setSelected(item); setActionModal(true); }}
-            delayLongPress={400}
-          >
-            <View style={[s.avatar, { backgroundColor: accent }]}>
-              <Text style={s.avatarText}>{item.name[0]?.toUpperCase()}</Text>
-            </View>
-            <View style={s.info}>
-              <View style={s.nameRow}>
-                {item.pinned && <Text style={{ fontSize: 12 }}>📌</Text>}
-                <Text style={[s.name, { color: tx }]}>{item.name}</Text>
-              </View>
-              <Text style={[s.sub2, { color: sub }]}>👥 {item.memberCount || 1} members · {item.lastMessage}</Text>
-            </View>
-            <Text style={[s.time, { color: sub }]}>{item.time}</Text>
-          </TouchableOpacity>
-        )}
-        ListEmptyComponent={
-          <View style={s.empty}>
-            <Text style={s.emptyIcon}>👥</Text>
-            <Text style={[s.emptyTitle, { color: tx }]}>No groups yet</Text>
-            <Text style={[s.emptySub, { color: sub }]}>Tap + New to create a group</Text>
-            <TouchableOpacity style={[s.createBtn, { backgroundColor: accent }]} onPress={() => setCreateModal(true)}>
-              <Text style={{ color: '#fff', fontWeight: 'bold' }}>Create Group</Text>
-            </TouchableOpacity>
-          </View>
-        }
+        data={groups}
+        keyExtractor={item => item.id}
+        renderItem={renderGroup}
+        ListEmptyComponent={renderEmpty}
+        contentContainerStyle={groups.length === 0 ? { flex: 1 } : { paddingBottom: 20 }}
+        style={{ flex: 1 }}
       />
 
-      {/* Long Press Actions */}
-      <Modal visible={actionModal} transparent animationType="fade">
-        <TouchableOpacity style={s.overlay} activeOpacity={1} onPress={() => setActionModal(false)}>
-          <View style={[s.actionBox, { backgroundColor: card, borderColor: border }]}>
-            <Text style={[s.actionTitle, { color: tx }]}>{selected?.name}</Text>
-            <TouchableOpacity style={[s.actionBtn, { borderBottomColor: border }]} onPress={pinGroup}>
-              <Text style={[s.actionText, { color: tx }]}>{selected?.pinned ? '📌 Unpin' : '📌 Pin Group'}</Text>
+      <Modal visible={createModal} animationType="slide" transparent onRequestClose={() => setCreateModal(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={s.modalOverlay}>
+          <View style={[s.sheet, { backgroundColor: card }]}>
+            <View style={[s.sheetHandle, { backgroundColor: border }]} />
+            <Text style={[s.sheetTitle, { color: tx }]}>Create New Group</Text>
+            <Text style={[s.sheetSub, { color: sub }]}>All group messages are end-to-end encrypted 🔒</Text>
+            <TextInput style={[s.input, { backgroundColor: inputBg, color: tx, borderColor: border }]} placeholder="Group name" placeholderTextColor={sub} value={groupName} onChangeText={setGroupName} autoFocus maxLength={50} />
+            <TextInput style={[s.input, { backgroundColor: inputBg, color: tx, borderColor: border }]} placeholder="Description (optional)" placeholderTextColor={sub} value={groupDesc} onChangeText={setGroupDesc} maxLength={150} />
+            <View style={s.sheetBtns}>
+              <TouchableOpacity style={[s.cancelBtn, { borderColor: border }]} onPress={() => { setCreateModal(false); setGroupName(''); setGroupDesc(''); }}>
+                <Text style={[s.cancelBtnText, { color: sub }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[s.createBtn, { backgroundColor: accent }]} onPress={handleCreate}>
+                <Text style={s.createBtnText}>Create</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      <Modal visible={actionModal} animationType="fade" transparent onRequestClose={() => setActionModal(false)}>
+        <TouchableOpacity style={s.actionOverlay} activeOpacity={1} onPress={() => setActionModal(false)}>
+          <View style={[s.actionSheet, { backgroundColor: card }]}>
+            <Text style={[s.actionTitle, { color: tx }]} numberOfLines={1}>{selectedGroup?.name}</Text>
+            <TouchableOpacity style={[s.actionRow, { borderBottomColor: border }]} onPress={handlePin}>
+              <Text style={s.actionIcon}>📌</Text>
+              <Text style={[s.actionLabel, { color: tx }]}>{selectedGroup?.pinned ? 'Unpin' : 'Pin'}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[s.actionBtn, { borderBottomColor: border }]} onPress={() => { setActionModal(false); setMembersModal(true); }}>
-              <Text style={[s.actionText, { color: tx }]}>👥 Manage Members</Text>
+            <TouchableOpacity style={[s.actionRow, { borderBottomColor: border }]} onPress={handleHideAlerts}>
+              <Text style={s.actionIcon}>{selectedGroup?.hideAlerts ? '🔔' : '🔕'}</Text>
+              <Text style={[s.actionLabel, { color: tx }]}>{selectedGroup?.hideAlerts ? 'Unmute Alerts' : 'Hide Alerts'}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[s.actionBtn, { borderBottomColor: border }]} onPress={archiveGroup}>
-              <Text style={[s.actionText, { color: tx }]}>{selected?.archived ? '📥 Unarchive' : '📦 Archive'}</Text>
+            <TouchableOpacity style={[s.actionRow, { borderBottomColor: 'transparent' }]} onPress={handleDelete}>
+              <Text style={s.actionIcon}>🗑️</Text>
+              <Text style={[s.actionLabel, { color: '#ff4444' }]}>Delete Group</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={s.actionBtn} onPress={deleteGroup}>
-              <Text style={[s.actionText, { color: '#ff4444' }]}>🗑️ Delete Group</Text>
+            <TouchableOpacity style={[s.cancelAction, { borderTopColor: border }]} onPress={() => setActionModal(false)}>
+              <Text style={[s.cancelActionText, { color: sub }]}>Cancel</Text>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
       </Modal>
-
-      {/* Members Management Modal */}
-      <Modal visible={membersModal} animationType="slide">
-        <View style={[{ flex: 1, backgroundColor: bg }]}>
-          <View style={[s.modalHeader, { backgroundColor: card, borderBottomColor: border }]}>
-            <TouchableOpacity onPress={() => setMembersModal(false)}>
-              <Text style={{ color: accent, fontSize: 16 }}>‹ Back</Text>
-            </TouchableOpacity>
-            <Text style={[s.modalTitle, { color: tx }]}>Members — {selected?.name}</Text>
-            <View style={{ width: 60 }} />
-          </View>
-
-          <TextInput
-            style={[s.memberSearch, { backgroundColor: inputBg, color: tx, borderColor: border }]}
-            placeholder="Search to add members..."
-            placeholderTextColor={sub}
-            value={contactSearch}
-            onChangeText={setContactSearch}
-            autoCapitalize="none"
-          />
-
-          {/* Current members */}
-          {selected?.members?.length > 0 && (
-            <>
-              <Text style={[s.sectionLabel, { color: sub }]}>CURRENT MEMBERS</Text>
-              {selected.members.map((m, i) => (
-                <View key={i} style={[s.memberRow, { borderBottomColor: border, backgroundColor: card }]}>
-                  <View style={[s.memberAvatar, { backgroundColor: '#5856d6' }]}>
-                    <Text style={{ color: '#fff', fontWeight: 'bold' }}>{m.name?.[0]?.toUpperCase() || '?'}</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[{ color: tx, fontWeight: 'bold', fontSize: 15 }]}>{m.name || m.phone}</Text>
-                    {m.handle ? <Text style={[{ color: '#5856d6', fontSize: 12 }]}>{m.handle}</Text> : null}
-                  </View>
-                  <TouchableOpacity style={[s.removeBtn]} onPress={() => removeMember(m)}>
-                    <Text style={{ color: '#ff4444', fontWeight: 'bold', fontSize: 13 }}>Remove</Text>
-                  </TouchableOpacity>
-                </View>
-              ))}
-            </>
-          )}
-
-          {/* Add from contacts */}
-          <Text style={[s.sectionLabel, { color: sub }]}>ADD MEMBERS</Text>
-          <ScrollView style={{ flex: 1 }}>
-            {filteredContacts
-              .filter(c => !selected?.members?.find(m => m.phone === c.phone))
-              .map((c, i) => (
-                <TouchableOpacity key={i} style={[s.memberRow, { borderBottomColor: border, backgroundColor: card }]} onPress={() => addMember(c)}>
-                  <View style={[s.memberAvatar, { backgroundColor: c.onApp ? accent : '#888' }]}>
-                    <Text style={{ color: '#fff', fontWeight: 'bold' }}>{c.name?.[0]?.toUpperCase() || '?'}</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[{ color: tx, fontWeight: 'bold', fontSize: 15 }]}>{c.name || c.phone}</Text>
-                    <Text style={[{ color: c.onApp ? '#00ffa3' : sub, fontSize: 11 }]}>{c.onApp ? '🔒 On VaultChat' : '📱 Not installed'}</Text>
-                  </View>
-                  <View style={[s.addMemberBtn, { backgroundColor: c.onApp ? accent : '#5856d6' }]}>
-                    <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>{c.onApp ? 'Add' : 'Invite'}</Text>
-                  </View>
-                </TouchableOpacity>
-              ))}
-          </ScrollView>
-        </View>
-      </Modal>
-
-      {/* Create Group Modal */}
-      <Modal visible={createModal} animationType="slide">
-        <View style={[{ flex: 1, backgroundColor: bg }]}>
-          <View style={[s.modalHeader, { backgroundColor: card, borderBottomColor: border }]}>
-            <TouchableOpacity onPress={() => { setCreateModal(false); setGroupName(''); setGroupDesc(''); setPicked([]); setContactSearch(''); }}>
-              <Text style={{ color: sub, fontSize: 15 }}>Cancel</Text>
-            </TouchableOpacity>
-            <Text style={[s.modalTitle, { color: tx }]}>New Group</Text>
-            <TouchableOpacity onPress={createGroup}>
-              <Text style={{ color: groupName.trim() ? accent : sub, fontWeight: 'bold', fontSize: 15 }}>Create</Text>
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
-            <View style={[s.groupAvatarLarge, { backgroundColor: accent }]}>
-              <Text style={s.groupAvatarText}>{groupName ? groupName[0].toUpperCase() : '👥'}</Text>
-            </View>
-
-            <TextInput
-              style={[s.textField, { backgroundColor: card, color: tx, borderColor: border }]}
-              placeholder="Group name *"
-              placeholderTextColor={sub}
-              value={groupName}
-              onChangeText={setGroupName}
-              autoFocus
-            />
-            <TextInput
-              style={[s.textField, { backgroundColor: card, color: tx, borderColor: border }]}
-              placeholder="Description (optional)"
-              placeholderTextColor={sub}
-              value={groupDesc}
-              onChangeText={setGroupDesc}
-            />
-
-            {/* Selected members chips */}
-            {picked.length > 0 && (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
-                {picked.map((m, i) => (
-                  <TouchableOpacity key={i} style={[s.chip, { backgroundColor: accent }]} onPress={() => setPicked(picked.filter(x => x.phone !== m.phone))}>
-                    <Text style={s.chipText}>{m.name || m.phone} ✕</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            )}
-
-            <Text style={[s.sectionLabel, { color: sub }]}>ADD MEMBERS ({picked.length} selected)</Text>
-            <TextInput
-              style={[s.textField, { backgroundColor: card, color: tx, borderColor: border }]}
-              placeholder="Search name, @handle or phone..."
-              placeholderTextColor={sub}
-              value={contactSearch}
-              onChangeText={setContactSearch}
-              autoCapitalize="none"
-            />
-
-            {filteredContacts.length === 0
-              ? <Text style={[{ color: sub, textAlign: 'center', padding: 20 }]}>No contacts. Go to Settings → Sync Contacts first.</Text>
-              : filteredContacts.map(c => {
-                const isPicked = picked.find(m => m.phone === c.phone);
-                return (
-                  <TouchableOpacity key={c.phone} style={[s.contactRow, { borderBottomColor: border, backgroundColor: card }]} onPress={() => {
-                    if (isPicked) { setPicked(picked.filter(m => m.phone !== c.phone)); }
-                    else { setPicked([...picked, c]); }
-                  }}>
-                    <View style={[s.memberAvatar, { backgroundColor: isPicked ? accent : c.onApp ? '#5856d6' : '#888' }]}>
-                      <Text style={{ color: '#fff', fontWeight: 'bold' }}>{c.name?.[0]?.toUpperCase() || '?'}</Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[{ color: tx, fontWeight: 'bold', fontSize: 15 }]}>{c.name || c.phone}</Text>
-                      {c.handle ? <Text style={[{ color: '#5856d6', fontSize: 12 }]}>{c.handle}</Text> : <Text style={[{ color: sub, fontSize: 12 }]}>+1{c.phone}</Text>}
-                      <Text style={[{ fontSize: 10, color: c.onApp ? '#00ffa3' : sub }]}>{c.onApp ? '🔒 On VaultChat' : '📱 Will receive invite'}</Text>
-                    </View>
-                    <View style={[s.checkbox, { borderColor: accent, backgroundColor: isPicked ? accent : 'transparent' }]}>
-                      {isPicked && <Text style={{ color: '#fff', fontSize: 14 }}>✓</Text>}
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-          </ScrollView>
-        </View>
-      </Modal>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 60, paddingBottom: 12, borderBottomWidth: 1 },
-  title: { fontSize: 24, fontWeight: 'bold' },
-  newBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 },
-  newBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
-  searchBar: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginVertical: 10, borderRadius: 14, borderWidth: 1, paddingHorizontal: 14 },
-  searchIcon: { fontSize: 16, marginRight: 8 },
-  searchInput: { flex: 1, padding: 10, fontSize: 15 },
-  row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, gap: 12 },
-  avatar: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
-  avatarText: { color: '#fff', fontWeight: 'bold', fontSize: 20 },
-  info: { flex: 1 },
-  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 3 },
-  name: { fontWeight: 'bold', fontSize: 15 },
-  sub2: { fontSize: 13 },
+  safe: { flex: 1 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth },
+  headerTitle: { fontSize: 22, fontWeight: '700' },
+  newBtn: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20 },
+  newBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
+  avatar: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', marginRight: 12, position: 'relative' },
+  avatarEmoji: { fontSize: 22 },
+  pinBadge: { position: 'absolute', top: -2, right: -2, width: 16, height: 16, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  pinText: { fontSize: 8 },
+  info: { flex: 1, gap: 3 },
+  topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  name: { fontSize: 16, fontWeight: '600', flex: 1, marginRight: 8 },
   time: { fontSize: 12 },
-  empty: { alignItems: 'center', paddingTop: 80, gap: 8 },
-  emptyIcon: { fontSize: 56 },
-  emptyTitle: { fontSize: 20, fontWeight: 'bold' },
-  emptySub: { fontSize: 14, textAlign: 'center' },
-  createBtn: { paddingHorizontal: 24, paddingVertical: 12, borderRadius: 20, marginTop: 8 },
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' },
-  actionBox: { width: '80%', borderRadius: 20, borderWidth: 1, overflow: 'hidden' },
-  actionTitle: { fontSize: 16, fontWeight: 'bold', padding: 16, textAlign: 'center' },
-  actionBtn: { padding: 16, borderBottomWidth: 1, alignItems: 'center' },
-  actionText: { fontSize: 16, fontWeight: '500' },
-  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 56, paddingBottom: 14, borderBottomWidth: 1 },
-  modalTitle: { fontSize: 16, fontWeight: 'bold' },
-  memberSearch: { margin: 16, borderRadius: 14, borderWidth: 1, padding: 12, fontSize: 15 },
-  sectionLabel: { fontSize: 11, fontWeight: 'bold', letterSpacing: 1, paddingHorizontal: 20, paddingVertical: 8 },
-  memberRow: { flexDirection: 'row', alignItems: 'center', padding: 14, borderBottomWidth: 1, gap: 12 },
-  memberAvatar: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
-  removeBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, borderWidth: 1, borderColor: '#ff4444' },
-  addMemberBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
-  groupAvatarLarge: { width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center', alignSelf: 'center', marginBottom: 20 },
-  groupAvatarText: { color: '#fff', fontSize: 32, fontWeight: 'bold' },
-  textField: { borderWidth: 1, borderRadius: 12, padding: 14, fontSize: 15, marginBottom: 12 },
-  chip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, marginRight: 8 },
-  chipText: { color: '#fff', fontSize: 13, fontWeight: 'bold' },
-  contactRow: { flexDirection: 'row', alignItems: 'center', padding: 14, borderBottomWidth: 1, gap: 12, borderRadius: 12, marginBottom: 4 },
-  checkbox: { width: 26, height: 26, borderRadius: 13, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  bottomRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  preview: { fontSize: 13, flex: 1, marginRight: 8 },
+  members: { fontSize: 12 },
+  chevron: { fontSize: 20, marginLeft: 8 },
+  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40 },
+  emptyEmoji: { fontSize: 56, marginBottom: 16 },
+  emptyTitle: { fontSize: 20, fontWeight: '700', marginBottom: 8 },
+  emptySub: { fontSize: 14, textAlign: 'center', lineHeight: 20, marginBottom: 24 },
+  emptyBtn: { paddingHorizontal: 24, paddingVertical: 12, borderRadius: 24 },
+  emptyBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
+  sheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, paddingBottom: 40 },
+  sheetHandle: { width: 40, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 20 },
+  sheetTitle: { fontSize: 20, fontWeight: '700', marginBottom: 4 },
+  sheetSub: { fontSize: 13, marginBottom: 20 },
+  input: { borderWidth: 1, borderRadius: 12, padding: 14, fontSize: 15, marginBottom: 12 },
+  sheetBtns: { flexDirection: 'row', gap: 12, marginTop: 8 },
+  cancelBtn: { flex: 1, borderWidth: 1, borderRadius: 12, padding: 14, alignItems: 'center' },
+  cancelBtnText: { fontSize: 15, fontWeight: '600' },
+  createBtn: { flex: 1, borderRadius: 12, padding: 14, alignItems: 'center' },
+  createBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  actionOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
+  actionSheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingTop: 8, paddingBottom: 34 },
+  actionTitle: { fontSize: 13, fontWeight: '600', textAlign: 'center', paddingVertical: 12, paddingHorizontal: 24 },
+  actionRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 24, paddingVertical: 16, borderBottomWidth: StyleSheet.hairlineWidth, gap: 14 },
+  actionIcon: { fontSize: 20, width: 28, textAlign: 'center' },
+  actionLabel: { fontSize: 16 },
+  cancelAction: { marginTop: 8, borderTopWidth: StyleSheet.hairlineWidth, paddingVertical: 16, alignItems: 'center' },
+  cancelActionText: { fontSize: 16, fontWeight: '600' },
 });
