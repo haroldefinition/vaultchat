@@ -23,10 +23,10 @@ export async function uploadMedia(uri, type) {
       .from('vaultchat-media')
       .getPublicUrl(path);
 
-    console.log('Public URL:', urlData.publicUrl);
+
     return urlData.publicUrl;
   } catch (e) {
-    console.log('Upload error:', e.message);
+    if (__DEV__) console.log('Upload error:', e.message);
     return null;
   }
 }

@@ -128,7 +128,8 @@ export default function NewMessageScreen({ navigation, route }) {
     }
     if (msg.trim()) {
       try {
-        const senderId = user?.id || '550e8400-e29b-41d4-a716-446655440001';
+        if (!user?.id) return;
+        const senderId = user.id;
         await fetch(`${BACKEND}/messages`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ room_id: roomId, sender_id: senderId, content: msg.trim() }) });
       } catch(e) {}
     }

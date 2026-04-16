@@ -95,7 +95,7 @@ export default function App() {
   useEffect(() => {
     setupPushNotifications();
     const cleanup = addNotificationResponseListener(response => {
-      console.log('Notification tapped:', response);
+      if (__DEV__) console.log('Notification tapped:', response);
     });
     return cleanup;
   }, []);

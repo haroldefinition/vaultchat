@@ -32,26 +32,26 @@ export function connectSocket(userId) {
 
   // ── Connection events ──────────────────────────────────────
   socket.on('connect', () => {
-    console.log('🟢 Connected to VaultChat server');
+    if (__DEV__) console.log('🟢 Connected to VaultChat server');
     socket.emit('user:online', { userId });
   });
 
   socket.on('disconnect', (reason) => {
-    console.log('🔴 Disconnected:', reason);
+    if (__DEV__) console.log('🔴 Disconnected:', reason);
     // socket.io auto-reconnects — no action needed
   });
 
   socket.on('reconnect', (attempt) => {
-    console.log(`🔄 Reconnected after ${attempt} attempts`);
+    if (__DEV__) console.log(`🔄 Reconnected after ${attempt} attempts`);
     socket.emit('user:online', { userId });
   });
 
   socket.on('reconnect_attempt', (attempt) => {
-    console.log(`🔁 Reconnection attempt ${attempt}...`);
+    if (__DEV__) console.log(`🔁 Reconnection attempt ${attempt}...`);
   });
 
   socket.on('connect_error', (error) => {
-    console.log('⚠️ Connection error:', error.message);
+    if (__DEV__) console.log('⚠️ Connection error:', error.message);
     // Will auto-retry — user sees "Reconnecting..." in UI
   });
 

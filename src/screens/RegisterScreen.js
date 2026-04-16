@@ -26,12 +26,12 @@ export default function RegisterScreen({ route, onLoginCallback }) {
         options: { channel: 'sms' }
       });
       if (error) {
-        Alert.alert('Code Sent', 'Enter 123456 (test mode — real SMS pending Twilio activation)');
+        if (__DEV__) Alert.alert('Code Sent', 'Enter 123456 to continue in dev mode.');
       } else {
         Alert.alert('Code Sent', 'Check your phone for the verification code.');
       }
     } catch (e) {
-      Alert.alert('Code Sent', 'Enter 123456 (test mode)');
+      if (__DEV__) Alert.alert('Code Sent', 'Enter 123456 to continue in dev mode.');
     }
     setLoading(false);
     setStep('otp');
@@ -49,7 +49,7 @@ export default function RegisterScreen({ route, onLoginCallback }) {
       setStep('handle');
       return;
     }
-    if (otp === '123456') {
+    if (__DEV__ && otp === '123456') {
       const testId = '550e8400-e29b-41d4-a716-' + phone.padStart(12, '0');
       setUserId(testId);
       await AsyncStorage.setItem('vaultchat_user', JSON.stringify({ phone: `+1${phone}`, id: testId }));
@@ -58,7 +58,7 @@ export default function RegisterScreen({ route, onLoginCallback }) {
       return;
     }
     setLoading(false);
-    Alert.alert('Error', 'Invalid code. In test mode use 123456.');
+    Alert.alert('Error', __DEV__ ? 'Invalid code. In dev mode use 123456.' : 'Invalid code. Please try again.');
   }
 
   async function checkHandleAvailable(h) {

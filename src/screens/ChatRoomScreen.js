@@ -578,7 +578,7 @@ export default function ChatRoomScreen({ route, navigation }) {
         </TouchableOpacity>
         <TouchableOpacity onPress={() => navigation.navigate('ActiveCall',{recipientName:contactName,recipientPhone:contactPhone,callType:'video'})} style={c.callBtn}><Text style={{fontSize:20}}>📹</Text></TouchableOpacity>
         <TouchableOpacity onPress={() => navigation.navigate('ActiveCall',{recipientName:contactName,recipientPhone:contactPhone,callType:'voice'})} style={c.callBtn}><Text style={{fontSize:20}}>📞</Text></TouchableOpacity>
-        <TouchableOpacity onPress={() => navigation.navigate('AIAssistant',{messages,context:recipientName})} style={c.callBtn}><Text style={{fontSize:18}}>🤖</Text></TouchableOpacity>
+
       </View>
 
       {/* Messages */}

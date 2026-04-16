@@ -32,7 +32,7 @@ export default function NewContactScreen({ route, navigation }) {
 
     if (onSave) onSave(name, photo);
     
-    const roomId = '550e8400-e29b-41d4-a716-446655440000';
+    // roomId derived from user phones at chat creation time
     navigation.replace('ChatRoom', { roomId, recipientPhone: phone, recipientName: name, recipientPhoto: photo, user });
     setLoading(false);
   }
