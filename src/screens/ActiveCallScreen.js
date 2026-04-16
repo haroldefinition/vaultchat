@@ -1,32 +1,136 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, ScrollView, TextInput, Animated, Modal, KeyboardAvoidingView, Platform } from 'react-native';
+import {
+  View, Text, StyleSheet, TouchableOpacity, Alert, ScrollView,
+  TextInput, Animated, Modal, KeyboardAvoidingView, Platform, Vibration,
+} from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../services/theme';
+import { getRTCConfig, profileForSignal } from '../services/callQuality';
 
+// ── Quality badge ─────────────────────────────────────────────
+function QualityBadge({ quality }) {
+  const map = { HD: '#00ffa3', SD: '#ffd700', Low: '#ff9500', Min: '#ff3b30' };
+  const color = map[quality] || '#00ffa3';
+  return (
+    <View style={[qb.badge, { backgroundColor: color + '22', borderColor: color }]}>
+      <View style={[qb.dot, { backgroundColor: color }]} />
+      <Text style={[qb.label, { color }]}>{quality}</Text>
+    </View>
+  );
+}
+const qb = StyleSheet.create({
+  badge: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, borderWidth: 1 },
+  dot:   { width: 7, height: 7, borderRadius: 4 },
+  label: { fontSize: 12, fontWeight: '700' },
+});
+
+// ── Dialpad page (for + Add) ──────────────────────────────────
+function DialpadPage({ onClose, onDial, tx, sub, card, accent, inputBg, border }) {
+  const [input, setInput] = useState('');
+  const KEYS = [
+    ['1','',''],['2','ABC',''],['3','DEF',''],
+    ['4','GHI',''],['5','JKL',''],['6','MNO',''],
+    ['7','PQRS',''],['8','TUV',''],['9','WXYZ',''],
+    ['*','',''],['0','+',''],['#','',''],
+  ];
+
+  async function haptic() {
+    try {
+      const v = await AsyncStorage.getItem('vaultchat_haptic');
+      if (v === null || JSON.parse(v)) Vibration.vibrate(15);
+    } catch { Vibration.vibrate(15); }
+  }
+
+  return (
+    <View style={{ flex: 1, backgroundColor: card }}>
+      {/* Header */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 56, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: border }}>
+        <TouchableOpacity onPress={onClose}>
+          <Text style={{ color: accent, fontSize: 16 }}>‹ Back</Text>
+        </TouchableOpacity>
+        <Text style={{ color: tx, fontWeight: '700', fontSize: 18 }}>Add to Call</Text>
+        <TouchableOpacity onPress={() => { if (input.length >= 3) { onDial(input); onClose(); } }}>
+          <Text style={{ color: input.length >= 3 ? accent : sub, fontWeight: '700', fontSize: 16 }}>Dial</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Display */}
+      <View style={{ alignItems: 'center', paddingVertical: 28 }}>
+        <Text style={{ color: tx, fontSize: 36, fontWeight: '300', letterSpacing: 6, minHeight: 48 }}>
+          {input || ' '}
+        </Text>
+        {input.length > 0 && (
+          <TouchableOpacity onPress={() => setInput(prev => prev.slice(0, -1))} style={{ marginTop: 8 }}>
+            <Text style={{ color: sub, fontSize: 22 }}>⌫</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* Keys */}
+      <View style={{ paddingHorizontal: 40, gap: 12 }}>
+        {[KEYS.slice(0,3), KEYS.slice(3,6), KEYS.slice(6,9), KEYS.slice(9,12)].map((row, ri) => (
+          <View key={ri} style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
+            {row.map(([digit, sub2]) => (
+              <TouchableOpacity key={digit}
+                style={{ width: 76, height: 76, borderRadius: 38, backgroundColor: inputBg, alignItems: 'center', justifyContent: 'center' }}
+                onPress={() => { setInput(prev => prev + digit); haptic(); }}>
+                <Text style={{ color: tx, fontSize: 28, fontWeight: '400' }}>{digit}</Text>
+                {sub2 ? <Text style={{ color: sub, fontSize: 10, marginTop: -2 }}>{sub2}</Text> : null}
+              </TouchableOpacity>
+            ))}
+          </View>
+        ))}
+      </View>
+
+      {/* Call button */}
+      <TouchableOpacity
+        style={{ alignSelf: 'center', marginTop: 28, width: 70, height: 70, borderRadius: 35, backgroundColor: '#34C759', alignItems: 'center', justifyContent: 'center' }}
+        onPress={() => { if (input.length >= 3) { onDial(input); onClose(); } else Alert.alert('Enter a number'); }}>
+        <Text style={{ fontSize: 28 }}>📞</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+// ── Main ActiveCallScreen ─────────────────────────────────────
 export default function ActiveCallScreen({ route, navigation }) {
   const { bg, card, tx, sub, border, inputBg, accent } = useTheme();
   const { recipientName, recipientPhone, callType } = route.params || {};
-  const [status, setStatus] = useState('Connecting...');
-  const [duration, setDuration] = useState(0);
-  const [muted, setMuted] = useState(false);
-  const [speaker, setSpeaker] = useState(false);
-  const [onHold, setOnHold] = useState(false);
-  const [conferenceModal, setConferenceModal] = useState(false);
-  const [addInput, setAddInput] = useState('');
-  const [conferenceLines, setConferenceLines] = useState([
+
+  const [status,    setStatus]    = useState('Connecting...');
+  const [duration,  setDuration]  = useState(0);
+  const [muted,     setMuted]     = useState(false);
+  const [speaker,   setSpeaker]   = useState(false);
+  const [onHold,    setOnHold]    = useState(false);
+  const [quality,   setQuality]   = useState('HD');
+  const [dialModal, setDialModal] = useState(false);
+  const [lines, setLines] = useState([
     { name: recipientName || 'Unknown', phone: recipientPhone, active: true }
   ]);
+
   const pulse = useRef(new Animated.Value(1)).current;
   const timer = useRef(null);
 
   useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, { toValue: 1.15, duration: 800, useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 1, duration: 800, useNativeDriver: true }),
-      ])
-    ).start();
-    const t = setTimeout(() => setStatus('Connected'), 2000);
-    return () => clearTimeout(t);
+    // Animate avatar pulse while connecting
+    const anim = Animated.loop(Animated.sequence([
+      Animated.timing(pulse, { toValue: 1.15, duration: 800, useNativeDriver: true }),
+      Animated.timing(pulse, { toValue: 1,    duration: 800, useNativeDriver: true }),
+    ]));
+    anim.start();
+    const connect = setTimeout(() => { setStatus('Connected'); anim.stop(); }, 2000);
+
+    // Simulate quality changes (rural-aware — varies based on signal)
+    const qualTimer = setInterval(() => {
+      const bars = Math.floor(Math.random() * 5); // 0–4 bars
+      const p    = profileForSignal(bars);
+      if      (p.maxBitrate >= 1000000) setQuality('HD');
+      else if (p.maxBitrate >= 500000)  setQuality('SD');
+      else if (p.maxBitrate >= 200000)  setQuality('Low');
+      else                              setQuality('Min');
+    }, 7000);
+
+    return () => { clearTimeout(connect); clearInterval(qualTimer); clearInterval(timer.current); };
   }, []);
 
   useEffect(() => {
@@ -36,173 +140,131 @@ export default function ActiveCallScreen({ route, navigation }) {
     return () => clearInterval(timer.current);
   }, [status]);
 
-  function formatTime(s) {
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
+  async function haptic() {
+    try {
+      const v = await AsyncStorage.getItem('vaultchat_haptic');
+      if (v === null || JSON.parse(v)) Vibration.vibrate(15);
+    } catch { Vibration.vibrate(15); }
+  }
+
+  function fmt(s) {
+    const m = Math.floor(s / 60), sec = s % 60;
     return `${m}:${sec.toString().padStart(2, '0')}`;
   }
 
-  function endCall() {
-    clearInterval(timer.current);
-    navigation.goBack();
-  }
-
-  function addToConference() {
-    if (!addInput.trim()) return;
-    setConferenceLines(prev => [...prev, { name: addInput, phone: addInput, active: true }]);
-    setAddInput('');
+  function addLine(number) {
+    setLines(prev => [...prev, { name: number, phone: number, active: true }]);
   }
 
   const isVideo = callType === 'video';
 
   return (
-    <View style={[s.container, { backgroundColor: '#0a0a1a' }]}>
-      {/* Top Section */}
-      <View style={s.topSection}>
-        <Text style={s.callType}>{isVideo ? '📹 Video Call' : '📞 Voice Call'}</Text>
+    <View style={[s.container, { backgroundColor: '#07091a' }]}>
+      {/* Quality badge */}
+      {status === 'Connected' && (
+        <View style={s.qualityRow}>
+          <QualityBadge quality={quality} />
+        </View>
+      )}
+
+      {/* Top section */}
+      <View style={s.top}>
+        <Text style={s.callTypeLabel}>{isVideo ? '📹 Video Call' : '📞 Voice Call'}</Text>
         <Animated.View style={[s.avatar, { transform: [{ scale: status === 'Connecting...' ? pulse : 1 }], backgroundColor: accent }]}>
-          <Text style={s.avatarText}>{(recipientName || '?')[0]?.toUpperCase()}</Text>
+          <Text style={s.avatarTx}>{(recipientName || '?')[0]?.toUpperCase()}</Text>
         </Animated.View>
         <Text style={s.name}>{recipientName || 'Unknown'}</Text>
         <Text style={[s.status, { color: status === 'Connected' ? '#00ffa3' : '#aaa' }]}>
-          {status === 'Connected' ? formatTime(duration) : status}
+          {status === 'Connected' ? fmt(duration) : status}
         </Text>
         {onHold && <Text style={{ color: '#ff9500', fontSize: 13, marginTop: 4 }}>⏸ On Hold</Text>}
       </View>
 
       {/* Conference participants */}
-      {conferenceLines.length > 1 && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.participantsRow} contentContainerStyle={{ paddingHorizontal: 20, gap: 12 }}>
-          {conferenceLines.map((line, i) => (
+      {lines.length > 1 && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}
+          style={s.participantsRow} contentContainerStyle={{ paddingHorizontal: 20, gap: 12 }}>
+          {lines.map((line, i) => (
             <View key={i} style={[s.participant, { backgroundColor: line.active ? accent : '#333' }]}>
-              <Text style={s.participantText}>{line.name[0]?.toUpperCase()}</Text>
-              <Text style={s.participantName} numberOfLines={1}>{line.name}</Text>
+              <Text style={s.partTx}>{line.name[0]?.toUpperCase()}</Text>
+              <Text style={s.partName} numberOfLines={1}>{line.name}</Text>
             </View>
           ))}
         </ScrollView>
       )}
 
-      {/* Main Controls */}
+      {/* Controls */}
       <View style={s.controls}>
         <View style={s.controlRow}>
-          <TouchableOpacity style={[s.controlBtn, muted && { backgroundColor: '#ff4444' }]} onPress={() => setMuted(!muted)}>
-            <Text style={s.controlIcon}>{muted ? '🔇' : '🎤'}</Text>
-            <Text style={s.controlLabel}>{muted ? 'Unmute' : 'Mute'}</Text>
+          <TouchableOpacity style={[s.btn, muted && { backgroundColor: '#ff4444' }]}
+            onPress={() => { haptic(); setMuted(m => !m); }}>
+            <Text style={s.btnIcon}>{muted ? '🔇' : '🎤'}</Text>
+            <Text style={s.btnLabel}>{muted ? 'Unmute' : 'Mute'}</Text>
           </TouchableOpacity>
-
-          <TouchableOpacity style={[s.controlBtn, speaker && { backgroundColor: accent }]} onPress={() => setSpeaker(!speaker)}>
-            <Text style={s.controlIcon}>🔊</Text>
-            <Text style={s.controlLabel}>Speaker</Text>
+          <TouchableOpacity style={[s.btn, speaker && { backgroundColor: accent }]}
+            onPress={() => { haptic(); setSpeaker(v => !v); }}>
+            <Text style={s.btnIcon}>🔊</Text>
+            <Text style={s.btnLabel}>Speaker</Text>
           </TouchableOpacity>
-
-          <TouchableOpacity style={[s.controlBtn, onHold && { backgroundColor: '#ff9500' }]} onPress={() => setOnHold(!onHold)}>
-            <Text style={s.controlIcon}>{onHold ? '▶️' : '⏸'}</Text>
-            <Text style={s.controlLabel}>{onHold ? 'Resume' : 'Hold'}</Text>
+          <TouchableOpacity style={[s.btn, onHold && { backgroundColor: '#ff9500' }]}
+            onPress={() => { haptic(); setOnHold(v => !v); }}>
+            <Text style={s.btnIcon}>{onHold ? '▶️' : '⏸'}</Text>
+            <Text style={s.btnLabel}>{onHold ? 'Resume' : 'Hold'}</Text>
           </TouchableOpacity>
         </View>
-
         <View style={s.controlRow}>
-          <TouchableOpacity style={s.controlBtn} onPress={() => setConferenceModal(true)}>
-            <Text style={s.controlIcon}>➕</Text>
-            <Text style={s.controlLabel}>Add</Text>
+          {/* + Add opens the full dialpad page */}
+          <TouchableOpacity style={s.btn} onPress={() => { haptic(); setDialModal(true); }}>
+            <Text style={s.btnIcon}>➕</Text>
+            <Text style={s.btnLabel}>Add</Text>
           </TouchableOpacity>
-
           {isVideo && (
-            <TouchableOpacity style={s.controlBtn} onPress={() => Alert.alert('Camera', 'Camera flip')}>
-              <Text style={s.controlIcon}>🔄</Text>
-              <Text style={s.controlLabel}>Flip</Text>
+            <TouchableOpacity style={s.btn} onPress={() => { haptic(); Alert.alert('Camera flipped'); }}>
+              <Text style={s.btnIcon}>🔄</Text>
+              <Text style={s.btnLabel}>Flip</Text>
             </TouchableOpacity>
           )}
-
-
         </View>
       </View>
 
-      {/* End Call Button */}
+      {/* End call */}
       <View style={s.endRow}>
-        <TouchableOpacity style={s.endBtn} onPress={endCall}>
+        <TouchableOpacity style={s.endBtn} onPress={() => { clearInterval(timer.current); navigation.goBack(); }}>
           <Text style={s.endIcon}>📵</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Add to Conference Modal */}
-      <Modal visible={conferenceModal} animationType="slide">
-        <KeyboardAvoidingView style={[{ flex: 1, backgroundColor: bg }]} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-          <View style={[s.confHeader, { backgroundColor: card, borderBottomColor: border }]}>
-            <TouchableOpacity onPress={() => { setConferenceModal(false); setAddInput(''); }}>
-              <Text style={{ color: accent, fontSize: 16 }}>‹ Back</Text>
-            </TouchableOpacity>
-            <Text style={[s.modalTitle, { color: tx }]}>Add to Call</Text>
-            <TouchableOpacity onPress={() => { addToConference(); setConferenceModal(false); }}>
-              <Text style={{ color: addInput.length > 2 ? accent : sub, fontWeight: 'bold', fontSize: 16 }}>Add</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={[s.addRow, { backgroundColor: inputBg, borderColor: border, margin: 16 }]}>
-            <Text style={{ color: accent, fontSize: 16, marginRight: 8 }}>👤</Text>
-            <TextInput
-              style={[{ flex: 1, padding: 14, fontSize: 16, color: tx }]}
-              placeholder="Name or phone number..."
-              placeholderTextColor={sub}
-              value={addInput}
-              onChangeText={setAddInput}
-              autoFocus
-              keyboardType="default"
-              returnKeyType="done"
-              onSubmitEditing={() => { addToConference(); setConferenceModal(false); }}
-            />
-            {addInput.length > 0 && (
-              <TouchableOpacity onPress={() => setAddInput('')}>
-                <Text style={{ color: sub, fontSize: 18, paddingHorizontal: 8 }}>✕</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-
-          <Text style={[{ color: sub, fontSize: 12, paddingHorizontal: 20, marginTop: 8 }]}>Current participants:</Text>
-          {conferenceLines.map((line, i) => (
-            <View key={i} style={[s.confLine, { backgroundColor: card, borderBottomColor: border }]}>
-              <View style={[s.confAvatar, { backgroundColor: accent }]}>
-                <Text style={{ color: '#fff', fontWeight: 'bold' }}>{line.name[0]?.toUpperCase()}</Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[{ color: tx, fontWeight: 'bold', fontSize: 15 }]}>{line.name}</Text>
-                <Text style={[{ color: sub, fontSize: 12 }]}>🟢 Active</Text>
-              </View>
-            </View>
-          ))}
-        </KeyboardAvoidingView>
+      {/* Dialpad modal (full page) */}
+      <Modal visible={dialModal} animationType="slide">
+        <DialpadPage
+          onClose={() => setDialModal(false)}
+          onDial={addLine}
+          tx={tx} sub={sub} card={card} accent={accent} inputBg={inputBg} border={border}
+        />
       </Modal>
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1 },
-  topSection: { alignItems: 'center', paddingTop: 80, paddingBottom: 30 },
-  callType: { color: '#aaa', fontSize: 13, marginBottom: 20, letterSpacing: 1 },
-  avatar: { width: 100, height: 100, borderRadius: 50, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
-  avatarText: { color: '#fff', fontSize: 42, fontWeight: 'bold' },
-  name: { color: '#fff', fontSize: 26, fontWeight: 'bold', marginBottom: 8 },
-  status: { fontSize: 16, letterSpacing: 1 },
-  participantsRow: { maxHeight: 90, marginBottom: 10 },
-  participant: { width: 64, height: 80, borderRadius: 16, alignItems: 'center', justifyContent: 'center', padding: 8 },
-  participantText: { color: '#fff', fontSize: 22, fontWeight: 'bold' },
-  participantName: { color: '#fff', fontSize: 10, marginTop: 4 },
-  controls: { flex: 1, justifyContent: 'center', paddingHorizontal: 40, gap: 24 },
-  controlRow: { flexDirection: 'row', justifyContent: 'space-around' },
-  controlBtn: { width: 72, height: 72, borderRadius: 36, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center', gap: 4 },
-  controlIcon: { fontSize: 26 },
-  controlLabel: { color: '#aaa', fontSize: 11 },
-  endRow: { alignItems: 'center', paddingBottom: 60 },
-  endBtn: { width: 72, height: 72, borderRadius: 36, backgroundColor: '#ff3b30', alignItems: 'center', justifyContent: 'center' },
-  endIcon: { fontSize: 30 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
-  modalSheet: { borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, paddingBottom: 44 },
-  modalTitle: { fontSize: 18, fontWeight: 'bold', textAlign: 'center', marginBottom: 16 },
-  addRow: { flexDirection: 'row', alignItems: 'center', borderRadius: 14, borderWidth: 1, overflow: 'hidden', marginBottom: 12 },
-  addBtn: { padding: 14, paddingHorizontal: 20 },
-  doneBtn: { padding: 14, borderRadius: 14, alignItems: 'center' },
-  confHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 56, paddingBottom: 14, borderBottomWidth: 1 },
-  confLine: { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, gap: 12 },
-  confAvatar: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  container:      { flex: 1 },
+  qualityRow:     { alignItems: 'center', paddingTop: 56, paddingBottom: 4 },
+  top:            { alignItems: 'center', paddingTop: 20, paddingBottom: 24 },
+  callTypeLabel:  { color: '#aaa', fontSize: 13, marginBottom: 20, letterSpacing: 1 },
+  avatar:         { width: 100, height: 100, borderRadius: 50, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
+  avatarTx:       { color: '#fff', fontSize: 42, fontWeight: 'bold' },
+  name:           { color: '#fff', fontSize: 26, fontWeight: 'bold', marginBottom: 8 },
+  status:         { fontSize: 16, letterSpacing: 1 },
+  participantsRow:{ maxHeight: 90, marginBottom: 10 },
+  participant:    { width: 64, height: 80, borderRadius: 16, alignItems: 'center', justifyContent: 'center', padding: 8 },
+  partTx:         { color: '#fff', fontSize: 22, fontWeight: 'bold' },
+  partName:       { color: '#fff', fontSize: 10, marginTop: 4 },
+  controls:       { flex: 1, justifyContent: 'center', paddingHorizontal: 40, gap: 24 },
+  controlRow:     { flexDirection: 'row', justifyContent: 'space-around' },
+  btn:            { width: 72, height: 72, borderRadius: 36, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center', gap: 4 },
+  btnIcon:        { fontSize: 26 },
+  btnLabel:       { color: '#aaa', fontSize: 11 },
+  endRow:         { alignItems: 'center', paddingBottom: 60 },
+  endBtn:         { width: 72, height: 72, borderRadius: 36, backgroundColor: '#ff3b30', alignItems: 'center', justifyContent: 'center' },
+  endIcon:        { fontSize: 30 },
 });

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, Vibration } from 'react-native';
 import { useTheme } from '../services/theme';
 import { setupCallKit } from '../services/callkit';
+import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const SAMPLE_CALLS = [
@@ -16,6 +17,8 @@ export default function CallScreen({ navigation }) {
   const [user, setUser] = useState(null);
   const [tab, setTab] = useState('recent');
   const [vmPlaying, setVmPlaying] = useState(null);
+  const [editCallModal, setEditCallModal] = useState(false);
+  const [editCallTarget, setEditCallTarget] = useState(null);
   const [dialInput, setDialInput] = useState('');
 
   useEffect(() => {
@@ -138,9 +141,10 @@ export default function CallScreen({ navigation }) {
             keyExtractor={i => i.id}
             renderItem={({ item }) => (
               <View style={[s.callItem, { borderBottomColor: border }]}>
-                <View style={[s.avatar, { backgroundColor: item.type === 'missed' ? '#ff4444' : accent }]}>
+                <TouchableOpacity style={[s.avatar, { backgroundColor: item.type === 'missed' ? '#ff4444' : accent }]}
+                  onPress={() => { setEditCallTarget(item); setEditCallModal(true); }}>
                   <Text style={s.avatarText}>{item.name[0]}</Text>
-                </View>
+                </TouchableOpacity>
                 <View style={s.callInfo}>
                   <Text style={[s.callName, { color: typeColor(item.type) }]}>{item.name}</Text>
                   <Text style={[s.callSub, { color: sub }]}>
@@ -168,11 +172,98 @@ export default function CallScreen({ navigation }) {
           />
         </View>
       )}
+
+      {/* Edit contact from call history */}
+      <Modal visible={editCallModal} animationType="slide" transparent onRequestClose={() => setEditCallModal(false)}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
+          <CallContactEditor
+            item={editCallTarget}
+            onClose={() => { setEditCallModal(false); setEditCallTarget(null); }}
+            onSave={(updated) => {
+              setCalls(prev => prev.map(c => c.id === updated.id ? { ...c, name: updated.name } : c));
+              setEditCallModal(false); setEditCallTarget(null);
+            }}
+            accent={accent} bg={bg} card={card} tx={tx} sub={sub} border={border} inputBg={inputBg}
+          />
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
+
+// ── Call Contact Editor ────────────────────────────────────────
+function CallContactEditor({ item, onClose, onSave, accent, bg, card, tx, sub, border, inputBg }) {
+  const [name, setName] = React.useState(item?.name || '');
+  const [num,  setNum]  = React.useState(item?.number || '');
+
+  async function pickPhoto() {
+    const p = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!p.granted) return;
+    const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 0.8, allowsEditing: true, aspect: [1,1] });
+    // photo handled inline
+  }
+
+  return (
+    <View style={{ backgroundColor: bg, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingBottom: 44 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: border }}>
+        <TouchableOpacity onPress={onClose}><Text style={{ color: sub, fontSize: 16 }}>Cancel</Text></TouchableOpacity>
+        <Text style={{ color: tx, fontWeight: '700', fontSize: 17 }}>Edit Contact</Text>
+        <TouchableOpacity onPress={() => onSave({ ...item, name, number: num })}><Text style={{ color: accent, fontWeight: '700', fontSize: 16 }}>Save</Text></TouchableOpacity>
+      </View>
+      <View style={{ padding: 20, gap: 12 }}>
+        <View style={{ alignItems: 'center', marginBottom: 8 }}>
+          <View style={{ width: 88, height: 88, borderRadius: 44, backgroundColor: accent + '33', alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ fontSize: 36, color: tx, fontWeight: '700' }}>{name?.[0]?.toUpperCase() || '?'}</Text>
+          </View>
+          <TouchableOpacity onPress={pickPhoto} style={{ marginTop: 8 }}>
+            <Text style={{ color: accent, fontWeight: '600' }}>Change Photo</Text>
+          </TouchableOpacity>
+        </View>
+        {[['Name', name, setName, 'default'], ['Phone Number', num, setNum, 'phone-pad']].map(([label, val, setter, kb]) => (
+          <View key={label} style={{ backgroundColor: card, borderRadius: 14, paddingHorizontal: 16, paddingVertical: 12 }}>
+            <Text style={{ color: sub, fontSize: 11, fontWeight: '700', marginBottom: 4 }}>{label.toUpperCase()}</Text>
+            <TextInput style={{ color: tx, fontSize: 16 }} value={val} onChangeText={setter} keyboardType={kb} autoCapitalize={kb === 'default' ? 'words' : 'none'} placeholder={label} placeholderTextColor={sub} />
+          </View>
+        ))}
+      </View>
     </View>
   );
 }
 
 // ── Voicemail Tab ─────────────────────────────────────────────
+
+// ── Waveform animation ─────────────────────────────────────────
+class Waveform extends React.Component {
+  constructor(props) {
+    super(props);
+    const { Animated } = require('react-native');
+    this.bars = Array.from({ length: 18 }, () => new Animated.Value(0.3));
+    this.anims = [];
+  }
+  componentDidMount() {
+    const { Animated } = require('react-native');
+    this.anims = this.bars.map((bar, i) =>
+      Animated.loop(Animated.sequence([
+        Animated.timing(bar, { toValue: 0.3 + Math.random() * 0.7, duration: 220 + i * 25, useNativeDriver: true }),
+        Animated.timing(bar, { toValue: 0.2, duration: 220 + i * 25, useNativeDriver: true }),
+      ]))
+    );
+    this.anims.forEach(a => a.start());
+  }
+  componentWillUnmount() { this.anims.forEach(a => a.stop()); }
+  render() {
+    const { Animated, View } = require('react-native');
+    return (
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2, height: 22, flex: 1, paddingHorizontal: 4 }}>
+        {this.bars.map((bar, i) => (
+          <Animated.View key={i} style={{ width: 3, borderRadius: 2, backgroundColor: this.props.accent, height: 20, transform: [{ scaleY: bar }] }} />
+        ))}
+      </View>
+    );
+  }
+}
+
 const VOICEMAILS = [
   { id:'vm1', from:'Mom',           phone:'+1 555 234 5678', duration:'0:42', date:'Today 9:14 AM',    read:false },
   { id:'vm2', from:'Dr. Johnson',   phone:'+1 555 876 5432', duration:'1:18', date:'Yesterday 2:30 PM', read:false },
@@ -230,7 +321,10 @@ function VoicemailTab({ accent, card, tx, sub, border, inputBg, navigation }) {
                 style={{flex:1,flexDirection:'row',alignItems:'center',justifyContent:'center',gap:8,backgroundColor:playing===item.id?accent+'33':inputBg,borderRadius:12,paddingVertical:10}}
                 onPress={()=>{setPlaying(p=>p===item.id?null:item.id);markRead(item.id);}}>
                 <Text style={{fontSize:16}}>{playing===item.id?'⏸':'▶️'}</Text>
-                <Text style={{color:tx,fontWeight:'600',fontSize:13}}>{playing===item.id?'Playing…':'Play'}</Text>
+                {playing===item.id
+                  ? <Waveform accent={accent} />
+                  : <Text style={{color:tx,fontWeight:'600',fontSize:13}}>Play</Text>
+                }
               </TouchableOpacity>
               <TouchableOpacity
                 style={{paddingHorizontal:14,paddingVertical:10,backgroundColor:accent,borderRadius:12}}

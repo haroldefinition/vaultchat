@@ -32,6 +32,7 @@ export default function SettingsScreen({ navigation }) {
   const [editMessages, setEditMessages] = useState(true);
   const [pinMessages, setPinMessages] = useState(true);
   const [relay, setRelay] = useState(false);
+  const [hapticEnabled, setHapticEnabled] = useState(true);
   const [noiseCancell, setNoiseCancell] = useState(true);
   const [notifSound, setNotifSound] = useState(true);
   const [faceTimeEnabled, setFaceTimeEnabled] = useState(true);
@@ -48,6 +49,7 @@ export default function SettingsScreen({ navigation }) {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => { if (session) setUser(session.user); });
     load();
+    AsyncStorage.getItem('vaultchat_haptic').then(v => { if (v !== null) setHapticEnabled(JSON.parse(v)); else setHapticEnabled(true); });
   }, []);
 
   async function load() {
@@ -312,7 +314,12 @@ export default function SettingsScreen({ navigation }) {
   return (
     <View style={{ flex: 1, backgroundColor: bg }}>
       <ScrollView contentContainerStyle={{ paddingBottom: 60 }}>
-        <Text style={[st.header, { color: accent }]}>Settings</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 4 }}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={{ marginRight: 12 }}>
+            <Text style={{ color: accent, fontSize: 28, fontWeight: 'bold' }}>‹</Text>
+          </TouchableOpacity>
+          <Text style={[st.header, { color: accent, paddingHorizontal: 0, paddingTop: 0 }]}>Settings</Text>
+        </View>
 
         <TouchableOpacity style={[st.profileCard, { backgroundColor: card, borderColor: border }]} onPress={() => setPage('profile')}>
           <View style={{ position: 'relative' }}>
@@ -370,6 +377,7 @@ export default function SettingsScreen({ navigation }) {
         </Section>
 
         <Section title="CALLS">
+          <Toggle icon="📳" label="Haptic Feedback" subText="Vibrate on keypad and call actions" storageKey="vaultchat_haptic" value={hapticEnabled} onChange={setHapticEnabled} />
           <Toggle icon="🌐" label="International Relay" subText="Route calls through secure relay" storageKey="vaultchat_relay" value={relay} onChange={setRelay} />
           <Toggle icon="🎙️" label="Noise Cancellation" subText="AI background noise removal" storageKey="vaultchat_noise" value={noiseCancell} onChange={setNoiseCancell} />
           <Row icon="🔄" label="Call Hold / Swap" subText="Switch apps while on hold" right={<Text style={{ color: '#00ffa3', fontWeight: 'bold', fontSize: 12 }}>ACTIVE</Text>} />
