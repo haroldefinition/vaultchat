@@ -37,6 +37,9 @@ export default function BusinessScreen({ navigation }) {
   return (
     <View style={[s.container, { backgroundColor: bg }]}>
       <View style={[s.header, { backgroundColor: card, borderBottomColor: border }]}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={{ padding: 4 }}>
+          <Text style={{ color: accent, fontSize: 28, fontWeight: 'bold' }}>‹</Text>
+        </TouchableOpacity>
         <Text style={[s.title, { color: tx }]}>Business</Text>
         <TouchableOpacity style={[s.setupBtn, { backgroundColor: accent }]} onPress={() => setSetupModal(true)}>
           <Text style={{ color: '#000', fontWeight: '700', fontSize: 13 }}>+ Setup</Text>
@@ -158,8 +161,8 @@ export default function BusinessScreen({ navigation }) {
 
 const s = StyleSheet.create({
   container:     { flex: 1 },
-  header:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 56, paddingBottom: 12, borderBottomWidth: 1 },
-  title:         { fontSize: 24, fontWeight: '800' },
+  header:        { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingTop: 56, paddingBottom: 12, borderBottomWidth: 1 },
+  title:         { flex: 1, fontSize: 22, fontWeight: '800' },
   setupBtn:      { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 14 },
   tabs:          { flexDirection: 'row', borderBottomWidth: 1 },
   tab:           { flex: 1, alignItems: 'center', paddingVertical: 14 },

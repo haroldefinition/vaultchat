@@ -48,37 +48,44 @@ const Tab   = createBottomTabNavigator();
 function MoreScreen({ navigation }) {
   const { bg, card, tx, sub, border, accent } = useTheme();
   const items = [
-    { icon:'🏪', label:'Business',    screen:'Business',    desc:'Dashboard, inbox & plans' },
-    { icon:'🤖', label:'AI Assistant',screen:'AIAssistant', desc:'Private, on-device AI' },
-    { icon:'📡', label:'Nearby',      screen:'Nearby',      desc:'Offline mesh messaging' },
+    { icon:'🏪', label:'Business',      screen:'Business',     desc:'Dashboard, inbox & plans' },
+    { icon:'🤖', label:'AI Assistant',  screen:'AIAssistant',  desc:'Private, on-device AI' },
+    { icon:'📡', label:'Nearby',        screen:'Nearby',       desc:'Offline mesh messaging' },
     { icon:'🔒', label:'Privacy Policy',screen:'PrivacyPolicy',desc:'How we protect you' },
-    { icon:'⚙️', label:'Settings',    screen:'Settings',    desc:'Notifications, account' },
+    { icon:'⚙️', label:'Settings',      screen:'Settings',     desc:'Notifications, account' },
   ];
   return (
     <View style={[m.container,{backgroundColor:bg}]}>
-      <View style={[m.header,{borderBottomColor:border}]}>
+      <View style={[m.header,{borderBottomColor:border,backgroundColor:bg}]}>
         <Text style={[m.title,{color:tx}]}>More</Text>
       </View>
-      {items.map(item => (
-        <TouchableOpacity key={item.label} style={[m.row,{backgroundColor:card,borderColor:border}]}
-          onPress={() => navigation.navigate(item.screen)}>
-          <Text style={{fontSize:26}}>{item.icon}</Text>
-          <View style={{flex:1,marginLeft:14}}>
-            <Text style={[{color:tx,fontWeight:'700',fontSize:15}]}>{item.label}</Text>
-            <Text style={[{color:sub,fontSize:12}]}>{item.desc}</Text>
-          </View>
-          <Text style={{color:sub,fontSize:18}}>›</Text>
-        </TouchableOpacity>
-      ))}
+      <View style={{paddingHorizontal:16,paddingTop:16,gap:10}}>
+        {items.map(item => (
+          <TouchableOpacity key={item.label}
+            style={[m.row,{backgroundColor:card,borderColor:border}]}
+            onPress={() => navigation.navigate(item.screen)}
+            activeOpacity={0.75}>
+            <View style={[m.iconWrap,{backgroundColor:accent+'18'}]}>
+              <Text style={{fontSize:22}}>{item.icon}</Text>
+            </View>
+            <View style={{flex:1,marginLeft:14}}>
+              <Text style={[{color:tx,fontWeight:'700',fontSize:15}]}>{item.label}</Text>
+              <Text style={[{color:sub,fontSize:12,marginTop:1}]}>{item.desc}</Text>
+            </View>
+            <Text style={{color:sub,fontSize:20,paddingRight:4}}>›</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
     </View>
   );
 }
 
 const m = StyleSheet.create({
   container:{flex:1},
-  header:   {paddingHorizontal:20,paddingTop:60,paddingBottom:14,borderBottomWidth:1},
+  header:   {paddingHorizontal:20,paddingTop:60,paddingBottom:14,borderBottomWidth:StyleSheet.hairlineWidth},
   title:    {fontSize:28,fontWeight:'800'},
-  row:      {flexDirection:'row',alignItems:'center',marginHorizontal:16,marginTop:12,borderRadius:18,padding:16,borderWidth:1},
+  row:      {flexDirection:'row',alignItems:'center',borderRadius:18,padding:16,borderWidth:1},
+  iconWrap: {width:46,height:46,borderRadius:14,alignItems:'center',justifyContent:'center'},
 });
 
 // ── Main tab navigator ────────────────────────────────────────

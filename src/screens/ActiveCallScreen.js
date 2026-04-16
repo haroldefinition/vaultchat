@@ -114,10 +114,7 @@ export default function ActiveCallScreen({ route, navigation }) {
             </TouchableOpacity>
           )}
 
-          <TouchableOpacity style={s.controlBtn} onPress={() => Alert.alert('Keypad', 'Keypad')}>
-            <Text style={s.controlIcon}>⌨️</Text>
-            <Text style={s.controlLabel}>Keypad</Text>
-          </TouchableOpacity>
+
         </View>
       </View>
 

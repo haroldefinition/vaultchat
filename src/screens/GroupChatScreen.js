@@ -161,6 +161,8 @@ export default function GroupChatScreen({ route, navigation }) {
     }
   }, [attachModal]);
 
+  const STORAGE_KEY = `vaultchat_gmsgs_${groupId}`;
+
   const fetchMessages = async () => {
     try {
       const { data, error } = await supabase
@@ -168,8 +170,19 @@ export default function GroupChatScreen({ route, navigation }) {
         .select('*')
         .eq('group_id', groupId)
         .order('created_at', { ascending: true });
-      if (!error && data) setMessages(data.filter(m => m.id));
+      if (!error && data && data.length > 0) {
+        const filtered = data.filter(m => m.id && !String(m.id).startsWith('temp_'));
+        setMessages(filtered);
+        // Keep local cache in sync
+        try { await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(filtered)); } catch {}
+        return;
+      }
     } catch (e) { if (__DEV__) console.warn('fetchGroupMessages error:', e); }
+    // Fallback: load from AsyncStorage
+    try {
+      const raw = await AsyncStorage.getItem(STORAGE_KEY);
+      if (raw) setMessages(JSON.parse(raw));
+    } catch {}
   };
 
   // Send a message to group_messages table
@@ -190,8 +203,23 @@ export default function GroupChatScreen({ route, navigation }) {
     setReplyingTo(null);
     flatListRef.current?.scrollToEnd({ animated: true });
     try {
-      await supabase.from('group_messages').insert(payload);
-    } catch (e) { if (__DEV__) console.warn('group send error:', e); }
+      const { data, error } = await supabase.from('group_messages').insert(payload).select().single();
+      if (!error && data) {
+        // Replace temp with real ID
+        setMessages(prev => {
+          const updated = prev.map(m => m.id === payload.created_at ? { ...data } : m);
+          AsyncStorage.setItem(`vaultchat_gmsgs_${groupId}`, JSON.stringify(updated.filter(m => !String(m.id).startsWith('temp_')))).catch(() => {});
+          return updated;
+        });
+      }
+    } catch (e) {
+      if (__DEV__) console.warn('group send error:', e);
+      // Keep temp message — store locally so it persists
+      const raw = await AsyncStorage.getItem(`vaultchat_gmsgs_${groupId}`);
+      const existing = raw ? JSON.parse(raw) : [];
+      const withNew = [...existing, { ...payload, id: `local_${Date.now()}` }];
+      await AsyncStorage.setItem(`vaultchat_gmsgs_${groupId}`, JSON.stringify(withNew)).catch(() => {});
+    }
   };
 
   // Simple text send
@@ -515,9 +543,7 @@ export default function GroupChatScreen({ route, navigation }) {
           <TouchableOpacity style={g.attachBtn} onPress={() => setAttachModal(true)}>
             <Text style={[g.attachBtnText, { color: accent || '#6C63FF' }]}>+</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={g.gifBtn} onPress={() => setGifPickerVisible(true)}>
-            <Text style={g.gifBtnText}>GIF</Text>
-          </TouchableOpacity>
+
           <TextInput
             style={[g.input, { color: tx || '#fff', backgroundColor: inputBg || '#2C2C2E' }]}
             placeholder="Message..." placeholderTextColor={sub || '#8E8E93'}

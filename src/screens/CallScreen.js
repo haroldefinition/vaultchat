@@ -15,6 +15,7 @@ export default function CallScreen({ navigation }) {
   const [calls, setCalls] = useState(SAMPLE_CALLS);
   const [user, setUser] = useState(null);
   const [tab, setTab] = useState('recent');
+  const [vmPlaying, setVmPlaying] = useState(null);
   const [dialInput, setDialInput] = useState('');
 
   useEffect(() => {
@@ -63,6 +64,9 @@ export default function CallScreen({ navigation }) {
             <TouchableOpacity style={[s.tabBtn, tab === 'recent' && { backgroundColor: accent }]} onPress={() => setTab('recent')}>
               <Text style={[s.tabBtnText, { color: tab === 'recent' ? '#fff' : sub }]}>Recent</Text>
             </TouchableOpacity>
+            <TouchableOpacity style={[s.tabBtn, tab === 'voicemail' && { backgroundColor: accent }]} onPress={() => setTab('voicemail')}>
+              <Text style={[s.tabBtnText, { color: tab === 'voicemail' ? '#fff' : sub }]}>Voicemail</Text>
+            </TouchableOpacity>
             <TouchableOpacity style={[s.tabBtn, tab === 'keypad' && { backgroundColor: accent }]} onPress={() => setTab('keypad')}>
               <Text style={[s.tabBtnText, { color: tab === 'keypad' ? '#fff' : sub }]}>Keypad</Text>
             </TouchableOpacity>
@@ -71,7 +75,9 @@ export default function CallScreen({ navigation }) {
         </View>
       </View>
 
-      {tab === 'keypad' ? (
+      {tab === 'voicemail' ? (
+        <VoicemailTab accent={accent} card={card} tx={tx} sub={sub} border={border} inputBg={inputBg} navigation={navigation} />
+      ) : tab === 'keypad' ? (
         <View style={s.keypadPage}>
           <View style={s.displayBox}>
             <Text style={[s.displayText, { color: tx }]}>
@@ -162,6 +168,84 @@ export default function CallScreen({ navigation }) {
           />
         </View>
       )}
+    </View>
+  );
+}
+
+// ── Voicemail Tab ─────────────────────────────────────────────
+const VOICEMAILS = [
+  { id:'vm1', from:'Mom',           phone:'+1 555 234 5678', duration:'0:42', date:'Today 9:14 AM',    read:false },
+  { id:'vm2', from:'Dr. Johnson',   phone:'+1 555 876 5432', duration:'1:18', date:'Yesterday 2:30 PM', read:false },
+  { id:'vm3', from:'John Smith',    phone:'+1 555 345 6789', duration:'0:25', date:'Mon 11:05 AM',      read:true  },
+  { id:'vm4', from:'Unknown',       phone:'+1 555 000 1234', duration:'0:12', date:'Sun 6:48 PM',       read:true  },
+];
+
+function VoicemailTab({ accent, card, tx, sub, border, inputBg, navigation }) {
+  const [vms, setVms] = React.useState(VOICEMAILS);
+  const [playing, setPlaying] = React.useState(null);
+
+  function markRead(id) { setVms(prev => prev.map(v => v.id===id ? {...v,read:true} : v)); }
+  function deleteVm(id)  { Alert.alert('Delete','Delete this voicemail?',[{text:'Cancel',style:'cancel'},{text:'Delete',style:'destructive',onPress:()=>setVms(prev=>prev.filter(v=>v.id!==id))}]); }
+
+  const unread = vms.filter(v=>!v.read).length;
+
+  return (
+    <View style={{flex:1}}>
+      {unread > 0 && (
+        <View style={{backgroundColor:accent+'22',marginHorizontal:16,marginTop:12,borderRadius:12,padding:12}}>
+          <Text style={{color:accent,fontWeight:'700',fontSize:13}}>{unread} new voicemail{unread>1?'s':''}</Text>
+        </View>
+      )}
+      {vms.length === 0 && (
+        <View style={{flex:1,alignItems:'center',justifyContent:'center',gap:12}}>
+          <Text style={{fontSize:48}}>📭</Text>
+          <Text style={{color:sub,fontSize:15}}>No voicemails</Text>
+        </View>
+      )}
+      <FlatList
+        data={vms}
+        keyExtractor={v=>v.id}
+        contentContainerStyle={{padding:16,gap:10}}
+        renderItem={({item}) => (
+          <View style={{backgroundColor:card,borderRadius:18,padding:16,borderWidth:1,borderColor:border}}>
+            <View style={{flexDirection:'row',alignItems:'center',gap:12}}>
+              <View style={{width:46,height:46,borderRadius:23,backgroundColor:item.read?border:accent+'33',alignItems:'center',justifyContent:'center'}}>
+                <Text style={{fontSize:20}}>{item.read?'📞':'📞'}</Text>
+              </View>
+              <View style={{flex:1}}>
+                <View style={{flexDirection:'row',alignItems:'center',gap:6}}>
+                  <Text style={{color:tx,fontWeight:'700',fontSize:15}}>{item.from}</Text>
+                  {!item.read && <View style={{width:8,height:8,borderRadius:4,backgroundColor:accent}}/>}
+                </View>
+                <Text style={{color:sub,fontSize:12}}>{item.phone}</Text>
+              </View>
+              <View style={{alignItems:'flex-end',gap:4}}>
+                <Text style={{color:sub,fontSize:11}}>{item.date}</Text>
+                <Text style={{color:sub,fontSize:11}}>⏱ {item.duration}</Text>
+              </View>
+            </View>
+            {/* Player controls */}
+            <View style={{flexDirection:'row',alignItems:'center',gap:8,marginTop:12,paddingTop:12,borderTopWidth:1,borderTopColor:border}}>
+              <TouchableOpacity
+                style={{flex:1,flexDirection:'row',alignItems:'center',justifyContent:'center',gap:8,backgroundColor:playing===item.id?accent+'33':inputBg,borderRadius:12,paddingVertical:10}}
+                onPress={()=>{setPlaying(p=>p===item.id?null:item.id);markRead(item.id);}}>
+                <Text style={{fontSize:16}}>{playing===item.id?'⏸':'▶️'}</Text>
+                <Text style={{color:tx,fontWeight:'600',fontSize:13}}>{playing===item.id?'Playing…':'Play'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{paddingHorizontal:14,paddingVertical:10,backgroundColor:accent,borderRadius:12}}
+                onPress={()=>navigation.navigate('ActiveCall',{recipientName:item.from,recipientPhone:item.phone,callType:'voice'})}>
+                <Text style={{color:'#000',fontWeight:'700',fontSize:13}}>Call Back</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{paddingHorizontal:14,paddingVertical:10,backgroundColor:'#ff3b3022',borderRadius:12}}
+                onPress={()=>deleteVm(item.id)}>
+                <Text style={{fontSize:16}}>🗑️</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+      />
     </View>
   );
 }

@@ -254,18 +254,23 @@ export default function ChatRoomScreen({ route, navigation }) {
 
   async function fetchMessages() {
     if (!roomId) return;
+    const MKEY = `vaultchat_msgs_${roomId}`;
     try {
-      // Try Supabase messages table
       const { data, error } = await supabase
         .from('messages')
         .select('*')
         .eq('room_id', roomId)
         .order('created_at', { ascending: true });
-      if (!error && data) { setMessages(data); return; }
+      if (!error && data && data.length > 0) {
+        const real = data.filter(m => m.id && !String(m.id).startsWith('temp_'));
+        setMessages(real);
+        AsyncStorage.setItem(MKEY, JSON.stringify(real)).catch(() => {});
+        return;
+      }
     } catch {}
-    // Fallback: AsyncStorage
+    // Fallback: AsyncStorage keeps messages even if Supabase is unreachable
     try {
-      const raw = await AsyncStorage.getItem(`vaultchat_msgs_${roomId}`);
+      const raw = await AsyncStorage.getItem(MKEY);
       if (raw) setMessages(JSON.parse(raw));
     } catch {}
   }
@@ -286,13 +291,22 @@ export default function ChatRoomScreen({ route, navigation }) {
         .select()
         .single();
       if (!error && data) {
-        setMessages(prev => prev.map(m => m.id === tempId ? data : m));
+        setMessages(prev => {
+          const updated = prev.map(m => m.id === tempId ? data : m);
+          AsyncStorage.setItem(`vaultchat_msgs_${roomId}`, JSON.stringify(updated.filter(m => !String(m.id).startsWith('temp_')))).catch(() => {});
+          return updated;
+        });
+      } else {
+        // Persist temp as local message
+        const raw = await AsyncStorage.getItem(`vaultchat_msgs_${roomId}`);
+        const existing = raw ? JSON.parse(raw) : [];
+        const saved = { ...newMsg, id: `local_${Date.now()}` };
+        await AsyncStorage.setItem(`vaultchat_msgs_${roomId}`, JSON.stringify([...existing, saved])).catch(() => {});
       }
     } catch {
-      // Keep in AsyncStorage as fallback
       const raw = await AsyncStorage.getItem(`vaultchat_msgs_${roomId}`);
       const existing = raw ? JSON.parse(raw) : [];
-      await AsyncStorage.setItem(`vaultchat_msgs_${roomId}`, JSON.stringify([...existing, newMsg]));
+      await AsyncStorage.setItem(`vaultchat_msgs_${roomId}`, JSON.stringify([...existing, newMsg])).catch(() => {});
     }
 
     // Update chat preview
