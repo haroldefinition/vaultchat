@@ -1,158 +1,133 @@
-// VaultChat — NearbyScreen
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, TextInput, Alert, Animated } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, TextInput, StyleSheet, Alert, Animated } from 'react-native';
 import { useTheme } from '../services/theme';
-import { scanNearbyDevices, isOnline } from '../services/offlineQueue';
+import { isOnline, queueMessage, getQueueCount, scanNearbyDevices } from '../services/offlineQueue';
 
 export default function NearbyScreen({ navigation }) {
   const { bg, card, tx, sub, border, inputBg, accent } = useTheme();
-  const [scanning,  setScanning]  = useState(false);
-  const [devices,   setDevices]   = useState([]);
-  const [online,    setOnline]    = useState(true);
-  const [msgModal,  setMsgModal]  = useState(false);
-  const [selected,  setSelected]  = useState(null);
-  const [msgText,   setMsgText]   = useState('');
-  const radarAnim = useRef(new Animated.Value(0)).current;
+  const [online,   setOnline]   = useState(true);
+  const [devices,  setDevices]  = useState([]);
+  const [queue,    setQueue]    = useState(0);
+  const [scanning, setScanning] = useState(false);
+  const [msgText,  setMsgText]  = useState('');
+  const [selected, setSelected] = useState(null);
+  const pulse = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    isOnline().then(setOnline);
+    checkStatus();
+    const t = setInterval(checkStatus, 5000);
+    return () => clearInterval(t);
   }, []);
+
+  async function checkStatus() {
+    const on = await isOnline();
+    setOnline(on);
+    const q = await getQueueCount();
+    setQueue(q);
+  }
 
   async function scan() {
     setScanning(true);
-    setDevices([]);
-    Animated.loop(Animated.timing(radarAnim, { toValue: 1, duration: 1500, useNativeDriver: true })).start();
-    const found = await scanNearbyDevices();
-    setDevices(found);
-    setScanning(false);
-    radarAnim.stopAnimation();
-    radarAnim.setValue(0);
+    Animated.loop(Animated.sequence([
+      Animated.timing(pulse, {toValue:1.3, duration:600, useNativeDriver:true}),
+      Animated.timing(pulse, {toValue:1,   duration:600, useNativeDriver:true}),
+    ])).start();
+    setTimeout(() => {
+      setDevices(scanNearbyDevices());
+      setScanning(false);
+      pulse.stopAnimation();
+      pulse.setValue(1);
+    }, 2000);
   }
 
-  function openMsg(device) { setSelected(device); setMsgModal(true); }
-
-  function sendOfflineMsg() {
-    if (!msgText.trim()) return;
-    Alert.alert('Sent!', `Message queued for ${selected.handle} via local network.`);
-    setMsgModal(false); setMsgText('');
+  async function sendOffline() {
+    if (!msgText.trim() || !selected) return;
+    await queueMessage({ to: selected.id, content: msgText.trim(), id: `q_${Date.now()}` });
+    Alert.alert('Queued', 'Message saved. It will send when connection is restored or delivered via mesh when in range.');
+    setMsgText('');
+    checkStatus();
   }
-
-  const radarScale = radarAnim.interpolate({ inputRange: [0, 1], outputRange: [0.8, 2.5] });
-  const radarOpacity = radarAnim.interpolate({ inputRange: [0, 1], outputRange: [0.8, 0] });
 
   return (
-    <View style={[s.container, { backgroundColor: bg }]}>
-      <View style={[s.header, { backgroundColor: card, borderBottomColor: border }]}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={s.backBtn}>
-          <Text style={[s.backTx, { color: accent }]}>‹</Text>
-        </TouchableOpacity>
-        <Text style={[s.headerTitle, { color: tx }]}>📡 Nearby</Text>
-        <View style={[s.statusBadge, { backgroundColor: online ? '#00ffa320' : '#ff444420' }]}>
-          <Text style={{ color: online ? '#00ffa3' : '#ff4444', fontSize: 12, fontWeight: '700' }}>
-            {online ? '🌐 Online' : '📵 Offline'}
-          </Text>
+    <View style={[s.container,{backgroundColor:bg}]}>
+      <View style={[s.header,{backgroundColor:card,borderBottomColor:border}]}>
+        <TouchableOpacity onPress={() => navigation.goBack()}><Text style={[s.back,{color:accent}]}>‹</Text></TouchableOpacity>
+        <Text style={[s.title,{color:tx}]}>Nearby</Text>
+        <View style={[s.statusBadge,{backgroundColor:online?'#00ffa322':'#ff3b3022'}]}>
+          <Text style={{color:online?'#00ffa3':'#ff3b30',fontSize:12,fontWeight:'700'}}>{online?'🟢 Online':'🔴 Offline'}</Text>
         </View>
       </View>
 
-      {/* Radar animation */}
-      <View style={s.radarWrap}>
-        {scanning && (
-          <Animated.View style={[s.radarRing, { backgroundColor: accent + '30', transform: [{ scale: radarScale }], opacity: radarOpacity }]} />
-        )}
-        <View style={[s.radarCenter, { backgroundColor: accent + '22', borderColor: accent }]}>
-          <Text style={{ fontSize: 32 }}>📡</Text>
-        </View>
-      </View>
-
-      <TouchableOpacity style={[s.scanBtn, { backgroundColor: scanning ? border : accent }]}
-        onPress={scan} disabled={scanning}>
-        <Text style={[s.scanBtnTx, { color: scanning ? sub : '#fff' }]}>
-          {scanning ? 'Scanning…' : '🔍 Scan for Nearby Devices'}
+      <View style={[s.infoCard,{backgroundColor:card,borderColor:border}]}>
+        <Text style={{fontSize:32,marginBottom:8}}>📡</Text>
+        <Text style={[{color:tx,fontWeight:'700',fontSize:16,marginBottom:6}]}>Mesh Messaging</Text>
+        <Text style={[{color:sub,fontSize:13,textAlign:'center',lineHeight:19}]}>
+          Send messages to nearby VaultChat users without internet.{'\n'}
+          Messages are encrypted and queue locally until delivered.
         </Text>
+        {queue > 0 && (
+          <View style={[s.queueBadge,{backgroundColor:accent}]}>
+            <Text style={{color:'#000',fontWeight:'700',fontSize:12}}>{queue} message{queue>1?'s':''} queued</Text>
+          </View>
+        )}
+      </View>
+
+      <TouchableOpacity style={[s.scanBtn,{borderColor:accent}]} onPress={scan} disabled={scanning}>
+        <Animated.Text style={{fontSize:36, transform:[{scale:pulse}]}}>📡</Animated.Text>
+        <Text style={[{color:accent,fontWeight:'700',marginTop:8}]}>{scanning?'Scanning…':'Scan for Devices'}</Text>
       </TouchableOpacity>
 
-      <FlatList
-        data={devices}
-        keyExtractor={i => i.id}
-        contentContainerStyle={{ padding: 16, gap: 10 }}
-        renderItem={({ item }) => (
-          <View style={[s.deviceRow, { backgroundColor: card, borderColor: border }]}>
-            <View style={[s.deviceAvatar, { backgroundColor: accent + '22' }]}>
-              <Text style={{ fontSize: 20 }}>👤</Text>
+      {devices.length > 0 && (
+        <>
+          <Text style={[s.sectionTitle,{color:sub}]}>NEARBY DEVICES</Text>
+          <FlatList
+            data={devices}
+            keyExtractor={d=>d.id}
+            horizontal
+            contentContainerStyle={{paddingHorizontal:16,gap:10}}
+            renderItem={({item}) => (
+              <TouchableOpacity
+                style={[s.deviceCard,{backgroundColor:selected?.id===item.id?accent+'22':card,borderColor:selected?.id===item.id?accent:border}]}
+                onPress={() => setSelected(item)}>
+                <Text style={{fontSize:28}}>📱</Text>
+                <Text style={[{color:tx,fontWeight:'600',fontSize:12,textAlign:'center',marginTop:4}]}>{item.name}</Text>
+                <Text style={[{color:sub,fontSize:10}]}>{item.signal} dBm</Text>
+              </TouchableOpacity>
+            )}
+          />
+          {selected && (
+            <View style={[s.composeRow,{backgroundColor:card,borderTopColor:border}]}>
+              <TextInput style={[s.input,{backgroundColor:inputBg,color:tx}]}
+                placeholder={`Message to ${selected.name}…`} placeholderTextColor={sub}
+                value={msgText} onChangeText={setMsgText}/>
+              <TouchableOpacity style={[s.sendBtn,{backgroundColor:accent}]} onPress={sendOffline}>
+                <Text style={{color:'#000',fontWeight:'700'}}>Send</Text>
+              </TouchableOpacity>
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[s.deviceName, { color: tx }]}>{item.name}</Text>
-              <Text style={[s.deviceHandle, { color: accent }]}>{item.handle}</Text>
-              <Text style={[s.deviceDist, { color: sub }]}>{item.distance} · Signal: {item.signal}</Text>
-            </View>
-            <TouchableOpacity style={[s.msgBtn, { backgroundColor: accent }]} onPress={() => openMsg(item)}>
-              <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>Message</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-        ListEmptyComponent={
-          !scanning && (
-            <View style={s.empty}>
-              <Text style={{ fontSize: 48, marginBottom: 12 }}>📵</Text>
-              <Text style={[s.emptyTitle, { color: tx }]}>No devices found</Text>
-              <Text style={[s.emptyTx, { color: sub }]}>Tap Scan to find VaultChat users nearby using Bluetooth or WiFi Direct</Text>
-            </View>
-          )
-        }
-      />
+          )}
+        </>
+      )}
 
-      <View style={[s.infoRow, { backgroundColor: card, borderTopColor: border }]}>
-        <Text style={[s.infoTx, { color: sub }]}>🔒 Encrypted · Works offline · Up to 100m range</Text>
-      </View>
-
-      <Modal visible={msgModal} transparent animationType="slide" onRequestClose={() => setMsgModal(false)}>
-        <View style={s.modalOverlay}>
-          <View style={[s.modalSheet, { backgroundColor: card }]}>
-            <Text style={[s.modalTitle, { color: tx }]}>Message {selected?.handle}</Text>
-            <Text style={[s.modalSub, { color: sub }]}>🔒 End-to-end encrypted · Sent via local network</Text>
-            <TextInput style={[s.modalInput, { backgroundColor: inputBg, color: tx, borderColor: border }]}
-              placeholder="Your message…" placeholderTextColor={sub}
-              value={msgText} onChangeText={setMsgText} multiline />
-            <TouchableOpacity style={[s.sendOfflineBtn, { backgroundColor: accent }]} onPress={sendOfflineMsg}>
-              <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>Send Offline Message</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setMsgModal(false)} style={{ marginTop: 10, alignItems: 'center' }}>
-              <Text style={{ color: sub }}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+      <Text style={[s.note,{color:sub}]}>
+        🔒 All nearby messages are end-to-end encrypted.{'\n'}No data passes through VaultChat servers.
+      </Text>
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  container:      { flex: 1 },
-  header:         { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 56, paddingBottom: 12, borderBottomWidth: 1, gap: 10 },
-  backBtn:        { padding: 4 },
-  backTx:         { fontSize: 28, fontWeight: 'bold' },
-  headerTitle:    { flex: 1, fontSize: 20, fontWeight: '800' },
-  statusBadge:    { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12 },
-  radarWrap:      { alignItems: 'center', justifyContent: 'center', height: 160, marginTop: 10 },
-  radarRing:      { position: 'absolute', width: 120, height: 120, borderRadius: 60 },
-  radarCenter:    { width: 90, height: 90, borderRadius: 45, alignItems: 'center', justifyContent: 'center', borderWidth: 2 },
-  scanBtn:        { marginHorizontal: 24, borderRadius: 16, padding: 14, alignItems: 'center', marginBottom: 8 },
-  scanBtnTx:      { fontSize: 15, fontWeight: '700' },
-  deviceRow:      { flexDirection: 'row', alignItems: 'center', borderRadius: 14, borderWidth: 1, padding: 14, gap: 12 },
-  deviceAvatar:   { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
-  deviceName:     { fontSize: 14, fontWeight: '700' },
-  deviceHandle:   { fontSize: 12, marginTop: 1 },
-  deviceDist:     { fontSize: 11, marginTop: 2 },
-  msgBtn:         { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 12 },
-  empty:          { alignItems: 'center', paddingTop: 20, paddingHorizontal: 32 },
-  emptyTitle:     { fontSize: 17, fontWeight: '700', marginBottom: 8 },
-  emptyTx:        { fontSize: 13, textAlign: 'center', lineHeight: 20 },
-  infoRow:        { padding: 16, borderTopWidth: 1, alignItems: 'center' },
-  infoTx:         { fontSize: 12 },
-  modalOverlay:   { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  modalSheet:     { borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 44 },
-  modalTitle:     { fontSize: 18, fontWeight: '800', marginBottom: 6, textAlign: 'center' },
-  modalSub:       { fontSize: 12, textAlign: 'center', marginBottom: 16 },
-  modalInput:     { borderRadius: 12, borderWidth: 1, padding: 14, fontSize: 14, minHeight: 80, marginBottom: 14 },
-  sendOfflineBtn: { borderRadius: 14, padding: 14, alignItems: 'center' },
+  container:   {flex:1},
+  header:      {flexDirection:'row',alignItems:'center',paddingHorizontal:16,paddingTop:56,paddingBottom:12,borderBottomWidth:1,gap:12},
+  back:        {fontSize:30,fontWeight:'bold'},
+  title:       {flex:1,fontSize:20,fontWeight:'800'},
+  statusBadge: {paddingHorizontal:10,paddingVertical:5,borderRadius:12},
+  infoCard:    {margin:16,borderRadius:20,padding:20,borderWidth:1,alignItems:'center'},
+  queueBadge:  {marginTop:12,paddingHorizontal:14,paddingVertical:6,borderRadius:12},
+  scanBtn:     {alignSelf:'center',alignItems:'center',borderRadius:80,borderWidth:2,padding:24,marginVertical:16},
+  sectionTitle:{paddingHorizontal:16,fontSize:11,fontWeight:'700',letterSpacing:0.5,marginBottom:8},
+  deviceCard:  {width:100,borderRadius:16,padding:14,borderWidth:1,alignItems:'center'},
+  composeRow:  {flexDirection:'row',alignItems:'center',padding:12,borderTopWidth:1,gap:8,marginTop:12},
+  input:       {flex:1,borderRadius:20,paddingHorizontal:14,paddingVertical:10,fontSize:15,minHeight:42},
+  sendBtn:     {paddingHorizontal:18,paddingVertical:10,borderRadius:20},
+  note:        {textAlign:'center',fontSize:12,lineHeight:18,padding:20,marginTop:'auto'},
 });
