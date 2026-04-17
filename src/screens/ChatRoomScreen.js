@@ -186,7 +186,19 @@ function Bubble({ item, myId, tx, sub, card, accent, onOpenImg, onPlayVid, onRep
       const [fname, url] = main.replace('FILE:', '').split('|');
       return (
         <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}
-          onPress={() => url && Linking.openURL(url)} onLongPress={onReply} delayLongPress={450}>
+          onPress={async () => {
+            if (!url) return;
+            // Try Share.share first — iOS routes to Word/PDF/Files app based on extension
+            try {
+              if (url.startsWith('http')) {
+                await Linking.openURL(url);
+              } else {
+                // Local file — use Share sheet which triggers app picker (Word, Adobe, etc.)
+                await Share.share({ url, message: fname }, { dialogTitle: 'Open with…' });
+              }
+            } catch { try { await Linking.openURL(url); } catch {} }
+          }}
+          onLongPress={onReply} delayLongPress={450}>
           <Text style={{ fontSize: 26 }}>📄</Text>
           <View>
             <Text style={[s.msgTx, { color: me ? '#fff' : tx }]}>{fname}</Text>
@@ -215,7 +227,7 @@ function Bubble({ item, myId, tx, sub, card, accent, onOpenImg, onPlayVid, onRep
 // ── Main Screen ───────────────────────────────────────────────
 export default function ChatRoomScreen({ route, navigation }) {
   const { bg, card, tx, sub, border, inputBg, accent } = useTheme();
-  const { roomId, recipientPhone, recipientName, recipientPhoto } = route.params || {};
+  const { roomId, recipientPhone, recipientName, recipientPhoto, pendingMessage } = route.params || {};
 
   const [messages,     setMessages]     = useState([]);
   const [text,         setText]         = useState('');
@@ -252,6 +264,13 @@ export default function ChatRoomScreen({ route, navigation }) {
     const poll = setInterval(fetchMessages, 3000);
     return () => clearInterval(poll);
   }, [roomId]);
+
+  // Auto-send media/message passed from NewMessageScreen
+  useEffect(() => {
+    if (pendingMessage && myId) {
+      postMsg(pendingMessage);
+    }
+  }, [myId]);  // fires once myId is set (after loadUser)
 
   useEffect(() => {
     if (!attachModal && pendingAttach.current) {

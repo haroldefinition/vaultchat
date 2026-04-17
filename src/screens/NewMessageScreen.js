@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput, Alert,
-  Modal, KeyboardAvoidingView, Platform, ScrollView, Share,
+  Modal, KeyboardAvoidingView, Platform, ScrollView, Share, Image, ActivityIndicator,
 } from 'react-native';
 import { useTheme } from '../services/theme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -10,6 +10,7 @@ import { getMyHandle } from '../services/vaultHandle';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Location from 'expo-location';
+import { uploadMedia } from '../services/mediaUpload';
 
 const GIFS = [
   { emoji: '😂', name: 'Haha',  msg: '😂' },
@@ -73,6 +74,10 @@ export default function NewMessageScreen({ navigation, route }) {
   const [emojiModal,    setEmojiModal]    = useState(false);
   const [emojiTab,      setEmojiTab]      = useState('emoji');
 
+  const [stagedPhotos,  setStagedPhotos]  = useState([]);   // [{uri, key}]
+  const [stagedVideos,  setStagedVideos]  = useState([]);   // [{uri}]
+  const [stagedFile,    setStagedFile]    = useState(null); // {name, uri}
+  const [sending,       setSending]       = useState(false);
   const pendingAttach = useRef(null);
 
   useEffect(() => {
@@ -108,26 +113,35 @@ export default function NewMessageScreen({ navigation, route }) {
       const p = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!p.granted) { Alert.alert('Permission needed'); return; }
       const r = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: 'images', quality: 0.85, allowsMultipleSelection: false,
+        mediaTypes: 'images', quality: 0.85, allowsMultipleSelection: true, selectionLimit: 20,
       });
-      if (!r.canceled && r.assets?.[0])
-        setMsg(prev => prev + (prev ? '\n' : '') + '🖼️ ' + r.assets[0].uri.split('/').pop());
+      if (!r.canceled && r.assets?.length) {
+        const newPhotos = await Promise.all(r.assets.map(async asset => {
+          const key = `img_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
+          await AsyncStorage.setItem(key, asset.uri);
+          return { uri: asset.uri, key };
+        }));
+        setStagedPhotos(prev => [...prev, ...newPhotos].slice(0, 20));
+      }
     } else if (type === 'video') {
       const p = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!p.granted) { Alert.alert('Permission needed'); return; }
-      const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'videos', quality: 1 });
-      if (!r.canceled && r.assets?.[0])
-        setMsg(prev => prev + (prev ? '\n' : '') + '🎥 ' + r.assets[0].uri.split('/').pop());
+      const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'videos', quality: 1, allowsMultipleSelection: true, selectionLimit: 10 });
+      if (!r.canceled && r.assets?.length)
+        setStagedVideos(prev => [...prev, ...r.assets.map(a => ({ uri: a.uri }))].slice(0, 10));
     } else if (type === 'camera') {
       const p = await ImagePicker.requestCameraPermissionsAsync();
       if (!p.granted) { Alert.alert('Permission needed'); return; }
       const r = await ImagePicker.launchCameraAsync({ quality: 0.85 });
-      if (!r.canceled && r.assets?.[0])
-        setMsg(prev => prev + (prev ? '\n' : '') + '📷 Photo captured');
+      if (!r.canceled && r.assets?.[0]) {
+        const key = `img_${Date.now()}`;
+        await AsyncStorage.setItem(key, r.assets[0].uri);
+        setStagedPhotos(prev => [...prev, { uri: r.assets[0].uri, key }].slice(0, 20));
+      }
     } else if (type === 'file') {
       const r = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
       if (!r.canceled && r.assets?.[0])
-        setMsg(prev => prev + (prev ? '\n' : '') + '📁 ' + r.assets[0].name);
+        setStagedFile({ name: r.assets[0].name, uri: r.assets[0].uri });
     } else if (type === 'airdrop') {
       try {
         const p = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -163,51 +177,67 @@ export default function NewMessageScreen({ navigation, route }) {
 
   async function startChat() {
     const cleaned = toInput.trim();
-    if (!cleaned) {
-      Alert.alert('To:', 'Enter a phone number or @handle.');
-      return;
-    }
-    // Handle @handle lookup vs phone number
-    const phone  = cleaned.startsWith('@') ? cleaned : cleaned.replace(/\D/g, '');
+    if (!cleaned) { Alert.alert('To:', 'Enter a phone number or @handle.'); return; }
+    const phone   = cleaned.startsWith('@') ? cleaned : cleaned.replace(/\D/g, '');
     const myPhone = user?.phone?.replace('+1','') || '0000000000';
     const roomId  = generateRoomId(myPhone, phone);
 
-    // Save chat to local store
+    // Save chat entry
     try {
       const raw  = await AsyncStorage.getItem('vaultchat_chats');
       const list = raw ? JSON.parse(raw) : [];
-      if (!list.find(c => c.phone === phone)) {
-        list.unshift({
-          roomId, phone,
-          name:        selectedName || phone,
-          handle:      cleaned.startsWith('@') ? cleaned : '',
-          photo:       null,
+      if (!list.find(ch => ch.phone === phone)) {
+        list.unshift({ roomId, phone, name: selectedName || phone,
+          handle: cleaned.startsWith('@') ? cleaned : '', photo: null,
           lastMessage: msg || 'New chat',
-          time:        new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          pinned:      false,
-          hideAlerts:  false,
-        });
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          pinned: false, hideAlerts: false });
         await AsyncStorage.setItem('vaultchat_chats', JSON.stringify(list));
       }
     } catch {}
 
-    // Send initial message if typed
-    if (msg.trim()) {
+    // Build pendingMessage for ChatRoom to auto-send
+    // Priority: photos > videos > file > text
+    let pendingMessage = null;
+
+    if (stagedPhotos.length > 0) {
+      const content = stagedPhotos.length === 1
+        ? \`LOCALIMG:\${stagedPhotos[0].key}\`
+        : \`GALLERY:\${stagedPhotos.map(p => p.key).join('|')}\`;
+      pendingMessage = msg.trim() ? content + '\n' + msg.trim() : content;
+    } else if (stagedVideos.length > 0) {
+      setSending(true);
       try {
-        const senderId = user?.id || 'local';
-        await fetch(`${BACKEND}/messages`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ room_id: roomId, sender_id: senderId, content: msg.trim() }),
-        });
+        const caption = msg.trim();
+        if (stagedVideos.length === 1) {
+          const url = await uploadMedia(stagedVideos[0].uri, 'video').catch(() => null);
+          const content = url ? \`LOCALVID:\${url}\` : '🎥 Video';
+          pendingMessage = caption ? content + '\n' + caption : content;
+        } else {
+          const urls = await Promise.all(stagedVideos.map(v => uploadMedia(v.uri, 'video').catch(() => null)));
+          const valid = urls.filter(Boolean);
+          const content = valid.length ? \`VIDEOS:\${valid.join('|')}\` : '🎥 Videos';
+          pendingMessage = caption ? content + '\n' + caption : content;
+        }
       } catch {}
+      setSending(false);
+    } else if (stagedFile) {
+      try {
+        const url = await uploadMedia(stagedFile.uri, 'file').catch(() => null);
+        pendingMessage = url ? \`FILE:\${stagedFile.name}|\${url}\` : \`FILE:\${stagedFile.name}|\${stagedFile.uri}\`;
+      } catch {
+        pendingMessage = \`FILE:\${stagedFile.name}|\${stagedFile.uri}\`;
+      }
+    } else if (msg.trim()) {
+      pendingMessage = msg.trim();
     }
 
     navigation.replace('ChatRoom', {
       roomId,
-      recipientPhone: phone,
-      recipientName:  selectedName || '',
-      recipientPhoto: null,
+      recipientPhone:  phone,
+      recipientName:   selectedName || '',
+      recipientPhoto:  null,
+      pendingMessage,  // ChatRoom auto-sends this on mount
     });
   }
 
@@ -263,6 +293,43 @@ export default function NewMessageScreen({ navigation, route }) {
 
       <View style={{ flex: 1 }} />
 
+      {/* Staged photos preview */}
+      {stagedPhotos.length > 0 && (
+        <View style={[s.stagedBar, { borderTopColor: border }]}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, padding: 8 }}>
+            {stagedPhotos.map((p, i) => (
+              <View key={i} style={s.stagedThumbWrap}>
+                <Image source={{ uri: p.uri }} style={s.stagedThumb} resizeMode="cover" />
+                <TouchableOpacity style={s.stagedRemove} onPress={() => setStagedPhotos(prev => prev.filter((_, j) => j !== i))}>
+                  <Text style={{ color: '#fff', fontSize: 10, fontWeight: '900' }}>✕</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </ScrollView>
+          <View style={[s.stagedBadge, { backgroundColor: accent }]}>
+            <Text style={s.stagedBadgeTx}>{stagedPhotos.length} photo{stagedPhotos.length > 1 ? 's' : ''}</Text>
+          </View>
+        </View>
+      )}
+
+      {/* Staged videos preview */}
+      {stagedVideos.length > 0 && (
+        <View style={[s.stagedVideoBar, { backgroundColor: inputBg, borderTopColor: border }]}>
+          <Text style={{ fontSize: 24 }}>🎥</Text>
+          <Text style={{ color: tx, fontWeight: '600', flex: 1 }}>{stagedVideos.length} video{stagedVideos.length > 1 ? 's' : ''} ready</Text>
+          <TouchableOpacity onPress={() => setStagedVideos([])}><Text style={{ color: sub, fontSize: 16 }}>✕</Text></TouchableOpacity>
+        </View>
+      )}
+
+      {/* Staged file preview */}
+      {stagedFile && (
+        <View style={[s.stagedVideoBar, { backgroundColor: inputBg, borderTopColor: border }]}>
+          <Text style={{ fontSize: 24 }}>📄</Text>
+          <Text style={{ color: tx, fontWeight: '600', flex: 1 }} numberOfLines={1}>{stagedFile.name}</Text>
+          <TouchableOpacity onPress={() => setStagedFile(null)}><Text style={{ color: sub, fontSize: 16 }}>✕</Text></TouchableOpacity>
+        </View>
+      )}
+
       {/* Input bar — identical to ChatRoomScreen */}
       <View style={[s.inputBar, { backgroundColor: card, borderTopColor: border }]}>
         <TouchableOpacity
@@ -272,7 +339,7 @@ export default function NewMessageScreen({ navigation, route }) {
         </TouchableOpacity>
         <TextInput
           style={[s.input, { backgroundColor: inputBg, color: tx }]}
-          placeholder="Message…"
+          placeholder={stagedPhotos.length || stagedVideos.length || stagedFile ? 'Caption… (optional)' : 'Message…'}
           placeholderTextColor={sub}
           value={msg}
           onChangeText={setMsg}
@@ -280,10 +347,12 @@ export default function NewMessageScreen({ navigation, route }) {
           maxLength={2000}
         />
         <TouchableOpacity
-          style={[s.sendBtn, { backgroundColor: toInput.trim().length >= 3 ? accent : inputBg }]}
+          style={[s.sendBtn, { backgroundColor: (toInput.trim().length >= 3 && (msg.trim() || stagedPhotos.length || stagedVideos.length || stagedFile)) ? accent : inputBg }]}
           onPress={startChat}
-          disabled={toInput.trim().length < 3}>
-          <Text style={{ color: toInput.trim().length >= 3 ? '#000' : sub, fontSize: 18 }}>➤</Text>
+          disabled={toInput.trim().length < 3 || sending}>
+          {sending
+            ? <ActivityIndicator color={accent} size="small" />
+            : <Text style={{ color: (toInput.trim().length >= 3 && (msg.trim() || stagedPhotos.length || stagedVideos.length || stagedFile)) ? '#000' : sub, fontSize: 18 }}>➤</Text>}
         </TouchableOpacity>
       </View>
 
@@ -420,4 +489,12 @@ const s = StyleSheet.create({
   emojiItem:      { width: 46, height: 46, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   tabRow:         { flexDirection: 'row', marginBottom: 12, borderRadius: 12, padding: 4 },
   tab:            { flex: 1, padding: 8, borderRadius: 10, alignItems: 'center' },
+  // Staged media previews
+  stagedBar:      { borderTopWidth: StyleSheet.hairlineWidth, position: 'relative' },
+  stagedThumbWrap:{ position: 'relative' },
+  stagedThumb:    { width: 80, height: 80, borderRadius: 12 },
+  stagedRemove:   { position: 'absolute', top: -4, right: -4, width: 18, height: 18, borderRadius: 9, backgroundColor: '#ff3b30', alignItems: 'center', justifyContent: 'center', zIndex: 10 },
+  stagedBadge:    { position: 'absolute', top: 12, left: 14, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
+  stagedBadgeTx:  { color: '#000', fontSize: 10, fontWeight: '800' },
+  stagedVideoBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, gap: 10 },
 });
