@@ -202,8 +202,8 @@ export default function NewMessageScreen({ navigation, route }) {
 
     if (stagedPhotos.length > 0) {
       const content = stagedPhotos.length === 1
-        ? \`LOCALIMG:\${stagedPhotos[0].key}\`
-        : \`GALLERY:\${stagedPhotos.map(p => p.key).join('|')}\`;
+        ? `LOCALIMG:${stagedPhotos[0].key}`
+        : `GALLERY:${stagedPhotos.map(p => p.key).join('|')}`;
       pendingMessage = msg.trim() ? content + '\n' + msg.trim() : content;
     } else if (stagedVideos.length > 0) {
       setSending(true);
@@ -211,12 +211,12 @@ export default function NewMessageScreen({ navigation, route }) {
         const caption = msg.trim();
         if (stagedVideos.length === 1) {
           const url = await uploadMedia(stagedVideos[0].uri, 'video').catch(() => null);
-          const content = url ? \`LOCALVID:\${url}\` : '🎥 Video';
+          const content = url ? `LOCALVID:${url}` : '🎥 Video';
           pendingMessage = caption ? content + '\n' + caption : content;
         } else {
           const urls = await Promise.all(stagedVideos.map(v => uploadMedia(v.uri, 'video').catch(() => null)));
           const valid = urls.filter(Boolean);
-          const content = valid.length ? \`VIDEOS:\${valid.join('|')}\` : '🎥 Videos';
+          const content = valid.length ? `VIDEOS:${valid.join('|')}` : '🎥 Videos';
           pendingMessage = caption ? content + '\n' + caption : content;
         }
       } catch {}
@@ -224,9 +224,9 @@ export default function NewMessageScreen({ navigation, route }) {
     } else if (stagedFile) {
       try {
         const url = await uploadMedia(stagedFile.uri, 'file').catch(() => null);
-        pendingMessage = url ? \`FILE:\${stagedFile.name}|\${url}\` : \`FILE:\${stagedFile.name}|\${stagedFile.uri}\`;
+        pendingMessage = url ? `FILE:${stagedFile.name}|${url}` : `FILE:${stagedFile.name}|${stagedFile.uri}`;
       } catch {
-        pendingMessage = \`FILE:\${stagedFile.name}|\${stagedFile.uri}\`;
+        pendingMessage = `FILE:${stagedFile.name}|${stagedFile.uri}`;
       }
     } else if (msg.trim()) {
       pendingMessage = msg.trim();
