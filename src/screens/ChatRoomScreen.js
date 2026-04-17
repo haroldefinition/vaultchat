@@ -11,6 +11,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as Location from 'expo-location';
 import { useTheme } from '../services/theme';
 import { uploadMedia } from '../services/mediaUpload';
+import ContactEditModal from '../components/ContactEditModal';
 import { supabase } from '../services/supabase';
 import { ResolvedPhotoStack, ResolvedVideoCarousel } from '../components/MediaBubbles';
 
@@ -212,6 +213,8 @@ export default function ChatRoomScreen({ route, navigation }) {
   const [sending,      setSending]      = useState(false);
   const [myId,         setMyId]         = useState('');
   const [replyTo,      setReplyTo]      = useState(null);
+  const [contactEditVis, setContactEditVis] = useState(false);
+  const [contactData,    setContactData]    = useState(null);
 
   // Staged media
   const [stagedPhotos, setStagedPhotos] = useState([]);  // { uri, key }
@@ -243,6 +246,22 @@ export default function ChatRoomScreen({ route, navigation }) {
       setTimeout(() => handleAttachType(t), 700);
     }
   }, [attachModal]);
+
+  // Build contact data from route params for the edit form
+  useEffect(() => {
+    setContactData({
+      firstName: recipientName?.split(' ')[0] || '',
+      lastName:  recipientName?.split(' ').slice(1).join(' ') || '',
+      name:      recipientName || '',
+      phone:     recipientPhone || '',
+      photo:     recipientPhoto || null,
+      email:     '',
+      address:   '',
+      birthday:  '',
+      url:       '',
+      notes:     '',
+    });
+  }, [recipientName, recipientPhone, recipientPhoto]);
 
   async function loadUser() {
     // Try Supabase session first
@@ -440,15 +459,20 @@ export default function ChatRoomScreen({ route, navigation }) {
         <TouchableOpacity onPress={() => navigation.goBack()} style={s.backBtn}>
           <Text style={[s.backTx, { color: accent }]}>‹</Text>
         </TouchableOpacity>
-        <View style={[s.hAvatar, { backgroundColor: accent }]}>
-          {recipientPhoto
-            ? <Image source={{ uri: recipientPhoto }} style={s.hAvatarImg} />
-            : <Text style={s.hAvatarTx}>{(recipientName || '?')[0]?.toUpperCase()}</Text>}
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={[s.hName, { color: tx }]}>{recipientName || recipientPhone || 'Chat'}</Text>
-          <Text style={[s.hSub, { color: sub }]}>🔒 End-to-end encrypted</Text>
-        </View>
+        <TouchableOpacity
+          style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10 }}
+          onPress={() => setContactEditVis(true)}
+          activeOpacity={0.7}>
+          <View style={[s.hAvatar, { backgroundColor: accent }]}>
+            {contactData?.photo
+              ? <Image source={{ uri: contactData.photo }} style={s.hAvatarImg} />
+              : <Text style={s.hAvatarTx}>{(recipientName || '?')[0]?.toUpperCase()}</Text>}
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[s.hName, { color: tx }]}>{contactData?.name || recipientName || recipientPhone || 'Chat'}</Text>
+            <Text style={[s.hSub, { color: sub }]}>🔒 End-to-end encrypted</Text>
+          </View>
+        </TouchableOpacity>
         <TouchableOpacity onPress={() => navigation.navigate('ActiveCall', { recipientName, recipientPhone, callType: 'voice' })} style={s.callBtn}>
           <Text style={{ fontSize: 22 }}>📞</Text>
         </TouchableOpacity>
@@ -667,6 +691,17 @@ export default function ChatRoomScreen({ route, navigation }) {
           </View>
         </View>
       </Modal>
+      {/* Contact edit modal — opened by tapping avatar/name in header */}
+      <ContactEditModal
+        visible={contactEditVis}
+        contact={contactData}
+        onClose={() => setContactEditVis(false)}
+        onSave={(updated) => {
+          setContactData(updated);
+          setContactEditVis(false);
+        }}
+        colors={{ bg, card, tx, sub, border, inputBg, accent }}
+      />
     </KeyboardAvoidingView>
   );
 }

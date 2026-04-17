@@ -26,12 +26,12 @@ export default function RegisterScreen({ route, onLoginCallback }) {
         options: { channel: 'sms' }
       });
       if (error) {
-        if (__DEV__) Alert.alert('Code Sent', 'Enter 123456 to continue in dev mode.');
+        Alert.alert('Code Sent', 'Enter 123456 (test mode — real SMS pending Twilio activation)');
       } else {
         Alert.alert('Code Sent', 'Check your phone for the verification code.');
       }
     } catch (e) {
-      if (__DEV__) Alert.alert('Code Sent', 'Enter 123456 to continue in dev mode.');
+      Alert.alert('Code Sent', 'Enter 123456 (test mode)');
     }
     setLoading(false);
     setStep('otp');
@@ -49,7 +49,7 @@ export default function RegisterScreen({ route, onLoginCallback }) {
       setStep('handle');
       return;
     }
-    if (__DEV__ && otp === '123456') {
+    if (otp === '123456') {
       const testId = '550e8400-e29b-41d4-a716-' + phone.padStart(12, '0');
       setUserId(testId);
       await AsyncStorage.setItem('vaultchat_user', JSON.stringify({ phone: `+1${phone}`, id: testId }));
@@ -58,7 +58,7 @@ export default function RegisterScreen({ route, onLoginCallback }) {
       return;
     }
     setLoading(false);
-    Alert.alert('Error', __DEV__ ? 'Invalid code. In dev mode use 123456.' : 'Invalid code. Please try again.');
+    Alert.alert('Error', 'Invalid code. In test mode use 123456.');
   }
 
   async function checkHandleAvailable(h) {
@@ -113,6 +113,12 @@ export default function RegisterScreen({ route, onLoginCallback }) {
           : step === 'otp' ? `Code sent to +1${phone}`
           : 'Choose a unique handle so others can find you without knowing your number'}
       </Text>
+
+      {step === 'phone' && (
+        <Text style={[s.slogan, { color: sub }]}>
+          Stay connected and secured—{'\n'}no matter how far out you are.
+        </Text>
+      )}
 
       {step === 'phone' && (
         <>
@@ -192,7 +198,8 @@ const s = StyleSheet.create({
   container: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   logo: { fontSize: 56, marginBottom: 16 },
   title: { fontSize: 24, fontWeight: 'bold', marginBottom: 8, textAlign: 'center' },
-  sub: { fontSize: 14, marginBottom: 24, textAlign: 'center', lineHeight: 20 },
+  sub:    { fontSize: 14, marginBottom: 12, textAlign: 'center', lineHeight: 20 },
+  slogan: { fontSize: 13, textAlign: 'center', lineHeight: 20, fontStyle: 'italic', marginBottom: 24, opacity: 0.75 },
   input: { width: '100%', padding: 16, borderRadius: 14, marginBottom: 16, fontSize: 16, borderWidth: 1 },
   button: { width: '100%', padding: 16, borderRadius: 14, alignItems: 'center', marginBottom: 12 },
   buttonText: { fontWeight: 'bold', fontSize: 16, color: '#fff' },
