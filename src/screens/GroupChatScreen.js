@@ -14,6 +14,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as Location from 'expo-location';
 import { uploadMedia } from '../services/mediaUpload';
 import GifPickerModal from '../components/GifPickerModal';
+import ReplyPreview from '../components/ReplyPreview';
 import ContactEditModal from '../components/ContactEditModal';
 import PremiumModal from '../components/PremiumModal';
 import { ResolvedPhotoStack, ResolvedVideoCarousel } from '../components/MediaBubbles';
@@ -101,10 +102,13 @@ function Bubble({ item, currentUserId, colors, onFullScreen, onPlay, onLongPress
     }
     if (item.reply_to_id) return (
       <>
-        <View style={[g.replyQuote, { borderLeftColor: isMe ? 'rgba(255,255,255,0.5)' : accent }]}>
-          <Text style={[g.replyQSender, { color: isMe ? 'rgba(255,255,255,0.8)' : accent }]}>{item.reply_to_sender}</Text>
-          <Text style={[g.replyQText,   { color: isMe ? 'rgba(255,255,255,0.65)' : sub }]} numberOfLines={2}>{item.reply_to_text}</Text>
-        </View>
+        <ReplyPreview
+          content={item.reply_to_text}
+          label={item.reply_to_sender ? `↩ ${item.reply_to_sender}` : '↩ Reply'}
+          labelColor={isMe ? 'rgba(255,255,255,0.8)' : accent}
+          textColor={isMe ? 'rgba(255,255,255,0.65)' : sub}
+          borderColor={isMe ? 'rgba(255,255,255,0.5)' : accent}
+        />
         <Text style={[g.msgTx, { color: isMe ? '#fff' : tx }]}>{raw}</Text>
       </>
     );
@@ -432,10 +436,14 @@ export default function GroupChatScreen({ route, navigation }) {
       {/* Reply bar */}
       {replyingTo && (
         <View style={[g.replyBar, { backgroundColor: card, borderTopColor: border }]}>
-          <View style={[g.replyLine, { backgroundColor: accent }]} />
           <View style={{ flex: 1 }}>
-            <Text style={[g.replyBarSender, { color: accent }]}>{replyingTo.sender}</Text>
-            <Text style={[g.replyBarText, { color: sub }]} numberOfLines={1}>{replyingTo.text}</Text>
+            <ReplyPreview
+              content={replyingTo.text}
+              label={replyingTo.sender ? `↩ ${replyingTo.sender}` : '↩ Reply'}
+              labelColor={accent}
+              textColor={sub}
+              borderColor={accent}
+            />
           </View>
           <TouchableOpacity onPress={() => setReplyingTo(null)} style={{ padding: 6 }}>
             <Text style={{ color: sub, fontSize: 18 }}>✕</Text>

@@ -12,6 +12,7 @@ import * as Location from 'expo-location';
 import { useTheme } from '../services/theme';
 import { uploadMedia } from '../services/mediaUpload';
 import ContactEditModal from '../components/ContactEditModal';
+import ReplyPreview from '../components/ReplyPreview';
 import { supabase } from '../services/supabase';
 import { ResolvedPhotoStack, ResolvedVideoCarousel } from '../components/MediaBubbles';
 
@@ -140,10 +141,13 @@ function Bubble({ item, myId, tx, sub, card, accent, onOpenImg, onPlayVid, onRep
       const actual = raw.substring(p + 1);
       return (
         <>
-          <View style={[s.replyQ, { borderLeftColor: me ? 'rgba(255,255,255,0.5)' : accent }]}>
-            <Text style={[s.replyLabel, { color: me ? 'rgba(255,255,255,0.7)' : accent }]}>↩ Reply</Text>
-            <Text style={[s.replyTx, { color: me ? 'rgba(255,255,255,0.6)' : sub }]} numberOfLines={2}>{quoted}</Text>
-          </View>
+          <ReplyPreview
+            content={quoted}
+            label="↩ Reply"
+            labelColor={me ? 'rgba(255,255,255,0.7)' : accent}
+            textColor={me ? 'rgba(255,255,255,0.6)' : sub}
+            borderColor={me ? 'rgba(255,255,255,0.5)' : accent}
+          />
           <Text style={[s.msgTx, { color: me ? '#fff' : tx }]}>{actual}</Text>
         </>
       );
@@ -506,10 +510,15 @@ export default function ChatRoomScreen({ route, navigation }) {
 
       {/* Reply bar */}
       {replyTo && (
-        <View style={[s.replyBar, { backgroundColor: card, borderTopColor: border, borderLeftColor: accent }]}>
+        <View style={[s.replyBar, { backgroundColor: card, borderTopColor: border }]}>
           <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: 11, fontWeight: 'bold', color: accent, marginBottom: 2 }}>↩ Replying</Text>
-            <Text style={{ fontSize: 12, color: sub }} numberOfLines={1}>{replyTo.content?.substring(0, 60)}</Text>
+            <ReplyPreview
+              content={replyTo.content}
+              label="↩ Replying"
+              labelColor={accent}
+              textColor={sub}
+              borderColor={accent}
+            />
           </View>
           <TouchableOpacity onPress={() => setReplyTo(null)} style={{ padding: 8 }}>
             <Text style={{ color: sub, fontSize: 20 }}>✕</Text>
