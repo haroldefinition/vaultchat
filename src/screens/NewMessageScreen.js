@@ -2,12 +2,14 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput, Alert,
   Modal, KeyboardAvoidingView, Platform, FlatList, ScrollView,
-  Animated, Dimensions,
+  Animated, Dimensions, Share,
 } from 'react-native';
 import { useTheme } from '../services/theme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../services/supabase';
 import { getMyHandle } from '../services/vaultHandle';
+import * as DocumentPicker from 'expo-document-picker';
+import * as Location from 'expo-location';
 import GifPickerModal from '../components/GifPickerModal';
 
 const { width: SW } = Dimensions.get('window');
@@ -190,6 +192,7 @@ export default function NewMessageScreen({ navigation, route }) {
   const [selectedName,  setSelectedName]  = useState('');
   const [myHandle,      setMyHandle]      = useState('');
   const [showEmoji,     setShowEmoji]     = useState(false);
+  const [attachModal,   setAttachModal]   = useState(false);
   const [gifVisible,    setGifVisible]    = useState(false);
   const msgRef = useRef(null);
 
@@ -218,6 +221,61 @@ export default function NewMessageScreen({ navigation, route }) {
       setMsg(prev => prev + gif.url);
     } else {
       setMsg(prev => prev + (prev ? ' ' : '') + gif.url);
+    }
+  }
+
+  const ATTACHMENTS = [
+    { icon: '🖼️', label: 'Gallery',  type: 'photo'    },
+    { icon: '🎥', label: 'Video',    type: 'video'    },
+    { icon: '📸', label: 'Camera',   type: 'camera'   },
+    { icon: '📁', label: 'File',     type: 'file'     },
+    { icon: '🎭', label: 'GIF',      type: 'gif'      },
+    { icon: '😀', label: 'Emoji',    type: 'emoji'    },
+    { icon: '🔵', label: 'AirDrop',  type: 'airdrop'  },
+    { icon: '📍', label: 'Location', type: 'location' },
+  ];
+
+  async function handleAttach(type) {
+    setAttachModal(false);
+    await new Promise(r => setTimeout(r, 400)); // wait for modal to close
+    if (type === 'photo') {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) { Alert.alert('Permission needed'); return; }
+      const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 0.85 });
+      if (!r.canceled && r.assets?.[0]) setMsg(prev => prev + '🖼️ ' + r.assets[0].uri.split('/').pop());
+    } else if (type === 'video') {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) { Alert.alert('Permission needed'); return; }
+      const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'videos', quality: 1 });
+      if (!r.canceled && r.assets?.[0]) setMsg(prev => prev + '🎥 ' + r.assets[0].uri.split('/').pop());
+    } else if (type === 'camera') {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) { Alert.alert('Permission needed'); return; }
+      const r = await ImagePicker.launchCameraAsync({ quality: 0.85 });
+      if (!r.canceled && r.assets?.[0]) setMsg(prev => prev + '📷 Photo captured');
+    } else if (type === 'file') {
+      const r = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
+      if (!r.canceled && r.assets?.[0]) setMsg(prev => prev + '📁 ' + r.assets[0].name);
+    } else if (type === 'gif') {
+      setGifVisible(true);
+    } else if (type === 'emoji') {
+      setShowEmoji(v => !v);
+    } else if (type === 'airdrop') {
+      try {
+        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!perm.granted) { Alert.alert('Permission needed', 'Allow photo access to use AirDrop/Nearby Share.'); return; }
+        const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'all', quality: 1 });
+        if (!r.canceled && r.assets?.[0]) {
+          await Share.share({ url: r.assets[0].uri, message: 'Shared via VaultChat' });
+        }
+      } catch {
+        Alert.alert('Share', 'Use the system share sheet to send to nearby devices.');
+      }
+    } else if (type === 'location') {
+      const perm = await Location.requestForegroundPermissionsAsync();
+      if (!perm.granted) { Alert.alert('Permission needed'); return; }
+      const loc = await Location.getCurrentPositionAsync({});
+      setMsg(prev => prev + `📍 https://maps.google.com/?q=${loc.coords.latitude.toFixed(5)},${loc.coords.longitude.toFixed(5)}`);
     }
   }
 
@@ -336,17 +394,11 @@ export default function NewMessageScreen({ navigation, route }) {
 
       {/* Input bar */}
       <View style={[s.inputBar, { backgroundColor: card, borderTopColor: border }]}>
-        {/* GIF button */}
+        {/* + Attachments button */}
         <TouchableOpacity
-          style={[s.toolBtn, { backgroundColor: inputBg, borderColor: border }]}
-          onPress={() => { setShowEmoji(false); setGifVisible(true); }}>
-          <Text style={{ fontSize: 13, fontWeight: '800', color: accent }}>GIF</Text>
-        </TouchableOpacity>
-        {/* Emoji button */}
-        <TouchableOpacity
-          style={[s.toolBtn, { backgroundColor: showEmoji ? accent + '33' : inputBg, borderColor: showEmoji ? accent : border }]}
-          onPress={() => setShowEmoji(v => !v)}>
-          <Text style={{ fontSize: 20 }}>😊</Text>
+          style={[s.attachPlusBtn, { backgroundColor: inputBg, borderColor: border }]}
+          onPress={() => setAttachModal(true)}>
+          <Text style={{ fontSize: 22, color: accent, fontWeight: '300', lineHeight: 26 }}>+</Text>
         </TouchableOpacity>
 
         <TextInput
@@ -372,6 +424,39 @@ export default function NewMessageScreen({ navigation, route }) {
         </TouchableOpacity>
       </View>
 
+      {/* Attachment sheet */}
+      <Modal visible={attachModal} transparent animationType="slide">
+        <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setAttachModal(false)}>
+          <View style={[s.sheet, { backgroundColor: card }]}>
+            <View style={[s.sheetHandle, { backgroundColor: border }]} />
+            <Text style={[s.sheetTitle, { color: tx }]}>Attachments</Text>
+            <View style={s.attachGrid}>
+              {ATTACHMENTS.map((a, i) => (
+                <TouchableOpacity key={i} style={s.attachItem} onPress={() => handleAttach(a.type)}>
+                  <View style={[s.attachIconBox, { backgroundColor: inputBg }]}>
+                    <Text style={{ fontSize: 28 }}>{a.icon}</Text>
+                  </View>
+                  <Text style={{ fontSize: 11, color: sub, marginTop: 4 }}>{a.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Emoji picker panel (shown above input when emoji attachment tapped) */}
+      {showEmoji && (
+        <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 100 }}>
+          <EmojiPicker
+            onPick={e => pickEmoji(e)}
+            accent={accent} card={card} sub={sub} inputBg={inputBg} border={border}
+          />
+          <TouchableOpacity style={[s.emojiClose, { backgroundColor: accent }]} onPress={() => setShowEmoji(false)}>
+            <Text style={{ color: '#000', fontWeight: '800', fontSize: 15 }}>Close</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* GIF picker */}
       <GifPickerModal
         visible={gifVisible}
@@ -396,4 +481,13 @@ const s = StyleSheet.create({
   toolBtn:     { width: 38, height: 38, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   msgInput:    { flex: 1, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 22, fontSize: 15, maxHeight: 100, minHeight: 42 },
   sendBtn:     { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
+  attachPlusBtn:{ width: 40, height: 40, borderRadius: 20, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  sheet:        { borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 20, paddingBottom: 44 },
+  sheetHandle:  { width: 40, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 16, backgroundColor: '#555' },
+  sheetTitle:   { fontWeight: '700', fontSize: 16, textAlign: 'center', marginBottom: 16 },
+  attachGrid:   { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-around', gap: 16 },
+  attachItem:   { alignItems: 'center', width: 72 },
+  attachIconBox:{ width: 56, height: 56, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  emojiClose:   { padding: 14, alignItems: 'center', margin: 10, borderRadius: 14 },
 });

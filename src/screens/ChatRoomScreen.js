@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity,
   KeyboardAvoidingView, Platform, Image, Modal, Alert, ActivityIndicator,
-  ScrollView, Linking,
+  ScrollView, Linking, Share,
 } from 'react-native';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -479,6 +479,17 @@ export default function ChatRoomScreen({ route, navigation }) {
         await sendText(url ? `FILE:${f.name}|${url}` : `📁 ${f.name}`);
         setSending(false);
       }
+    } else if (type === 'airdrop') {
+      try {
+        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!perm.granted) { Alert.alert('Permission needed', 'Allow photo access to use AirDrop/Nearby Share.'); return; }
+        const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'all', quality: 1 });
+        if (!result.canceled && result.assets?.[0]) {
+          await Share.share({ url: result.assets[0].uri, message: 'Shared via VaultChat' });
+        }
+      } catch {
+        Alert.alert('Share', 'Use the system share sheet to send to nearby devices.');
+      }
     } else if (type === 'location') {
       const p = await Location.requestForegroundPermissionsAsync();
       if (!p.granted) { Alert.alert('Permission needed'); return; }
@@ -497,6 +508,7 @@ export default function ChatRoomScreen({ route, navigation }) {
     { icon: '📁', label: 'File',     type: 'file'     },
     { icon: '🎭', label: 'GIF',      type: 'gif'      },
     { icon: '😀', label: 'Emoji',    type: 'emoji'    },
+    { icon: '🔵', label: 'AirDrop',  type: 'airdrop'  },
     { icon: '📍', label: 'Location', type: 'location' },
   ];
 
@@ -697,8 +709,8 @@ export default function ChatRoomScreen({ route, navigation }) {
                 </TouchableOpacity>
               ))}
             </View>
-            <TouchableOpacity style={[s.cancelBtn, { backgroundColor: inputBg }]} onPress={() => setGifModal(false)}>
-              <Text style={{ color: sub, fontWeight: 'bold' }}>Cancel</Text>
+            <TouchableOpacity style={[s.cancelBtn, { backgroundColor: accent }]} onPress={() => setGifModal(false)}>
+              <Text style={{ color: '#000', fontWeight: '800', fontSize: 15 }}>Close</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -740,8 +752,8 @@ export default function ChatRoomScreen({ route, navigation }) {
                 </View>
               )}
             </ScrollView>
-            <TouchableOpacity style={[s.cancelBtn, { backgroundColor: inputBg }]} onPress={() => setEmojiModal(false)}>
-              <Text style={{ color: sub, fontWeight: 'bold' }}>Close</Text>
+            <TouchableOpacity style={[s.cancelBtn, { backgroundColor: accent }]} onPress={() => setEmojiModal(false)}>
+              <Text style={{ color: '#000', fontWeight: '800', fontSize: 15 }}>Close</Text>
             </TouchableOpacity>
           </View>
         </View>
