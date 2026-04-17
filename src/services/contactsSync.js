@@ -8,16 +8,21 @@ const LOCAL_KEY = 'vaultchat_contacts';
 
 // ── Get owner_id (Supabase user id or local phone-derived id) ─
 async function getOwnerId() {
+  // Only return a real Supabase UUID — phone-derived IDs can't be stored in uuid column
   try {
     const { data } = await supabase.auth.getUser();
     if (data?.user?.id) return data.user.id;
   } catch {}
-  const raw = await AsyncStorage.getItem('vaultchat_user').catch(() => null);
-  if (raw) {
-    const u = JSON.parse(raw);
-    return u.id || u.phone || null;
-  }
-  return null;
+  // Fallback: check stored user id (may be a real uuid from prior auth)
+  try {
+    const raw = await AsyncStorage.getItem('vaultchat_user');
+    if (raw) {
+      const u = JSON.parse(raw);
+      // Only use if it looks like a UUID (8-4-4-4-12 hex format)
+      if (u.id && /^[0-9a-f-]{36}$/.test(u.id)) return u.id;
+    }
+  } catch {}
+  return null; // no valid UUID — Supabase sync skipped, AsyncStorage still works
 }
 
 // ── Load contacts ─────────────────────────────────────────────
@@ -121,7 +126,7 @@ export const CONTACTS_TABLE_SQL = `
 
 create table if not exists contacts (
   id          text primary key,
-  owner_id    text not null,
+  owner_id    uuid not null,
   first_name  text default '',
   last_name   text default '',
   phone       text default '',
@@ -143,5 +148,5 @@ alter table contacts enable row level security;
 
 create policy "Users see own contacts"
   on contacts for all
-  using (owner_id = auth.uid()::text);
+  using (owner_id = auth.uid());
 `;
