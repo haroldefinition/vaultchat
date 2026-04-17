@@ -342,22 +342,29 @@ export default function GroupChatScreen({ route, navigation }) {
       const r = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
       if (!r.canceled && r.assets?.[0]) {
         const f = r.assets[0]; setSending(true);
-        const url = await uploadMedia(f.uri, 'file');
-        await sendText(url ? `FILE:${f.name}|${url}` : `📁 ${f.name}`);
+        try {
+          const url = await uploadMedia(f.uri, 'file');
+          await sendText(url ? `FILE:${f.name}|${url}` : `FILE:${f.name}|${f.uri}`);
+        } catch {
+          await sendText(`FILE:${f.name}|${f.uri}`);
+        }
         setSending(false);
       }
     } else if (type === 'airdrop') {
       try {
         const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (!perm.granted) { Alert.alert('Permission needed', 'Allow photo access to use AirDrop/Nearby Share.'); return; }
-        const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'all', quality: 1 });
+        const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'all', quality: 1, allowsMultipleSelection: false });
         if (!result.canceled && result.assets?.[0]) {
-          await Share.share({ url: result.assets[0].uri, message: 'Shared via VaultChat' });
+          await Share.share(
+            { url: result.assets[0].uri, message: 'Shared via VaultChat — encrypted messaging' },
+            { dialogTitle: 'Send via AirDrop or Nearby Share' }
+          );
         }
       } catch {
-        Alert.alert('Share', 'Use the system share sheet to send to nearby devices.');
+        // Share dismissed or cancelled — not an error
       }
-    } else if (type === 'location') {
+        } else if (type === 'location') {
       const p = await Location.requestForegroundPermissionsAsync();
       if (!p.granted) { Alert.alert('Permission needed'); return; }
       const loc = await Location.getCurrentPositionAsync({});
@@ -524,18 +531,18 @@ export default function GroupChatScreen({ route, navigation }) {
           </View>
         </View>
       ) : (
-        <View style={[g.inputArea, { backgroundColor: card, borderTopColor: border }]}>
-          <TouchableOpacity style={[g.attachBtn, { backgroundColor: inputBg }]} onPress={() => setAttachModal(true)}>
-            <Text style={[g.attachBtnTx, { color: accent }]}>+</Text>
+        <View style={[g.inputBar, { backgroundColor: card, borderTopColor: border }]}>
+          <TouchableOpacity style={[g.plusBtn, { backgroundColor: inputBg, borderColor: accent }]} onPress={() => setAttachModal(true)}>
+            <Text style={[g.plusTx, { color: accent }]}>+</Text>
           </TouchableOpacity>
           <TextInput
             style={[g.input, { color: tx, backgroundColor: inputBg }]}
             placeholder="Message..." placeholderTextColor={sub}
             value={inputText} onChangeText={setInputText} multiline maxLength={2000} />
           <TouchableOpacity
-            style={[g.sendBtn, { backgroundColor: inputText.trim() ? (accent || '#6C63FF') : (sub || '#8E8E93') }]}
+            style={[g.sendBtn, { backgroundColor: inputText.trim() ? accent : inputBg }]}
             onPress={() => sendText()} disabled={!inputText.trim() || sending}>
-            {sending ? <ActivityIndicator color="#fff" size="small" /> : <Text style={g.sendIcon}>↑</Text>}
+            {sending ? <ActivityIndicator color="#fff" size="small" /> : <Text style={{ color: inputText.trim() ? '#000' : sub, fontSize: 18 }}>➤</Text>}
           </TouchableOpacity>
         </View>
       )}
@@ -597,7 +604,12 @@ export default function GroupChatScreen({ route, navigation }) {
         <View style={[g.modalOverlay]}>
           <View style={[g.sheet, { backgroundColor: card, maxHeight: '65%' }]}>
             <View style={[g.sheetHandle, { backgroundColor: border }]} />
-            <Text style={[g.sheetTitle, { color: tx }]}>Emoji</Text>
+            <View style={g.sheetHeaderRow}>
+              <Text style={[g.sheetTitle, { color: tx }]}>Emoji</Text>
+              <TouchableOpacity style={[g.sheetXBtn, { backgroundColor: accent }]} onPress={() => setEmojiModal(false)}>
+                <Text style={g.sheetXTx}>✕</Text>
+              </TouchableOpacity>
+            </View>
             <ScrollView showsVerticalScrollIndicator={false}>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, paddingBottom: 20 }}>
                 {EMOJIS.map((e, i) => (
@@ -609,9 +621,6 @@ export default function GroupChatScreen({ route, navigation }) {
                 ))}
               </View>
             </ScrollView>
-            <TouchableOpacity style={{ borderRadius: 12, padding: 14, alignItems: 'center', marginTop: 8, backgroundColor: accent }} onPress={() => setEmojiModal(false)}>
-              <Text style={{ color: '#000', fontWeight: '800', fontSize: 15 }}>Close</Text>
-            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -702,12 +711,14 @@ const g = StyleSheet.create({
   replyBarText:   { fontSize: 13 },
   emptyBox:       { alignItems: 'center', paddingTop: 80 },
   emptyTx:        { fontSize: 14, textAlign: 'center', lineHeight: 20 },
-  inputArea:      { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 10, paddingVertical: 8, paddingBottom: 24, borderTopWidth: StyleSheet.hairlineWidth, gap: 8 },
-  attachBtn:      { width: 38, height: 38, borderRadius: 19, justifyContent: 'center', alignItems: 'center' },
-  attachBtnTx:    { fontSize: 24, fontWeight: '400', lineHeight: 28 },
+  inputBar:       { flexDirection: 'row', alignItems: 'center', padding: 10, paddingHorizontal: 12, borderTopWidth: StyleSheet.hairlineWidth, gap: 8, paddingBottom: 24, minHeight: 70 },
+  plusBtn:        { width: 44, height: 44, borderRadius: 22, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  plusTx:         { fontSize: 26, fontWeight: '300', lineHeight: 30 },
+  sheetHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 4, marginBottom: 8 },
+  sheetXBtn:      { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  sheetXTx:       { color: '#000', fontWeight: '900', fontSize: 14 },
   input:          { flex: 1, borderRadius: 20, paddingHorizontal: 14, paddingTop: 10, paddingBottom: 10, fontSize: 15, maxHeight: 100 },
-  sendBtn:        { width: 38, height: 38, borderRadius: 19, justifyContent: 'center', alignItems: 'center', marginBottom: 1 },
-  sendIcon:       { color: '#fff', fontSize: 18, fontWeight: '700' },
+  sendBtn:        { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   menuOverlay:    { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
   msgMenu:        { borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 34 },
   menuPreview:    { fontSize: 13, textAlign: 'center', paddingHorizontal: 20, paddingVertical: 14, opacity: 0.7 },

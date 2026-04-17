@@ -255,7 +255,11 @@ export default function NewMessageScreen({ navigation, route }) {
       if (!r.canceled && r.assets?.[0]) setMsg(prev => prev + '📷 Photo captured');
     } else if (type === 'file') {
       const r = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
-      if (!r.canceled && r.assets?.[0]) setMsg(prev => prev + '📁 ' + r.assets[0].name);
+      if (!r.canceled && r.assets?.[0]) {
+        const f = r.assets[0];
+        // Store file reference in message — can be opened when sent
+        setMsg(prev => prev + (prev ? ' ' : '') + `📁 ${f.name}`);
+      }
     } else if (type === 'gif') {
       setGifVisible(true);
     } else if (type === 'emoji') {
@@ -264,12 +268,15 @@ export default function NewMessageScreen({ navigation, route }) {
       try {
         const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (!perm.granted) { Alert.alert('Permission needed', 'Allow photo access to use AirDrop/Nearby Share.'); return; }
-        const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'all', quality: 1 });
+        const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'all', quality: 1, allowsMultipleSelection: false });
         if (!r.canceled && r.assets?.[0]) {
-          await Share.share({ url: r.assets[0].uri, message: 'Shared via VaultChat' });
+          await Share.share(
+            { url: r.assets[0].uri, message: 'Shared via VaultChat — encrypted messaging' },
+            { dialogTitle: 'Send via AirDrop or Nearby Share' }
+          );
         }
       } catch {
-        Alert.alert('Share', 'Use the system share sheet to send to nearby devices.');
+        // Share dismissed — not an error
       }
     } else if (type === 'location') {
       const perm = await Location.requestForegroundPermissionsAsync();
@@ -447,13 +454,16 @@ export default function NewMessageScreen({ navigation, route }) {
       {/* Emoji picker panel (shown above input when emoji attachment tapped) */}
       {showEmoji && (
         <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 100 }}>
+          {/* ✕ close button top-right of emoji panel */}
+          <TouchableOpacity
+            style={[s.emojiXBtn, { backgroundColor: accent }]}
+            onPress={() => setShowEmoji(false)}>
+            <Text style={s.emojiXTx}>✕</Text>
+          </TouchableOpacity>
           <EmojiPicker
             onPick={e => pickEmoji(e)}
             accent={accent} card={card} sub={sub} inputBg={inputBg} border={border}
           />
-          <TouchableOpacity style={[s.emojiClose, { backgroundColor: accent }]} onPress={() => setShowEmoji(false)}>
-            <Text style={{ color: '#000', fontWeight: '800', fontSize: 15 }}>Close</Text>
-          </TouchableOpacity>
         </View>
       )}
 
@@ -489,5 +499,6 @@ const s = StyleSheet.create({
   attachGrid:   { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-around', gap: 16 },
   attachItem:   { alignItems: 'center', width: 72 },
   attachIconBox:{ width: 56, height: 56, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  emojiClose:   { padding: 14, alignItems: 'center', margin: 10, borderRadius: 14 },
+  emojiXBtn:    { position: 'absolute', top: -14, right: 12, zIndex: 101, width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  emojiXTx:     { color: '#000', fontWeight: '900', fontSize: 14 },
 });

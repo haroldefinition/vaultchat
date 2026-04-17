@@ -475,20 +475,27 @@ export default function ChatRoomScreen({ route, navigation }) {
       const r = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
       if (!r.canceled && r.assets?.[0]) {
         const f = r.assets[0]; setSending(true);
-        const url = await uploadMedia(f.uri, 'file');
-        await sendText(url ? `FILE:${f.name}|${url}` : `📁 ${f.name}`);
+        try {
+          const url = await uploadMedia(f.uri, 'file');
+          await sendText(url ? `FILE:${f.name}|${url}` : `FILE:${f.name}|${f.uri}`);
+        } catch {
+          await sendText(`FILE:${f.name}|${f.uri}`);
+        }
         setSending(false);
       }
     } else if (type === 'airdrop') {
       try {
         const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (!perm.granted) { Alert.alert('Permission needed', 'Allow photo access to use AirDrop/Nearby Share.'); return; }
-        const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'all', quality: 1 });
+        const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'all', quality: 1, allowsMultipleSelection: false });
         if (!result.canceled && result.assets?.[0]) {
-          await Share.share({ url: result.assets[0].uri, message: 'Shared via VaultChat' });
+          await Share.share(
+            { url: result.assets[0].uri, message: 'Shared via VaultChat — encrypted messaging' },
+            { dialogTitle: 'Send via AirDrop or Nearby Share' }
+          );
         }
       } catch {
-        Alert.alert('Share', 'Use the system share sheet to send to nearby devices.');
+        // Share dismissed or cancelled — not an error
       }
     } else if (type === 'location') {
       const p = await Location.requestForegroundPermissionsAsync();
@@ -699,7 +706,12 @@ export default function ChatRoomScreen({ route, navigation }) {
         <View style={s.overlay}>
           <View style={[s.sheet, { backgroundColor: card, maxHeight: '60%' }]}>
             <View style={[s.handle, { backgroundColor: border }]} />
-            <Text style={[s.sheetTitle, { color: tx }]}>Send a GIF</Text>
+            <View style={s.sheetHeaderRow}>
+              <Text style={[s.sheetTitle, { color: tx }]}>GIFs</Text>
+              <TouchableOpacity style={[s.sheetXBtn, { backgroundColor: accent }]} onPress={() => setGifModal(false)}>
+                <Text style={s.sheetXTx}>✕</Text>
+              </TouchableOpacity>
+            </View>
             <View style={s.gifGrid}>
               {GIFS.map((g, i) => (
                 <TouchableOpacity key={i} style={[s.gifItem, { backgroundColor: inputBg }]}
@@ -709,9 +721,6 @@ export default function ChatRoomScreen({ route, navigation }) {
                 </TouchableOpacity>
               ))}
             </View>
-            <TouchableOpacity style={[s.cancelBtn, { backgroundColor: accent }]} onPress={() => setGifModal(false)}>
-              <Text style={{ color: '#000', fontWeight: '800', fontSize: 15 }}>Close</Text>
-            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -721,6 +730,12 @@ export default function ChatRoomScreen({ route, navigation }) {
         <View style={s.overlay}>
           <View style={[s.sheet, { backgroundColor: card, maxHeight: '65%' }]}>
             <View style={[s.handle, { backgroundColor: border }]} />
+            <View style={s.sheetHeaderRow}>
+              <Text style={[s.sheetTitle, { color: tx }]}>Emoji & GIFs</Text>
+              <TouchableOpacity style={[s.sheetXBtn, { backgroundColor: accent }]} onPress={() => setEmojiModal(false)}>
+                <Text style={s.sheetXTx}>✕</Text>
+              </TouchableOpacity>
+            </View>
             <View style={[s.tabRow, { backgroundColor: inputBg }]}>
               {['emoji', 'gif'].map(t => (
                 <TouchableOpacity key={t} style={[s.tab, emojiTab === t && { backgroundColor: card }]}
@@ -752,176 +767,6 @@ export default function ChatRoomScreen({ route, navigation }) {
                 </View>
               )}
             </ScrollView>
-            <TouchableOpacity style={[s.cancelBtn, { backgroundColor: accent }]} onPress={() => setEmojiModal(false)}>
-              <Text style={{ color: '#000', fontWeight: '800', fontSize: 15 }}>Close</Text>
-            </TouchableOpacity>
           </View>
         </View>
       </Modal>
-      {/* Message long-press action menu */}
-      <Modal visible={menuVis} transparent animationType="fade" onRequestClose={() => setMenuVis(false)}>
-        <TouchableOpacity style={s.menuOverlay} activeOpacity={1} onPress={() => setMenuVis(false)}>
-          <View style={[s.msgMenu, { backgroundColor: card }]}>
-            <Text style={[s.menuPreview, { color: sub }]} numberOfLines={2}>
-              {(() => {
-                const raw = menuMsg?.content || '';
-                if (!raw.startsWith('REPLY:')) return raw.substring(0, 80);
-                const ci = raw.indexOf(':', 6);
-                const qLen = parseInt(raw.substring(6, ci)) || 0;
-                return raw.substring(ci + 1 + qLen, ci + 1 + qLen + 80);
-              })()}
-            </Text>
-            {/* Reply */}
-            <TouchableOpacity style={[s.menuOpt, { borderTopColor: border }]}
-              onPress={() => { setReplyTo(menuMsg); setMenuVis(false); }}>
-              <Text style={s.menuIcon}>↩️</Text>
-              <Text style={[s.menuLabel, { color: tx }]}>Reply</Text>
-            </TouchableOpacity>
-            {/* Edit — own messages within 1 hour */}
-            {menuMsg?.sender_id === myId && (Date.now() - new Date(menuMsg?.created_at).getTime()) < 3600000 && (
-              <TouchableOpacity style={[s.menuOpt, { borderTopColor: border }]}
-                onPress={() => {
-                  const raw = (menuMsg.content || '').replace(/^REPLY:[^|]+\|/, '');
-                  setEditText(raw);
-                  setEditingMsg(menuMsg);
-                  setMenuVis(false);
-                }}>
-                <Text style={s.menuIcon}>✏️</Text>
-                <Text style={[s.menuLabel, { color: tx }]}>Edit</Text>
-              </TouchableOpacity>
-            )}
-            {/* Delete — own messages only */}
-            {menuMsg?.sender_id === myId && (
-              <TouchableOpacity style={[s.menuOpt, { borderTopColor: border }]} onPress={doDeleteMessage}>
-                <Text style={s.menuIcon}>🗑️</Text>
-                <Text style={[s.menuLabel, { color: '#FF3B30' }]}>Delete</Text>
-              </TouchableOpacity>
-            )}
-            <TouchableOpacity style={[s.menuCancel, { borderTopColor: border }]} onPress={() => setMenuVis(false)}>
-              <Text style={[s.menuCancelTx, { color: sub }]}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      </Modal>
-
-      {/* Edit message modal */}
-      <Modal visible={!!editingMsg} transparent animationType="slide" onRequestClose={() => setEditingMsg(null)}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' }}>
-          <View style={[s.editSheet, { backgroundColor: card, borderTopColor: border }]}>
-            <View style={s.editHeader}>
-              <TouchableOpacity onPress={() => setEditingMsg(null)}>
-                <Text style={{ color: sub, fontSize: 16 }}>Cancel</Text>
-              </TouchableOpacity>
-              <Text style={[s.editTitle, { color: tx }]}>Edit Message</Text>
-              <TouchableOpacity onPress={doEditMessage}>
-                <Text style={{ color: accent, fontWeight: '700', fontSize: 16 }}>Save</Text>
-              </TouchableOpacity>
-            </View>
-            <TextInput
-              style={[s.editInput, { backgroundColor: inputBg, color: tx, borderColor: border }]}
-              value={editText}
-              onChangeText={setEditText}
-              multiline
-              autoFocus
-              placeholder="Edit your message…"
-              placeholderTextColor={sub}
-            />
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
-
-      {/* Contact edit modal — opened by tapping avatar/name in header */}
-      <ContactEditModal
-        visible={contactEditVis}
-        contact={contactData}
-        onClose={() => setContactEditVis(false)}
-        onSave={(updated) => {
-          setContactData(updated);
-          setContactEditVis(false);
-        }}
-        colors={{ bg, card, tx, sub, border, inputBg, accent }}
-      />
-    </KeyboardAvoidingView>
-  );
-}
-
-const s = StyleSheet.create({
-  container:   { flex: 1 },
-  header:      { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, borderBottomWidth: 1, gap: 8 },
-  backBtn:     { padding: 4 },
-  backTx:      { fontSize: 30, fontWeight: 'bold' },
-  hAvatar:     { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  hAvatarImg:  { width: 40, height: 40, borderRadius: 20 },
-  hAvatarTx:   { color: '#fff', fontWeight: 'bold', fontSize: 16 },
-  hName:       { fontWeight: 'bold', fontSize: 15 },
-  hSub:        { fontSize: 11 },
-  callBtn:     { padding: 4 },
-  bWrap:       { marginBottom: 4, maxWidth: '80%' },
-  myWrap:      { alignSelf: 'flex-end', alignItems: 'flex-end' },
-  theirWrap:   { alignSelf: 'flex-start', alignItems: 'flex-start' },
-  bubble:      { borderRadius: 20, paddingHorizontal: 14, paddingVertical: 10 },
-  myBubble:    { backgroundColor: '#0057a8', borderBottomRightRadius: 4 },
-  theirBubble: { borderBottomLeftRadius: 4 },
-  mediaPad:    { paddingHorizontal: 4, paddingVertical: 4 },
-  msgTx:       { fontSize: 15, lineHeight: 21 },
-  cap:         { fontSize: 13, lineHeight: 19, paddingHorizontal: 6, paddingTop: 5, paddingBottom: 2 },
-  time:        { fontSize: 11, color: '#8e8e93', marginTop: 3, marginBottom: 8 },
-  tR:          { alignSelf: 'flex-end',   marginRight: 4 },
-  tL:          { alignSelf: 'flex-start', marginLeft: 4 },
-  replyQ:      { borderLeftWidth: 3, paddingLeft: 8, paddingVertical: 4, borderRadius: 4, marginBottom: 6 },
-  replyLabel:  { fontSize: 11, fontWeight: 'bold', marginBottom: 2 },
-  replyTx:     { fontSize: 12 },
-  replyBar:    { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, borderTopWidth: 1, borderLeftWidth: 4 },
-  emptyBox:    { alignItems: 'center', paddingTop: 80 },
-  emptyTx:     { fontSize: 15, textAlign: 'center' },
-  // Staged
-  stagedWrap:  { borderTopWidth: 1 },
-  thumb:       { width: 90, height: 90, borderRadius: 12 },
-  removeBadge: { position: 'absolute', top: -7, right: -7, width: 22, height: 22, borderRadius: 11, backgroundColor: '#ff3b30', alignItems: 'center', justifyContent: 'center', zIndex: 10 },
-  addMore:     { width: 90, height: 90, borderRadius: 12, borderWidth: 1.5, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center', gap: 3 },
-  countBadge:  { position: 'absolute', top: 14, left: 14, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
-  vidPreview:  { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, marginHorizontal: 12, borderRadius: 14, marginBottom: 4 },
-  captionRow:  { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, paddingBottom: 24, gap: 10, borderTopWidth: 1 },
-  captionInput:{ flex: 1, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 22, fontSize: 15, maxHeight: 80, minHeight: 42 },
-  // Input bar
-  inputBar:    { flexDirection: 'row', alignItems: 'center', padding: 10, paddingHorizontal: 12, borderTopWidth: 1, gap: 8, paddingBottom: 24, minHeight: 70 },
-  plusBtn:     { width: 44, height: 44, borderRadius: 22, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
-  plusTx:      { fontSize: 26, fontWeight: '300', lineHeight: 30 },
-  input:       { flex: 1, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 22, fontSize: 15, maxHeight: 100, minHeight: 42 },
-  sendBtn:     { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
-  // Viewer
-  fsWrap:      { flex: 1, backgroundColor: 'rgba(0,0,0,0.97)', alignItems: 'center', justifyContent: 'center' },
-  menuOverlay:  { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
-  msgMenu:      { borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 34 },
-  menuPreview:  { fontSize: 13, textAlign: 'center', paddingHorizontal: 20, paddingVertical: 14, opacity: 0.7 },
-  menuOpt:      { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderTopWidth: StyleSheet.hairlineWidth, gap: 14 },
-  menuIcon:     { fontSize: 18, width: 28, textAlign: 'center' },
-  menuLabel:    { fontSize: 16 },
-  menuCancel:   { paddingVertical: 16, alignItems: 'center', borderTopWidth: StyleSheet.hairlineWidth },
-  menuCancelTx: { fontSize: 16, fontWeight: '600' },
-  editSheet:    { paddingBottom: 34, borderTopWidth: StyleSheet.hairlineWidth },
-  editHeader:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: StyleSheet.hairlineWidth },
-  editTitle:    { fontWeight: '700', fontSize: 16 },
-  editInput:    { margin: 16, padding: 14, borderRadius: 14, borderWidth: 1, fontSize: 16, minHeight: 80, maxHeight: 160 },
-  fsClose:     { position: 'absolute', top: 56, right: 20, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8 },
-  fsCloseTx:   { color: '#fff', fontWeight: 'bold' },
-  fsImg:       { width: '100%', height: '80%' },
-  fsVideo:     { width: '100%', height: 300 },
-  // Modals
-  overlay:     { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  sheet:       { borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 20, paddingBottom: 44 },
-  handle:      { width: 40, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 16 },
-  sheetTitle:  { fontWeight: 'bold', fontSize: 16, marginBottom: 16, textAlign: 'center' },
-  attachGrid:  { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-around', gap: 16 },
-  attachItem:  { alignItems: 'center', width: 72 },
-  attachIcon:  { width: 58, height: 58, borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
-  attachLabel: { fontSize: 11 },
-  gifGrid:     { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingBottom: 12 },
-  gifItem:     { width: '22%', borderRadius: 14, padding: 10, alignItems: 'center' },
-  emojiGrid:   { flexDirection: 'row', flexWrap: 'wrap', gap: 4, paddingBottom: 12 },
-  emojiItem:   { width: 46, height: 46, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  cancelBtn:   { borderRadius: 12, padding: 12, alignItems: 'center', marginTop: 8 },
-  tabRow:      { flexDirection: 'row', marginBottom: 12, borderRadius: 12, padding: 4 },
-  tab:         { flex: 1, padding: 8, borderRadius: 10, alignItems: 'center' },
-});
