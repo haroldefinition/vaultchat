@@ -136,9 +136,12 @@ function Bubble({ item, myId, tx, sub, card, accent, onOpenImg, onPlayVid, onRep
 
   const body = () => {
     if (raw.startsWith('REPLY:')) {
-      const p = raw.indexOf('|');
-      const quoted = raw.substring(6, p);
-      const actual = raw.substring(p + 1);
+      // Format: REPLY:{len}:{quotedContent}{actualMessage}
+      // Length-prefix avoids | collision with GALLERY: keys
+      const colonIdx = raw.indexOf(':', 6);
+      const qLen     = parseInt(raw.substring(6, colonIdx)) || 0;
+      const quoted   = raw.substring(colonIdx + 1, colonIdx + 1 + qLen);
+      const actual   = raw.substring(colonIdx + 1 + qLen);
       return (
         <>
           <ReplyPreview
@@ -391,7 +394,8 @@ export default function ChatRoomScreen({ route, navigation }) {
     let content = override || text.trim();
     if (!content) return;
     if (replyTo && !override) {
-      content = `REPLY:${replyTo.content || ''}|${content}`;
+      const qc = replyTo.content || '';
+      content = `REPLY:${qc.length}:${qc}${content}`;
       setReplyTo(null);
     }
     setText(''); setSending(true);
@@ -747,7 +751,13 @@ export default function ChatRoomScreen({ route, navigation }) {
         <TouchableOpacity style={s.menuOverlay} activeOpacity={1} onPress={() => setMenuVis(false)}>
           <View style={[s.msgMenu, { backgroundColor: card }]}>
             <Text style={[s.menuPreview, { color: sub }]} numberOfLines={2}>
-              {(menuMsg?.content || '').replace(/^REPLY:[^|]+\|/, '').substring(0, 80)}
+              {(() => {
+                const raw = menuMsg?.content || '';
+                if (!raw.startsWith('REPLY:')) return raw.substring(0, 80);
+                const ci = raw.indexOf(':', 6);
+                const qLen = parseInt(raw.substring(6, ci)) || 0;
+                return raw.substring(ci + 1 + qLen, ci + 1 + qLen + 80);
+              })()}
             </Text>
             {/* Reply */}
             <TouchableOpacity style={[s.menuOpt, { borderTopColor: border }]}

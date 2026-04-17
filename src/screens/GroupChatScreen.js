@@ -152,6 +152,8 @@ export default function GroupChatScreen({ route, navigation }) {
   const [attachModal,   setAttachModal]   = useState(false);
   const [infoEditModal, setInfoEditModal] = useState(false);
   const [emojiModal,    setEmojiModal]    = useState(false);
+  const [editingMsg,    setEditingMsg]    = useState(null);
+  const [editText,      setEditText]      = useState('');
 
   const flatRef      = useRef(null);
   const pollRef      = useRef(null);
