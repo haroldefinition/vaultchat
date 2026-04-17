@@ -120,7 +120,7 @@ function VideoBubble({ uri, onPlay, onReply }) {
 }
 
 // ── Message bubble ────────────────────────────────────────────
-function Bubble({ item, myId, tx, sub, card, accent, onOpenImg, onPlayVid, onReply }) {
+function Bubble({ item, myId, tx, sub, card, accent, onOpenImg, onPlayVid, onReply, onLongPress }) {
   const me      = item.sender_id === myId;
   const raw     = item.content || '';
   const nlIdx   = raw.indexOf('\n');
@@ -199,10 +199,12 @@ function Bubble({ item, myId, tx, sub, card, accent, onOpenImg, onPlayVid, onRep
     <View style={[s.bWrap, me ? s.myWrap : s.theirWrap]}>
       <TouchableOpacity
         style={[s.bubble, me ? s.myBubble : [s.theirBubble, { backgroundColor: card }], isMedia && s.mediaPad]}
-        onLongPress={onReply} delayLongPress={450} activeOpacity={0.88}>
+        onLongPress={() => onLongPress && onLongPress(item)} delayLongPress={450} activeOpacity={0.88}>
         {body()}
       </TouchableOpacity>
-      <Text style={[s.time, me ? s.tR : s.tL]}>{timeStr}</Text>
+      <Text style={[s.time, me ? s.tR : s.tL]}>
+        {timeStr}{item.edited ? '  ✎ edited' : ''}
+      </Text>
     </View>
   );
 }
@@ -217,6 +219,10 @@ export default function ChatRoomScreen({ route, navigation }) {
   const [sending,      setSending]      = useState(false);
   const [myId,         setMyId]         = useState('');
   const [replyTo,      setReplyTo]      = useState(null);
+  const [menuMsg,      setMenuMsg]      = useState(null);
+  const [menuVis,      setMenuVis]      = useState(false);
+  const [editingMsg,   setEditingMsg]   = useState(null);   // message being edited
+  const [editText,     setEditText]     = useState('');
   const [contactEditVis, setContactEditVis] = useState(false);
   const [contactData,    setContactData]    = useState(null);
 
@@ -346,11 +352,46 @@ export default function ChatRoomScreen({ route, navigation }) {
     } catch {}
   }
 
+  // ── Edit a message (within 1 hour, own messages only) ──────
+  async function doEditMessage() {
+    if (!menuMsg || !editText.trim()) return;
+    const newContent = editText.trim();
+    setMessages(prev => prev.map(m => m.id === menuMsg.id ? { ...m, content: newContent, edited: true } : m));
+    setEditingMsg(null); setEditText('');
+    try {
+      await supabase.from('messages').update({ content: newContent, edited: true }).eq('id', menuMsg.id);
+    } catch {}
+    // Persist locally
+    try {
+      const raw = await AsyncStorage.getItem(`vaultchat_msgs_${roomId}`);
+      if (raw) {
+        const msgs = JSON.parse(raw).map(m => m.id === menuMsg.id ? { ...m, content: newContent, edited: true } : m);
+        await AsyncStorage.setItem(`vaultchat_msgs_${roomId}`, JSON.stringify(msgs));
+      }
+    } catch {}
+  }
+
+  async function doDeleteMessage() {
+    if (!menuMsg) return;
+    setMenuVis(false);
+    setMessages(prev => prev.filter(m => m.id !== menuMsg.id));
+    try {
+      await supabase.from('messages').delete().eq('id', menuMsg.id);
+    } catch {}
+    try {
+      const raw = await AsyncStorage.getItem(`vaultchat_msgs_${roomId}`);
+      if (raw) {
+        const msgs = JSON.parse(raw).filter(m => m.id !== menuMsg.id);
+        await AsyncStorage.setItem(`vaultchat_msgs_${roomId}`, JSON.stringify(msgs));
+      }
+    } catch {}
+  }
+
   async function sendText(override) {
     let content = override || text.trim();
     if (!content) return;
     if (replyTo && !override) {
-      content = `REPLY:${(replyTo.content || '').substring(0, 60)}|${content}`;
+      content = `REPLY:${replyTo.content || ''}|${content}`;
       setReplyTo(null);
     }
     setText(''); setSending(true);
@@ -497,6 +538,7 @@ export default function ChatRoomScreen({ route, navigation }) {
             item={item} myId={myId} tx={tx} sub={sub} card={card} accent={accent}
             onOpenImg={uri => setFullImgUri(uri)}
             onPlayVid={uri => setVidUri(uri)}
+            onLongPress={item => { setMenuMsg(item); setMenuVis(true); }}
             onReply={() => setReplyTo(item)}
           />
         )}
@@ -700,6 +742,73 @@ export default function ChatRoomScreen({ route, navigation }) {
           </View>
         </View>
       </Modal>
+      {/* Message long-press action menu */}
+      <Modal visible={menuVis} transparent animationType="fade" onRequestClose={() => setMenuVis(false)}>
+        <TouchableOpacity style={s.menuOverlay} activeOpacity={1} onPress={() => setMenuVis(false)}>
+          <View style={[s.msgMenu, { backgroundColor: card }]}>
+            <Text style={[s.menuPreview, { color: sub }]} numberOfLines={2}>
+              {(menuMsg?.content || '').replace(/^REPLY:[^|]+\|/, '').substring(0, 80)}
+            </Text>
+            {/* Reply */}
+            <TouchableOpacity style={[s.menuOpt, { borderTopColor: border }]}
+              onPress={() => { setReplyTo(menuMsg); setMenuVis(false); }}>
+              <Text style={s.menuIcon}>↩️</Text>
+              <Text style={[s.menuLabel, { color: tx }]}>Reply</Text>
+            </TouchableOpacity>
+            {/* Edit — own messages within 1 hour */}
+            {menuMsg?.sender_id === myId && (Date.now() - new Date(menuMsg?.created_at).getTime()) < 3600000 && (
+              <TouchableOpacity style={[s.menuOpt, { borderTopColor: border }]}
+                onPress={() => {
+                  const raw = (menuMsg.content || '').replace(/^REPLY:[^|]+\|/, '');
+                  setEditText(raw);
+                  setEditingMsg(menuMsg);
+                  setMenuVis(false);
+                }}>
+                <Text style={s.menuIcon}>✏️</Text>
+                <Text style={[s.menuLabel, { color: tx }]}>Edit</Text>
+              </TouchableOpacity>
+            )}
+            {/* Delete — own messages only */}
+            {menuMsg?.sender_id === myId && (
+              <TouchableOpacity style={[s.menuOpt, { borderTopColor: border }]} onPress={doDeleteMessage}>
+                <Text style={s.menuIcon}>🗑️</Text>
+                <Text style={[s.menuLabel, { color: '#FF3B30' }]}>Delete</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity style={[s.menuCancel, { borderTopColor: border }]} onPress={() => setMenuVis(false)}>
+              <Text style={[s.menuCancelTx, { color: sub }]}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Edit message modal */}
+      <Modal visible={!!editingMsg} transparent animationType="slide" onRequestClose={() => setEditingMsg(null)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <View style={[s.editSheet, { backgroundColor: card, borderTopColor: border }]}>
+            <View style={s.editHeader}>
+              <TouchableOpacity onPress={() => setEditingMsg(null)}>
+                <Text style={{ color: sub, fontSize: 16 }}>Cancel</Text>
+              </TouchableOpacity>
+              <Text style={[s.editTitle, { color: tx }]}>Edit Message</Text>
+              <TouchableOpacity onPress={doEditMessage}>
+                <Text style={{ color: accent, fontWeight: '700', fontSize: 16 }}>Save</Text>
+              </TouchableOpacity>
+            </View>
+            <TextInput
+              style={[s.editInput, { backgroundColor: inputBg, color: tx, borderColor: border }]}
+              value={editText}
+              onChangeText={setEditText}
+              multiline
+              autoFocus
+              placeholder="Edit your message…"
+              placeholderTextColor={sub}
+            />
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
       {/* Contact edit modal — opened by tapping avatar/name in header */}
       <ContactEditModal
         visible={contactEditVis}
@@ -761,6 +870,18 @@ const s = StyleSheet.create({
   sendBtn:     { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   // Viewer
   fsWrap:      { flex: 1, backgroundColor: 'rgba(0,0,0,0.97)', alignItems: 'center', justifyContent: 'center' },
+  menuOverlay:  { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
+  msgMenu:      { borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 34 },
+  menuPreview:  { fontSize: 13, textAlign: 'center', paddingHorizontal: 20, paddingVertical: 14, opacity: 0.7 },
+  menuOpt:      { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderTopWidth: StyleSheet.hairlineWidth, gap: 14 },
+  menuIcon:     { fontSize: 18, width: 28, textAlign: 'center' },
+  menuLabel:    { fontSize: 16 },
+  menuCancel:   { paddingVertical: 16, alignItems: 'center', borderTopWidth: StyleSheet.hairlineWidth },
+  menuCancelTx: { fontSize: 16, fontWeight: '600' },
+  editSheet:    { paddingBottom: 34, borderTopWidth: StyleSheet.hairlineWidth },
+  editHeader:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: StyleSheet.hairlineWidth },
+  editTitle:    { fontWeight: '700', fontSize: 16 },
+  editInput:    { margin: 16, padding: 14, borderRadius: 14, borderWidth: 1, fontSize: 16, minHeight: 80, maxHeight: 160 },
   fsClose:     { position: 'absolute', top: 56, right: 20, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8 },
   fsCloseTx:   { color: '#fff', fontWeight: 'bold' },
   fsImg:       { width: '100%', height: '80%' },

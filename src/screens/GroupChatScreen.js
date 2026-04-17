@@ -122,7 +122,7 @@ function Bubble({ item, currentUserId, colors, onFullScreen, onPlay, onLongPress
       <View style={[g.bubble, isMedia && g.mediaPad, { backgroundColor: isMe ? '#0057a8' : card }]}>
         {body()}
         <Text style={[g.msgTime, { color: isMe ? 'rgba(255,255,255,0.6)' : sub }]}>
-          {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}{item.edited ? '  ✎' : ''}
         </Text>
       </View>
     </TouchableOpacity>
@@ -367,6 +367,21 @@ export default function GroupChatScreen({ route, navigation }) {
     try { await supabase.from('group_messages').delete().eq('id', selectedMsg.id); } catch {}
   }
 
+  async function doEditGroupMessage() {
+    if (!editingMsg || !editText.trim()) return;
+    const newText = editText.trim();
+    setMessages(prev => prev.map(m => m.id === editingMsg.id ? { ...m, text: newText, edited: true } : m));
+    setEditingMsg(null); setEditText('');
+    try {
+      await supabase.from('group_messages').update({ text: newText, edited: true }).eq('id', editingMsg.id);
+    } catch {}
+    const raw = await AsyncStorage.getItem(SKEY).catch(() => null);
+    if (raw) {
+      const msgs = JSON.parse(raw).map(m => m.id === editingMsg.id ? { ...m, text: newText, edited: true } : m);
+      AsyncStorage.setItem(SKEY, JSON.stringify(msgs)).catch(() => {});
+    }
+  }
+
   const hasStaged = stagedPhotos.length > 0 || stagedVideos.length > 0;
 
   const ATTACHMENTS = [
@@ -525,6 +540,13 @@ export default function GroupChatScreen({ route, navigation }) {
               <Text style={g.menuOptIcon}>↩️</Text>
               <Text style={[g.menuOptLabel, { color: tx }]}>Reply</Text>
             </TouchableOpacity>
+            {selectedMsg?.sender_id === currentUserId && (Date.now() - new Date(selectedMsg?.created_at).getTime()) < 3600000 && (
+              <TouchableOpacity style={[g.menuOpt, { borderTopColor: border }]}
+                onPress={() => { setEditText(selectedMsg.text || ''); setEditingMsg(selectedMsg); setMsgMenuVis(false); }}>
+                <Text style={g.menuOptIcon}>✏️</Text>
+                <Text style={[g.menuOptLabel, { color: tx }]}>Edit</Text>
+              </TouchableOpacity>
+            )}
             {selectedMsg?.sender_id === currentUserId && (
               <TouchableOpacity style={[g.menuOpt, { borderTopColor: border }]} onPress={doDelete}>
                 <Text style={g.menuOptIcon}>🗑️</Text>
@@ -610,6 +632,30 @@ export default function GroupChatScreen({ route, navigation }) {
             postMsg(gif.url, 'gif'); // real GIF
           }
         }} colors={colors} />
+
+      {/* Edit message modal */}
+      <Modal visible={!!editingMsg} transparent animationType="slide" onRequestClose={() => setEditingMsg(null)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <View style={{ backgroundColor: card, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 34 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: border }}>
+              <TouchableOpacity onPress={() => setEditingMsg(null)}>
+                <Text style={{ color: sub, fontSize: 16 }}>Cancel</Text>
+              </TouchableOpacity>
+              <Text style={{ color: tx, fontWeight: '700', fontSize: 16 }}>Edit Message</Text>
+              <TouchableOpacity onPress={doEditGroupMessage}>
+                <Text style={{ color: accent, fontWeight: '700', fontSize: 16 }}>Save</Text>
+              </TouchableOpacity>
+            </View>
+            <TextInput
+              style={{ margin: 16, padding: 14, borderRadius: 14, borderWidth: 1, borderColor: border, backgroundColor: inputBg, color: tx, fontSize: 16, minHeight: 80, maxHeight: 160 }}
+              value={editText} onChangeText={setEditText}
+              multiline autoFocus
+              placeholder="Edit your message…" placeholderTextColor={sub}
+            />
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
 
       {/* Premium modal */}
       <PremiumModal visible={premiumVis} onClose={() => setPremiumVis(false)} onUpgraded={() => setPremium(true)} colors={colors} />

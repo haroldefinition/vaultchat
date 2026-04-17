@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { saveContact } from '../services/contactsSync';
 
 export default function ContactEditModal({ visible, contact, onClose, onSave, colors = {} }) {
   const {
@@ -70,14 +71,8 @@ export default function ContactEditModal({ visible, contact, onClose, onSave, co
       url:       url.trim(),
       notes:     notes.trim(),
     };
-    // Persist to contacts store
-    AsyncStorage.getItem('vaultchat_contacts').then(raw => {
-      const list = raw ? JSON.parse(raw) : [];
-      const idx  = list.findIndex(c => c.id === contact?.id || c.phone === contact?.phone);
-      if (idx >= 0) list[idx] = { ...list[idx], ...updated };
-      else list.push({ ...updated, id: `contact_${Date.now()}` });
-      AsyncStorage.setItem('vaultchat_contacts', JSON.stringify(list));
-    }).catch(() => {});
+    // Save to AsyncStorage + Supabase via sync service
+    saveContact(updated).catch(() => {});
     onSave && onSave(updated);
     onClose();
   }

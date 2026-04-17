@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { saveContact } from '../services/contactsSync';
 import { useTheme } from '../services/theme';
 
 export default function NewContactScreen({ route, navigation }) {
@@ -55,13 +56,8 @@ export default function NewContactScreen({ route, navigation }) {
       url:       url.trim(),
       notes:     notes.trim(),
     };
-    // Save to AsyncStorage contacts store
-    try {
-      const raw  = await AsyncStorage.getItem('vaultchat_contacts');
-      const list = raw ? JSON.parse(raw) : [];
-      list.push(contact);
-      await AsyncStorage.setItem('vaultchat_contacts', JSON.stringify(list));
-    } catch {}
+    // Save to AsyncStorage + Supabase via sync service
+    try { await saveContact(contact); } catch {}
 
     // Notify caller if a callback was provided
     if (typeof onSave === 'function') onSave(contact);

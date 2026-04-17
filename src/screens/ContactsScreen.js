@@ -7,6 +7,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../services/theme';
 import { requestContactsPermission, syncContacts, getCachedContacts } from '../services/contacts';
+import { loadContacts, saveContact, deleteContact } from '../services/contactsSync';
 
 function Avatar({ contact, size = 46, accent }) {
   const name = contact.name || contact.firstName || '?';
@@ -24,19 +25,18 @@ export default function ContactsScreen({ navigation }) {
   const [loading,  setLoading]  = useState(false);
   const [synced,   setSynced]   = useState(false);
 
-  useEffect(() => { loadContacts(); }, []);
+  useEffect(() => { fetchContacts(); }, []);
 
-  async function loadContacts() {
+  async function fetchContacts() {
     setLoading(true);
-    // Load from our own store
-    const raw  = await AsyncStorage.getItem('vaultchat_contacts');
-    const mine = raw ? JSON.parse(raw) : [];
-    // Load cached phone contacts
-    const cached = await getCachedContacts();
-    // Merge — prefer our store records for dupes
+    // Load from AsyncStorage immediately (Supabase syncs in background)
+    const mine = await loadContacts();
+    // loadContacts is from contactsSync
+    // Also merge cached phone contacts
+    const cached = await getCachedContacts().catch(() => []);
     const merged = [...mine];
-    cached.forEach(c => {
-      if (!merged.find(m => m.phone === c.phone)) merged.push(c);
+    cached.forEach(pc => {
+      if (!merged.find(m => m.phone === pc.phone)) merged.push(pc);
     });
     setContacts(merged.sort((a, b) => (a.name || '').localeCompare(b.name || '')));
     setLoading(false);
