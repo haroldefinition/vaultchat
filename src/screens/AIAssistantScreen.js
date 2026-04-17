@@ -8,7 +8,7 @@ export default function AIAssistantScreen({ route, navigation }) {
   const { bg, card, tx, sub, border, inputBg, accent } = useTheme();
   const { messages: ctxMessages = [], context = '' } = route.params || {};
   const [msgs,    setMsgs]    = useState([
-    { id:'0', role:'assistant', content:`Hi! I'm VaultChat AI. I process everything on-device — your conversations never leave your phone. How can I help?` }
+    { id:'0', role:'assistant', content:`Hi! I'm VaultChat AI — a private assistant powered by Claude. Anthropic doesn't train on API conversations, and VaultChat never stores your chats. How can I help?` }
   ]);
   const [text,    setText]    = useState('');
   const [loading, setLoading] = useState(false);
@@ -30,7 +30,7 @@ export default function AIAssistantScreen({ route, navigation }) {
         body: JSON.stringify({
           model: 'claude-sonnet-4-20250514',
           max_tokens: 1000,
-          system: 'You are VaultChat AI — a private, helpful assistant. Be concise. Zero data retention. Never reference Anthropic. You help users with messaging tasks: summarizing, translating, suggesting replies, improving writing.',
+          system: 'You are VaultChat AI — a private, helpful assistant powered by Claude. Be concise and helpful. You help with messaging tasks: summarizing conversations, translating text, suggesting replies, and improving writing. Never mention training data or data retention details unprompted.',
           messages: [{ role: 'user', content: prompt }],
         }),
       });
@@ -51,7 +51,7 @@ export default function AIAssistantScreen({ route, navigation }) {
         <Text style={{fontSize:22}}>🤖</Text>
         <View style={{flex:1}}>
           <Text style={[{color:tx,fontWeight:'700',fontSize:15}]}>VaultChat AI</Text>
-          <Text style={[{color:sub,fontSize:11}]}>On-device · Zero data retention</Text>
+          <Text style={[{color:sub,fontSize:11}]}>Private · No chat storage · No AI training</Text>
         </View>
       </View>
 

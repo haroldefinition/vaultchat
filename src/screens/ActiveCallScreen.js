@@ -7,21 +7,37 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../services/theme';
 import { getRTCConfig, profileForSignal } from '../services/callQuality';
 
-// ── Quality badge ─────────────────────────────────────────────
-function QualityBadge({ quality }) {
-  const map = { HD: '#00ffa3', SD: '#ffd700', Low: '#ff9500', Min: '#ff3b30' };
-  const color = map[quality] || '#00ffa3';
+// ── Enhanced quality badge with relay info ────────────────────
+function QualityBadge({ quality, routing }) {
+  const colorMap = { HD: '#00ffa3', SD: '#ffd700', Low: '#ff9500', Min: '#ff3b30' };
+  const labelMap = {
+    HD:  'HD · Excellent signal',
+    SD:  'SD · Good signal',
+    Low: 'Low · Weak signal',
+    Min: 'Min · Rural relay active',
+  };
+  const color = colorMap[quality] || '#00ffa3';
   return (
-    <View style={[qb.badge, { backgroundColor: color + '22', borderColor: color }]}>
-      <View style={[qb.dot, { backgroundColor: color }]} />
-      <Text style={[qb.label, { color }]}>{quality}</Text>
+    <View style={{ alignItems: 'center', gap: 4 }}>
+      <View style={[qb.badge, { backgroundColor: color + '22', borderColor: color }]}>
+        <View style={[qb.dot, { backgroundColor: color }]} />
+        <Text style={[qb.label, { color }]}>{quality}</Text>
+        {quality === 'Low' || quality === 'Min' ? (
+          <Text style={[qb.relay, { color }]}>📡 Relay</Text>
+        ) : (
+          <Text style={[qb.relay, { color }]}>✓ Direct</Text>
+        )}
+      </View>
+      <Text style={qb.subLabel}>{labelMap[quality]}</Text>
     </View>
   );
 }
 const qb = StyleSheet.create({
-  badge: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, borderWidth: 1 },
-  dot:   { width: 7, height: 7, borderRadius: 4 },
-  label: { fontSize: 12, fontWeight: '700' },
+  badge:    { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 14, borderWidth: 1 },
+  dot:      { width: 7, height: 7, borderRadius: 4 },
+  label:    { fontSize: 12, fontWeight: '800' },
+  relay:    { fontSize: 11, fontWeight: '600', opacity: 0.85 },
+  subLabel: { fontSize: 10, color: 'rgba(255,255,255,0.45)', letterSpacing: 0.3 },
 });
 
 // ── Dialpad page (for + Add) ──────────────────────────────────
@@ -160,10 +176,15 @@ export default function ActiveCallScreen({ route, navigation }) {
 
   return (
     <View style={[s.container, { backgroundColor: '#07091a' }]}>
-      {/* Quality badge */}
+      {/* Quality badge — shows signal + routing info */}
       {status === 'Connected' && (
         <View style={s.qualityRow}>
           <QualityBadge quality={quality} />
+          {(quality === 'Low' || quality === 'Min') && (
+            <Text style={s.ruralNote}>
+              📶 Routing through secure relay for low-signal areas
+            </Text>
+          )}
         </View>
       )}
 
@@ -248,7 +269,8 @@ export default function ActiveCallScreen({ route, navigation }) {
 
 const s = StyleSheet.create({
   container:      { flex: 1 },
-  qualityRow:     { alignItems: 'center', paddingTop: 56, paddingBottom: 4 },
+  qualityRow:     { alignItems: 'center', paddingTop: 56, paddingBottom: 4, gap: 6 },
+  ruralNote:      { fontSize: 11, color: 'rgba(255,255,255,0.5)', textAlign: 'center', paddingHorizontal: 32 },
   top:            { alignItems: 'center', paddingTop: 20, paddingBottom: 24 },
   callTypeLabel:  { color: '#aaa', fontSize: 13, marginBottom: 20, letterSpacing: 1 },
   avatar:         { width: 100, height: 100, borderRadius: 50, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },

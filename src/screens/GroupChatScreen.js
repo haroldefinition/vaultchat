@@ -7,7 +7,7 @@ import {
 import { Video, ResizeMode } from 'expo-av';
 import { useTheme } from '../services/theme';
 import { supabase } from '../services/supabase';
-import { isPremiumUser, injectAds } from '../services/adsService';
+// adsService used only in Discover/OfferInbox — not in private chats
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
@@ -133,7 +133,6 @@ export default function GroupChatScreen({ route, navigation }) {
   const [selectedMsg,   setSelectedMsg]   = useState(null);
   const [msgMenuVis,    setMsgMenuVis]    = useState(false);
   const [gifVisible,    setGifVisible]    = useState(false);
-  const [premium,       setPremium]       = useState(false);
   const [premiumVis,    setPremiumVis]    = useState(false);
   const [currentUserId, setCurrentUserId] = useState('');
   const [currentHandle, setCurrentHandle] = useState('');
@@ -405,17 +404,12 @@ export default function GroupChatScreen({ route, navigation }) {
       {/* Messages */}
       <FlatList
         ref={flatRef}
-        data={injectAds(messages, premium, 8)}
+        data={messages}
         keyExtractor={(item, i) => String(item.id || i)}
         onContentSizeChange={() => flatRef.current?.scrollToEnd({ animated: false })}
         contentContainerStyle={{ padding: 12, paddingBottom: 8 }}
         renderItem={({ item }) => {
-          if (item.isAd) return (
-            <TouchableOpacity style={g.adBubble} onPress={() => { if (item.isUpgradeAd) setPremiumVis(true); else if (item.url) Linking.openURL(item.url); }}>
-              <Text style={g.adSponsor}>{item.sponsor} · Sponsored</Text>
-              <Text style={g.adText}>{item.text}</Text>
-            </TouchableOpacity>
-          );
+
           return (
             <Bubble item={item} currentUserId={currentUserId} colors={colors}
               onFullScreen={uri => setFullImgUri(uri)}
@@ -630,9 +624,6 @@ const g = StyleSheet.create({
   replyQuote:     { borderLeftWidth: 3, paddingLeft: 8, marginBottom: 6, paddingVertical: 2 },
   replyQSender:   { fontSize: 12, fontWeight: '700', marginBottom: 1 },
   replyQText:     { fontSize: 12, lineHeight: 16 },
-  adBubble:       { alignSelf: 'center', marginVertical: 4, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: '#1C1C2E', borderRadius: 14, borderLeftWidth: 3, borderLeftColor: '#6C63FF', maxWidth: '85%' },
-  adSponsor:      { color: '#6C63FF', fontSize: 10, fontWeight: '700', textTransform: 'uppercase', marginBottom: 2 },
-  adText:         { color: '#ccc', fontSize: 13 },
   replyBar:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth, gap: 10 },
   replyLine:      { width: 3, height: 34, borderRadius: 2 },
   replyBarSender: { fontSize: 12, fontWeight: '700', marginBottom: 2 },
