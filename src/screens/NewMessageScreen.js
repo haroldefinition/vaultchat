@@ -401,11 +401,11 @@ export default function NewMessageScreen({ navigation, route }) {
 
       {/* Input bar */}
       <View style={[s.inputBar, { backgroundColor: card, borderTopColor: border }]}>
-        {/* + Attachments button */}
+        {/* + Attachments button — matches GroupChatScreen plusBtn */}
         <TouchableOpacity
-          style={[s.attachPlusBtn, { backgroundColor: inputBg, borderColor: border }]}
+          style={[s.plusBtn, { backgroundColor: inputBg, borderColor: accent }]}
           onPress={() => setAttachModal(true)}>
-          <Text style={{ fontSize: 22, color: accent, fontWeight: '300', lineHeight: 26 }}>+</Text>
+          <Text style={[s.plusTx, { color: accent }]}>+</Text>
         </TouchableOpacity>
 
         <TextInput
@@ -436,7 +436,12 @@ export default function NewMessageScreen({ navigation, route }) {
         <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setAttachModal(false)}>
           <View style={[s.sheet, { backgroundColor: card }]}>
             <View style={[s.sheetHandle, { backgroundColor: border }]} />
-            <Text style={[s.sheetTitle, { color: tx }]}>Attachments</Text>
+            <View style={s.sheetHeaderRow}>
+              <Text style={[s.sheetTitle, { color: tx }]}>Attachments</Text>
+              <TouchableOpacity style={[s.sheetXBtn, { backgroundColor: accent }]} onPress={() => setAttachModal(false)}>
+                <Text style={s.sheetXTx}>✕</Text>
+              </TouchableOpacity>
+            </View>
             <View style={s.attachGrid}>
               {ATTACHMENTS.map((a, i) => (
                 <TouchableOpacity key={i} style={s.attachItem} onPress={() => handleAttach(a.type)}>
@@ -491,7 +496,11 @@ const s = StyleSheet.create({
   toolBtn:     { width: 38, height: 38, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   msgInput:    { flex: 1, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 22, fontSize: 15, maxHeight: 100, minHeight: 42 },
   sendBtn:     { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
-  attachPlusBtn:{ width: 40, height: 40, borderRadius: 20, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  plusBtn:      { width: 44, height: 44, borderRadius: 22, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  plusTx:       { fontSize: 26, fontWeight: '300', lineHeight: 30 },
+  sheetHeaderRow:{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 4, marginBottom: 8 },
+  sheetXBtn:    { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  sheetXTx:     { color: '#000', fontWeight: '900', fontSize: 14 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
   sheet:        { borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 20, paddingBottom: 44 },
   sheetHandle:  { width: 40, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 16, backgroundColor: '#555' },

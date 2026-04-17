@@ -125,8 +125,8 @@ export default function GifPickerModal({ visible, onClose, onSelectGif, colors }
             <Text style={[s.headerTitle, { color: tx }]}>
               {useFallback ? 'Send an Emoji' : 'Send a GIF'}
             </Text>
-            <TouchableOpacity onPress={onClose} style={s.closeBtn}>
-              <Text style={{ color: sub, fontSize: 16 }}>Cancel</Text>
+            <TouchableOpacity onPress={onClose} style={[s.closeBtn, { backgroundColor: accent }]}>
+              <Text style={{ color: '#000', fontWeight: '900', fontSize: 15 }}>✕</Text>
             </TouchableOpacity>
           </View>
 
@@ -201,7 +201,7 @@ const s = StyleSheet.create({
   handle:       { width: 40, height: 4, borderRadius: 2, alignSelf: 'center', marginTop: 12, marginBottom: 4 },
   headerRow:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 14 },
   headerTitle:  { fontSize: 17, fontWeight: '700' },
-  closeBtn:     { padding: 4 },
+  closeBtn:     { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
   searchRow:    { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginBottom: 12, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, borderWidth: 1 },
   searchInput:  { flex: 1, fontSize: 15 },
   errorText:    { textAlign: 'center', fontSize: 13, marginBottom: 10, paddingHorizontal: 20 },
