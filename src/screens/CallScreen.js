@@ -6,6 +6,7 @@ import {
 import { useTheme } from '../services/theme';
 import { setupCallKit } from '../services/callkit';
 import * as ImagePicker from 'expo-image-picker';
+import ContactEditModal from '../components/ContactEditModal';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // ── Sample data ───────────────────────────────────────────────
@@ -318,20 +319,19 @@ export default function CallScreen({ navigation }) {
         </View>
       )}
 
-      {/* Edit contact modal */}
-      <Modal visible={editCallModal} animationType="slide" transparent onRequestClose={() => setEditCallModal(false)}>
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
-          <CallContactEditor
-            item={editCallTarget}
-            onClose={() => { setEditCallModal(false); setEditCallTarget(null); }}
-            onSave={(updated) => {
-              setCalls(prev => prev.map(c => c.id === updated.id ? { ...c, name: updated.name, photo: updated.photo } : c));
-              setEditCallModal(false); setEditCallTarget(null);
-            }}
-            accent={accent} bg={bg} card={card} tx={tx} sub={sub} border={border}
-          />
-        </View>
-      </Modal>
+      {/* Universal contact edit modal */}
+      <ContactEditModal
+        visible={editCallModal}
+        contact={editCallTarget}
+        onClose={() => { setEditCallModal(false); setEditCallTarget(null); }}
+        onSave={(updated) => {
+          setCalls(prev => prev.map(c => c.id === updated.id
+            ? { ...c, name: updated.name, photo: updated.photo, email: updated.email }
+            : c));
+          setEditCallModal(false); setEditCallTarget(null);
+        }}
+        colors={{ bg, card, tx, sub, border, inputBg, accent }}
+      />
     </View>
   );
 }

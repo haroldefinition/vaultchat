@@ -4,6 +4,7 @@ import {
   Alert, StatusBar, SafeAreaView, KeyboardAvoidingView, Platform, ScrollView,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import ContactEditModal from '../components/ContactEditModal';
 import { useTheme } from '../services/theme';
 
 const STORAGE_KEY = 'vaultchat_groups';
@@ -113,6 +114,8 @@ export default function GroupScreen({ navigation }) {
   const [actionModal, setActionModal] = useState(false);
   const [membersModal,setMembersModal]= useState(false);
   const [selectedGroup,setSelectedGroup] = useState(null);
+  const [groupEditModal, setGroupEditModal] = useState(false);
+  const [groupEditTarget, setGroupEditTarget] = useState(null);
   const [groupName,   setGroupName]   = useState('');
   const [groupDesc,   setGroupDesc]   = useState('');
 
@@ -190,10 +193,11 @@ export default function GroupScreen({ navigation }) {
       onPress={() => navigation.navigate('GroupChat', { groupId: item.id, groupName: item.name })}
       onLongPress={() => openActionMenu(item)}
       delayLongPress={400}>
-      <View style={[s.avatar, { backgroundColor: accent + '22' }]}>
+      <TouchableOpacity style={[s.avatar, { backgroundColor: accent + '22' }]}
+        onPress={() => { setGroupEditTarget({ ...item, firstName: item.name, phone: '', email: '', id: item.id }); setGroupEditModal(true); }}>
         <Text style={s.avatarEmoji}>👥</Text>
         {item.pinned && <View style={[s.pinBadge, { backgroundColor: accent }]}><Text style={s.pinText}>📌</Text></View>}
-      </View>
+      </TouchableOpacity>
       <View style={s.info}>
         <View style={s.topRow}>
           <Text style={[s.name, { color: tx }]} numberOfLines={1}>{item.name}</Text>
@@ -292,6 +296,20 @@ export default function GroupScreen({ navigation }) {
         onClose={() => setMembersModal(false)}
         onSave={handleSaveMembers}
         accent={accent} bg={bg} card={card} tx={tx} sub={sub} border={border} inputBg={inputBg}
+      />
+      {/* Group info edit modal */}
+      <ContactEditModal
+        visible={groupEditModal}
+        contact={groupEditTarget}
+        onClose={() => { setGroupEditModal(false); setGroupEditTarget(null); }}
+        onSave={async (updated) => {
+          const next = groups.map(g => g.id === updated.id
+            ? { ...g, name: updated.name || updated.firstName || g.name, photo: updated.photo }
+            : g);
+          await saveGroups(next);
+          setGroupEditModal(false); setGroupEditTarget(null);
+        }}
+        colors={{ bg, card, tx, sub, border, inputBg, accent }}
       />
     </SafeAreaView>
   );

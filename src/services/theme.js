@@ -20,13 +20,14 @@ export function ThemeProvider({ children }) {
   const theme = {
     lightMode,
     toggleLight,
-    bg: lightMode ? '#f0f8ff' : '#080b12',
-    card: lightMode ? '#ffffff' : '#0e1220',
-    tx: lightMode ? '#003580' : '#ffffff',
-    sub: lightMode ? '#4a90d9' : '#888888',
-    border: lightMode ? '#d0e8ff' : '#141828',
-    inputBg: lightMode ? '#e8f4ff' : '#141828',
-    accent: '#0057a8',
+    bg:        lightMode ? '#f0f8ff' : '#080b12',
+    card:      lightMode ? '#ffffff' : '#0e1220',
+    tx:        lightMode ? '#003580' : '#ffffff',
+    sub:       lightMode ? '#4a90d9' : '#888888',
+    border:    lightMode ? '#d0e8ff' : '#1a2035',
+    inputBg:   lightMode ? '#e8f4ff' : '#141828',
+    // Fiji teal — tropical blue-green, bright and vibrant
+    accent:    lightMode ? '#0079bf' : '#00C2A8',
     sectionBg: lightMode ? '#ddeeff' : '#080b12',
   };
 

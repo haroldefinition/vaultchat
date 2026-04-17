@@ -2,54 +2,13 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, Modal, Image, Alert, ScrollView } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
+import ContactEditModal from '../components/ContactEditModal';
 import { useTheme } from '../services/theme';
 import { getMyHandle } from '../services/vaultHandle';
 
 const CHATS_KEY = 'vaultchat_chats';
 
 // ── Inline edit contact (tapping avatar in ChatsScreen) ───────
-function EditChatContact({ item, onClose, onSave, accent, bg, card, tx, sub, border, inputBg }) {
-  const [name,  setName]  = React.useState(item?.name  || '');
-  const [phone, setPhone] = React.useState(item?.phone || '');
-  const [email, setEmail] = React.useState(item?.email || '');
-  const [notes, setNotes] = React.useState(item?.notes || '');
-  const [photo, setPhoto] = React.useState(item?.photo || null);
-
-  async function pickPhoto() {
-    const p = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!p.granted) { Alert.alert('Permission needed'); return; }
-    const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 0.8, allowsEditing: true, aspect: [1,1] });
-    if (!r.canceled && r.assets?.[0]) setPhoto(r.assets[0].uri);
-  }
-
-  return (
-    <View style={{ backgroundColor: bg, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingBottom: 44 }}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: border }}>
-        <TouchableOpacity onPress={onClose}><Text style={{ color: sub, fontSize: 16 }}>Cancel</Text></TouchableOpacity>
-        <Text style={{ color: tx, fontWeight: '700', fontSize: 17 }}>Edit Contact</Text>
-        <TouchableOpacity onPress={() => onSave({ ...item, name, phone, email, notes, photo })}><Text style={{ color: accent, fontWeight: '700', fontSize: 16 }}>Save</Text></TouchableOpacity>
-      </View>
-      <ScrollView contentContainerStyle={{ padding: 20, gap: 12 }}>
-        <TouchableOpacity onPress={pickPhoto} style={{ alignItems: 'center', marginBottom: 8 }}>
-          {photo
-            ? <Image source={{ uri: photo }} style={{ width: 88, height: 88, borderRadius: 44 }} />
-            : <View style={{ width: 88, height: 88, borderRadius: 44, backgroundColor: accent + '33', alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ fontSize: 36, color: tx }}>{name?.[0]?.toUpperCase() || '?'}</Text>
-              </View>}
-          <Text style={{ color: accent, fontWeight: '600', marginTop: 8 }}>{photo ? 'Change Photo' : 'Add Photo'}</Text>
-        </TouchableOpacity>
-        {[['Name', name, setName, 'default'], ['Phone', phone, setPhone, 'phone-pad'], ['Email', email, setEmail, 'email-address'], ['Notes', notes, setNotes, 'default']].map(([label, val, setter, kb]) => (
-          <View key={label} style={{ backgroundColor: card, borderRadius: 14, paddingHorizontal: 16, paddingVertical: 12 }}>
-            <Text style={{ color: sub, fontSize: 11, fontWeight: '700', marginBottom: 4 }}>{label.toUpperCase()}</Text>
-            <TextInput style={{ color: tx, fontSize: 16 }} value={val} onChangeText={setter} keyboardType={kb} autoCapitalize={kb === 'default' ? 'words' : 'none'} placeholder={label} placeholderTextColor={sub} />
-          </View>
-        ))}
-      </ScrollView>
-    </View>
-  );
-}
-
-
 export default function ChatsScreen({ navigation }) {
   const { bg, card, tx, sub, border, inputBg, accent } = useTheme();
   const [chats, setChats] = useState([]);
@@ -206,28 +165,25 @@ export default function ChatsScreen({ navigation }) {
         </TouchableOpacity>
       </Modal>
 
-      {/* Edit avatar/contact modal */}
-      <Modal visible={editModalVis} animationType="slide" transparent onRequestClose={() => setEditModalVis(false)}>
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
-          <EditChatContact
-            item={editTarget}
-            onClose={() => { setEditModalVis(false); setEditTarget(null); }}
-            onSave={async (updated) => {
-              try {
-                const raw = await AsyncStorage.getItem('vaultchat_chats');
-                if (raw) {
-                  const parsed = JSON.parse(raw);
-                  const next = parsed.map(ch => ch.roomId === updated.roomId ? { ...ch, ...updated } : ch);
-                  await AsyncStorage.setItem('vaultchat_chats', JSON.stringify(next));
-                  setChats(next);
-                }
-              } catch {}
-              setEditModalVis(false); setEditTarget(null);
-            }}
-            accent={accent} bg={bg} card={card} tx={tx} sub={sub} border={border} inputBg={inputBg}
-          />
-        </View>
-      </Modal>
+      {/* Universal contact edit modal */}
+      <ContactEditModal
+        visible={editModalVis}
+        contact={editTarget}
+        onClose={() => { setEditModalVis(false); setEditTarget(null); }}
+        onSave={async (updated) => {
+          try {
+            const raw = await AsyncStorage.getItem('vaultchat_chats');
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              const next = parsed.map(ch => ch.roomId === updated.roomId ? { ...ch, ...updated } : ch);
+              await AsyncStorage.setItem('vaultchat_chats', JSON.stringify(next));
+              setChats(next);
+            }
+          } catch {}
+          setEditModalVis(false); setEditTarget(null);
+        }}
+        colors={{ bg, card, tx, sub, border, inputBg, accent }}
+      />
     </View>
   );
 }

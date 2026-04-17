@@ -14,6 +14,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as Location from 'expo-location';
 import { uploadMedia } from '../services/mediaUpload';
 import GifPickerModal from '../components/GifPickerModal';
+import ContactEditModal from '../components/ContactEditModal';
 import PremiumModal from '../components/PremiumModal';
 import { ResolvedPhotoStack, ResolvedVideoCarousel } from '../components/MediaBubbles';
 
@@ -142,6 +143,7 @@ export default function GroupChatScreen({ route, navigation }) {
   const [fullImgUri,    setFullImgUri]    = useState(null);
   const [vidUri,        setVidUri]        = useState(null);
   const [attachModal,   setAttachModal]   = useState(false);
+  const [infoEditModal, setInfoEditModal] = useState(false);
   const [emojiModal,    setEmojiModal]    = useState(false);
 
   const flatRef      = useRef(null);
@@ -390,9 +392,10 @@ export default function GroupChatScreen({ route, navigation }) {
         <TouchableOpacity onPress={() => navigation.goBack()} style={{ padding: 4 }}>
           <Text style={[g.backTx, { color: accent }]}>‹</Text>
         </TouchableOpacity>
-        <View style={[g.groupAvatar, { backgroundColor: (accent || '#6C63FF') + '22' }]}>
+        <TouchableOpacity style={[g.groupAvatar, { backgroundColor: (accent || '#6C63FF') + '22' }]}
+          onPress={() => setInfoEditModal(true)}>
           <Text style={{ fontSize: 18 }}>👥</Text>
-        </View>
+        </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={[g.hName, { color: tx }]}>{groupName || 'Group'}</Text>
           <Text style={[g.hSub, { color: accent }]}>🔒 Encrypted</Text>
@@ -571,9 +574,36 @@ export default function GroupChatScreen({ route, navigation }) {
         </View>
       </Modal>
 
+      {/* Group info edit modal (tap header avatar) */}
+      <ContactEditModal
+        visible={infoEditModal}
+        contact={{ firstName: groupName, id: groupId, phone: '', email: '' }}
+        onClose={() => setInfoEditModal(false)}
+        onSave={(updated) => {
+          setInfoEditModal(false);
+          // Update group name in AsyncStorage
+          AsyncStorage.getItem('vaultchat_groups').then(raw => {
+            if (raw) {
+              const gs = JSON.parse(raw).map(g =>
+                g.id === groupId ? { ...g, name: updated.firstName || groupName, photo: updated.photo } : g
+              );
+              AsyncStorage.setItem('vaultchat_groups', JSON.stringify(gs));
+            }
+          }).catch(() => {});
+        }}
+        colors={{ bg, card, tx, sub, border, inputBg, accent }}
+      />
+
       {/* GIF picker */}
       <GifPickerModal visible={gifVisible} onClose={() => setGifVisible(false)}
-        onSelectGif={(gif) => { setGifVisible(false); postMsg(gif.url, 'gif'); }} colors={colors} />
+        onSelectGif={(gif) => {
+          setGifVisible(false);
+          if (gif.isEmoji) {
+            postMsg(gif.url); // emoji — send as text
+          } else {
+            postMsg(gif.url, 'gif'); // real GIF
+          }
+        }} colors={colors} />
 
       {/* Premium modal */}
       <PremiumModal visible={premiumVis} onClose={() => setPremiumVis(false)} onUpgraded={() => setPremium(true)} colors={colors} />

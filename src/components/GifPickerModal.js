@@ -1,103 +1,215 @@
-import React, { useState, useCallback } from 'react';
-import { Modal, View, Text, TextInput, FlatList, Image, TouchableOpacity, StyleSheet, ActivityIndicator, Dimensions, KeyboardAvoidingView, Platform } from 'react-native';
+import React, { useState, useCallback, useEffect } from 'react';
+import {
+  Modal, View, Text, TextInput, FlatList, Image, TouchableOpacity,
+  StyleSheet, ActivityIndicator, Dimensions, KeyboardAvoidingView, Platform,
+} from 'react-native';
 
 const GIPHY_API_KEY = 'dc6zaTOxFJmzC';
-const GIPHY_BASE = 'https://api.giphy.com/v1/gifs';
-const COL_WIDTH = (Dimensions.get('window').width - 48) / 2;
+const GIPHY_BASE    = 'https://api.giphy.com/v1/gifs';
+const COL_WIDTH     = (Dimensions.get('window').width - 48) / 2;
+
+// Fallback emoji GIFs shown if API fails or returns nothing
+const FALLBACK_GIFS = [
+  { id: 'f1', emoji: '😂', label: 'Haha'   },
+  { id: 'f2', emoji: '🎉', label: 'Party'  },
+  { id: 'f3', emoji: '🔥', label: 'Fire'   },
+  { id: 'f4', emoji: '❤️', label: 'Love'   },
+  { id: 'f5', emoji: '👏', label: 'Clap'   },
+  { id: 'f6', emoji: '😎', label: 'Cool'   },
+  { id: 'f7', emoji: '🤣', label: 'Lol'    },
+  { id: 'f8', emoji: '💯', label: '100'    },
+  { id: 'f9', emoji: '🥳', label: 'Yay'    },
+  { id: 'f10',emoji: '😭', label: 'Cry'    },
+  { id: 'f11',emoji: '🤯', label: 'Wow'    },
+  { id: 'f12',emoji: '👀', label: 'Eyes'   },
+  { id: 'f13',emoji: '🏆', label: 'Win'    },
+  { id: 'f14',emoji: '🫶', label: 'Love'   },
+  { id: 'f15',emoji: '💀', label: 'Dead'   },
+  { id: 'f16',emoji: '🚀', label: 'Rocket' },
+];
 
 export default function GifPickerModal({ visible, onClose, onSelectGif, colors }) {
-  const c = colors || { card: '#1C1C1E', text: '#FFFFFF', muted: '#8E8E93', input: '#2C2C2E' };
-  const [query, setQuery] = useState('');
-  const [gifs, setGifs] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [searched, setSearched] = useState(false);
+  const c = colors || {};
+  const card    = c.card    || '#1C1C1E';
+  const tx      = c.tx      || '#FFFFFF';
+  const sub     = c.sub     || '#8E8E93';
+  const inputBg = c.inputBg || '#2C2C2E';
+  const border  = c.border  || '#2C2C2E';
+  const accent  = c.accent  || '#00C2A8';
+
+  const [query,    setQuery]    = useState('');
+  const [gifs,     setGifs]     = useState([]);
+  const [loading,  setLoading]  = useState(false);
+  const [error,    setError]    = useState(false);
+  const [useFallback, setUseFallback] = useState(false);
+
+  // Reset and load trending GIFs every time modal opens
+  useEffect(() => {
+    if (visible) {
+      setQuery('');
+      setError(false);
+      setUseFallback(false);
+      setGifs([]);
+      fetchGifs('');
+    }
+  }, [visible]);
 
   const fetchGifs = useCallback(async (q) => {
     setLoading(true);
+    setError(false);
     try {
       const endpoint = q.trim()
-        ? `${GIPHY_BASE}/search?api_key=${GIPHY_API_KEY}&q=${encodeURIComponent(q)}&limit=20&rating=g`
-        : `${GIPHY_BASE}/trending?api_key=${GIPHY_API_KEY}&limit=20&rating=g`;
-      const res = await fetch(endpoint);
+        ? `${GIPHY_BASE}/search?api_key=${GIPHY_API_KEY}&q=${encodeURIComponent(q)}&limit=24&rating=g`
+        : `${GIPHY_BASE}/trending?api_key=${GIPHY_API_KEY}&limit=24&rating=g`;
+      const res  = await fetch(endpoint);
       const json = await res.json();
-      setGifs(json.data || []);
-      setSearched(true);
-    } catch (e) {
-      console.warn('GIF fetch error:', e);
+      const data = json.data || [];
+      if (data.length > 0) {
+        setGifs(data);
+        setUseFallback(false);
+      } else {
+        setUseFallback(true);
+      }
+    } catch {
+      setError(true);
+      setUseFallback(true);
     } finally {
       setLoading(false);
     }
   }, []);
 
-  const handleSelect = (gif) => {
-    const url = gif.images?.downsized?.url || gif.images?.fixed_height?.url;
-    onSelectGif({ url, id: gif.id, title: gif.title });
+  function handleSelect(gif) {
+    // For real Giphy GIFs
+    const url = gif.images?.downsized?.url || gif.images?.fixed_height?.url || gif.images?.original?.url;
+    if (url) {
+      onSelectGif({ url, id: gif.id, title: gif.title || '' });
+    }
     onClose();
     setQuery('');
-  };
+  }
+
+  function handleFallbackSelect(item) {
+    // Send the emoji as the message content when API fails
+    onSelectGif({ url: item.emoji, id: item.id, title: item.label, isEmoji: true });
+    onClose();
+    setQuery('');
+  }
 
   const renderGif = ({ item }) => {
     const url = item.images?.fixed_height_small?.url || item.images?.downsized?.url;
+    if (!url) return null;
     return (
-      <TouchableOpacity style={styles.gifCell} onPress={() => handleSelect(item)}>
-        <Image source={{ uri: url }} style={styles.gifImage} resizeMode="cover" />
+      <TouchableOpacity onPress={() => handleSelect(item)} style={s.gifItem} activeOpacity={0.8}>
+        <Image source={{ uri: url }} style={s.gifImg} resizeMode="cover" />
       </TouchableOpacity>
     );
   };
 
+  const renderFallback = ({ item }) => (
+    <TouchableOpacity onPress={() => handleFallbackSelect(item)}
+      style={[s.fallbackItem, { backgroundColor: inputBg }]} activeOpacity={0.8}>
+      <Text style={{ fontSize: 36 }}>{item.emoji}</Text>
+      <Text style={{ color: sub, fontSize: 11, marginTop: 4 }}>{item.label}</Text>
+    </TouchableOpacity>
+  );
+
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose} onShow={() => { if (!searched) fetchGifs(''); }}>
-      <KeyboardAvoidingView style={styles.overlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={[styles.sheet, { backgroundColor: c.card }]}>
-          <View style={styles.header}>
-            <Text style={[styles.title, { color: c.text }]}>GIFs</Text>
-            <TouchableOpacity onPress={onClose}><Text style={[styles.close, { color: c.muted }]}>✕</Text></TouchableOpacity>
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={s.overlay}>
+        <View style={[s.sheet, { backgroundColor: card }]}>
+          {/* Handle */}
+          <View style={[s.handle, { backgroundColor: border }]} />
+
+          {/* Header */}
+          <View style={s.headerRow}>
+            <Text style={[s.headerTitle, { color: tx }]}>
+              {useFallback ? 'Send an Emoji' : 'Send a GIF'}
+            </Text>
+            <TouchableOpacity onPress={onClose} style={s.closeBtn}>
+              <Text style={{ color: sub, fontSize: 16 }}>Cancel</Text>
+            </TouchableOpacity>
           </View>
-          <View style={[styles.searchRow, { backgroundColor: c.input }]}>
-            <Text style={styles.searchIcon}>🔍</Text>
-            <TextInput
-              style={[styles.searchInput, { color: c.text }]}
-              placeholder="Search GIFs..."
-              placeholderTextColor={c.muted}
-              value={query}
-              onChangeText={setQuery}
-              onSubmitEditing={() => fetchGifs(query)}
-              returnKeyType="search"
-            />
-          </View>
+
+          {/* Search — only show when API is working */}
+          {!useFallback && (
+            <View style={[s.searchRow, { backgroundColor: inputBg, borderColor: border }]}>
+              <Text style={{ color: sub, marginRight: 8 }}>🔍</Text>
+              <TextInput
+                style={[s.searchInput, { color: tx }]}
+                placeholder="Search GIFs…"
+                placeholderTextColor={sub}
+                value={query}
+                onChangeText={setQuery}
+                onSubmitEditing={() => fetchGifs(query)}
+                returnKeyType="search"
+              />
+              {query.length > 0 && (
+                <TouchableOpacity onPress={() => { setQuery(''); fetchGifs(''); }}>
+                  <Text style={{ color: sub, fontSize: 16, paddingHorizontal: 8 }}>✕</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+
+          {/* Error message */}
+          {error && (
+            <Text style={[s.errorText, { color: sub }]}>
+              Can't load GIFs right now — sending emoji instead
+            </Text>
+          )}
+
+          {/* Content */}
           {loading ? (
-            <View style={styles.center}><ActivityIndicator color="#6C63FF" size="large" /></View>
+            <View style={s.loader}>
+              <ActivityIndicator size="large" color={accent} />
+              <Text style={{ color: sub, marginTop: 12 }}>Loading GIFs…</Text>
+            </View>
+          ) : useFallback ? (
+            <FlatList
+              data={FALLBACK_GIFS}
+              keyExtractor={item => item.id}
+              numColumns={4}
+              contentContainerStyle={s.fallbackGrid}
+              renderItem={renderFallback}
+              showsVerticalScrollIndicator={false}
+            />
           ) : (
             <FlatList
               data={gifs}
-              keyExtractor={(item) => item.id}
-              renderItem={renderGif}
+              keyExtractor={item => item.id}
               numColumns={2}
-              columnWrapperStyle={styles.row}
+              contentContainerStyle={s.gifGrid}
+              renderItem={renderGif}
               showsVerticalScrollIndicator={false}
-              contentContainerStyle={{ paddingBottom: 16 }}
-              ListEmptyComponent={searched ? <View style={styles.center}><Text style={{ color: c.muted }}>No GIFs found</Text></View> : null}
+              ListEmptyComponent={
+                <View style={s.emptyBox}>
+                  <Text style={{ fontSize: 40, marginBottom: 10 }}>🎭</Text>
+                  <Text style={{ color: sub }}>No GIFs found</Text>
+                </View>
+              }
             />
           )}
-          <Text style={[styles.powered, { color: c.muted }]}>Powered by GIPHY</Text>
         </View>
       </KeyboardAvoidingView>
     </Modal>
   );
 }
 
-const styles = StyleSheet.create({
-  overlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
-  sheet: { height: '75%', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  title: { fontSize: 18, fontWeight: '700' },
-  close: { fontSize: 18, fontWeight: '600', padding: 4 },
-  searchRow: { flexDirection: 'row', alignItems: 'center', borderRadius: 12, paddingHorizontal: 12, height: 42, marginBottom: 12 },
-  searchIcon: { fontSize: 14, marginRight: 8 },
-  searchInput: { flex: 1, fontSize: 15 },
-  row: { justifyContent: 'space-between', marginBottom: 8 },
-  gifCell: { width: COL_WIDTH, height: COL_WIDTH * 0.7, borderRadius: 10, overflow: 'hidden', backgroundColor: '#2C2C2E' },
-  gifImage: { width: '100%', height: '100%' },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 60 },
-  powered: { fontSize: 11, textAlign: 'center', marginTop: 8 },
+const s = StyleSheet.create({
+  overlay:      { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  sheet:        { borderTopLeftRadius: 28, borderTopRightRadius: 28, maxHeight: '80%', paddingBottom: 34 },
+  handle:       { width: 40, height: 4, borderRadius: 2, alignSelf: 'center', marginTop: 12, marginBottom: 4 },
+  headerRow:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 14 },
+  headerTitle:  { fontSize: 17, fontWeight: '700' },
+  closeBtn:     { padding: 4 },
+  searchRow:    { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginBottom: 12, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, borderWidth: 1 },
+  searchInput:  { flex: 1, fontSize: 15 },
+  errorText:    { textAlign: 'center', fontSize: 13, marginBottom: 10, paddingHorizontal: 20 },
+  loader:       { height: 200, alignItems: 'center', justifyContent: 'center' },
+  gifGrid:      { paddingHorizontal: 12, gap: 6 },
+  gifItem:      { width: COL_WIDTH, height: COL_WIDTH * 0.75, margin: 3, borderRadius: 12, overflow: 'hidden', backgroundColor: '#111' },
+  gifImg:       { width: '100%', height: '100%' },
+  fallbackGrid: { paddingHorizontal: 16, paddingBottom: 20 },
+  fallbackItem: { flex: 1, margin: 6, borderRadius: 14, paddingVertical: 14, alignItems: 'center', justifyContent: 'center' },
+  emptyBox:     { alignItems: 'center', paddingTop: 40 },
 });

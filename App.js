@@ -98,14 +98,14 @@ function MainTabs() {
         headerShown: false,
         tabBarStyle: { backgroundColor:tabBg, borderTopColor:border, borderTopWidth:0.5, height:80, paddingBottom:16, paddingTop:8 },
         tabBarActiveTintColor:   accent,
-        tabBarInactiveTintColor: '#666',
+        tabBarInactiveTintColor: '#aaaaaa',
         tabBarLabelStyle: { fontSize:11, fontWeight:'600', marginTop:2 },
       }}>
-      <Tab.Screen name="Chats"    component={ChatsScreen}   options={{ tabBarIcon:({focused})=><Text style={{fontSize:24,opacity:focused?1:0.6}}>💬</Text> }}/>
-      <Tab.Screen name="Calls"    component={CallScreen}    options={{ tabBarIcon:({focused})=><Text style={{fontSize:24,opacity:focused?1:0.6}}>📞</Text> }}/>
-      <Tab.Screen name="Groups"   component={GroupScreen}   options={{ tabBarIcon:({focused})=><Text style={{fontSize:24,opacity:focused?1:0.6}}>👥</Text> }}/>
-      <Tab.Screen name="Discover" component={DiscoverScreen}options={{ tabBarIcon:({focused})=><Text style={{fontSize:24,opacity:focused?1:0.6}}>🔍</Text> }}/>
-      <Tab.Screen name="More"     component={MoreScreen}    options={{ tabBarIcon:({focused})=><Text style={{fontSize:24,opacity:focused?1:0.6}}>⋯</Text> }}/>
+      <Tab.Screen name="Chats"    component={ChatsScreen}   options={{ tabBarIcon:({focused})=><Text style={{fontSize:26,opacity:focused?1:0.85}}>💬</Text> }}/>
+      <Tab.Screen name="Calls"    component={CallScreen}    options={{ tabBarIcon:({focused})=><Text style={{fontSize:26,opacity:focused?1:0.85}}>📞</Text> }}/>
+      <Tab.Screen name="Groups"   component={GroupScreen}   options={{ tabBarIcon:({focused})=><Text style={{fontSize:26,opacity:focused?1:0.85}}>👥</Text> }}/>
+      <Tab.Screen name="Discover" component={DiscoverScreen}options={{ tabBarIcon:({focused})=><Text style={{fontSize:26,opacity:focused?1:0.85}}>🔍</Text> }}/>
+      <Tab.Screen name="More"     component={MoreScreen}    options={{ tabBarIcon:({focused})=><Text style={{fontSize:26,opacity:focused?1:0.85}}>⋯</Text> }}/>
     </Tab.Navigator>
   );
 }
