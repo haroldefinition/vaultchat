@@ -3,10 +3,11 @@ import React, { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator }  from '@react-navigation/bottom-tabs';
-import { StatusBar, Text, View, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import { StatusBar, Text, View, TouchableOpacity, StyleSheet, Alert, AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeProvider, useTheme } from './src/services/theme';
-import { setupPushNotifications, addNotificationResponseListener } from './src/services/pushNotifications';
+import { setupPushNotifications, addNotificationResponseListener, clearBadge } from './src/services/pushNotifications';
+import { flushQueue } from './src/services/messageQueue';
 import { isBiometricEnabled } from './src/services/biometric';
 
 // ── Core screens ──────────────────────────────────────────────
@@ -121,6 +122,14 @@ export default function App() {
   useEffect(() => {
     (async () => {
       setupPushNotifications();
+      clearBadge(); // clear badge when app opens
+      flushQueue(); // retry any queued messages from offline period
+
+      // Flush queue + clear badge when app comes back to foreground
+      const appStateSub = AppState.addEventListener('change', state => {
+        if (state === 'active') { flushQueue(); clearBadge(); }
+      });
+
       const cleanup = addNotificationResponseListener(() => {});
 
       // Check auth

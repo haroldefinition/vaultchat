@@ -14,6 +14,9 @@ import { uploadMedia } from '../services/mediaUpload';
 import ContactEditModal from '../components/ContactEditModal';
 import ReplyPreview from '../components/ReplyPreview';
 import { supabase } from '../services/supabase';
+import { subscribeToRoom, subscribeToTyping, broadcastTyping } from '../services/realtimeMessages';
+import { enqueue, flushQueue } from '../services/messageQueue';
+import { markRoomAsRead, markDelivered, receiptIcon } from '../services/readReceipts';
 import { ResolvedPhotoStack, ResolvedVideoCarousel } from '../components/MediaBubbles';
 
 // ── GIFs & Emojis ─────────────────────────────────────────────
@@ -217,9 +220,14 @@ function Bubble({ item, myId, tx, sub, card, accent, onOpenImg, onPlayVid, onRep
         onLongPress={() => onLongPress && onLongPress(item)} delayLongPress={450} activeOpacity={0.88}>
         {body()}
       </TouchableOpacity>
-      <Text style={[s.time, me ? s.tR : s.tL]}>
-        {timeStr}{item.edited ? '  ✎ edited' : ''}
-      </Text>
+      <View style={[s.timeRow, me ? { alignSelf: 'flex-end' } : { alignSelf: 'flex-start' }]}>
+        <Text style={[s.time, me ? s.tR : s.tL]}>
+          {timeStr}{item.edited ? '  ✎' : ''}
+        </Text>
+        {me && (() => { const r = receiptIcon(item.status); return (
+          <Text style={{ fontSize: 11, color: r.color, marginLeft: 3 }}>{r.icon}</Text>
+        ); })()}
+      </View>
     </View>
   );
 }
@@ -233,7 +241,10 @@ export default function ChatRoomScreen({ route, navigation }) {
   const [text,         setText]         = useState('');
   const [sending,      setSending]      = useState(false);
   const [myId,         setMyId]         = useState('');
+  const [myHandle,     setMyHandle]     = useState('');
   const [replyTo,      setReplyTo]      = useState(null);
+  const [typingUsers,  setTypingUsers]  = useState([]);   // [{handle}] currently typing
+  const [pendingCount, setPendingCount] = useState(0);    // queued messages awaiting send
   const [menuMsg,      setMenuMsg]      = useState(null);
   const [menuVis,      setMenuVis]      = useState(false);
   const [editingMsg,   setEditingMsg]   = useState(null);   // message being edited
@@ -261,9 +272,58 @@ export default function ChatRoomScreen({ route, navigation }) {
   useEffect(() => {
     loadUser();
     fetchMessages();
-    const poll = setInterval(fetchMessages, 3000);
-    return () => clearInterval(poll);
-  }, [roomId]);
+    // Flush any queued messages from offline period
+    flushQueue().catch(() => {});
+
+    // Supabase Realtime — instant message delivery
+    // (requires Realtime enabled on 'messages' table in Supabase Dashboard)
+    const unsubRoom = subscribeToRoom(
+      roomId,
+      // onInsert: new message arrives instantly
+      (newMsg) => {
+        setMessages(prev => {
+          // Don't add if we already have it (temp or real)
+          if (prev.find(m => m.id === newMsg.id || m.content === newMsg.content && m.sender_id === newMsg.sender_id)) {
+            // Replace temp with confirmed
+            const updated = prev.map(m =>
+              m.sender_id === newMsg.sender_id && m.content === newMsg.content && String(m.id).startsWith('temp_')
+                ? newMsg : m
+            );
+            AsyncStorage.setItem(`vaultchat_msgs_${roomId}`, JSON.stringify(updated.filter(m => !String(m.id).startsWith('temp_')))).catch(() => {});
+            return updated;
+          }
+          const next = [...prev, newMsg];
+          AsyncStorage.setItem(`vaultchat_msgs_${roomId}`, JSON.stringify(next.filter(m => !String(m.id).startsWith('temp_')))).catch(() => {});
+          setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 60);
+          // Mark as delivered when we receive someone else's message
+          markDelivered(newMsg.id, myId, newMsg.sender_id);
+          return next;
+        });
+      },
+      // onUpdate: message edited or status changed
+      (updatedMsg) => {
+        setMessages(prev => prev.map(m => m.id === updatedMsg.id ? { ...m, ...updatedMsg } : m));
+      }
+    );
+
+    // Typing indicator subscription
+    const unsubTyping = subscribeToTyping(roomId, ({ userId, handle, isTyping }) => {
+      setTypingUsers(prev => {
+        if (isTyping && userId !== myId) {
+          return prev.find(t => t.userId === userId) ? prev : [...prev, { userId, handle }];
+        }
+        return prev.filter(t => t.userId !== userId);
+      });
+    });
+
+    // Fallback poll (slower) in case Realtime not enabled
+    const poll = setInterval(fetchMessages, 8000);
+    return () => {
+      clearInterval(poll);
+      unsubRoom();
+      unsubTyping();
+    };
+  }, [roomId, myId]);
 
   // Auto-send media/message passed from NewMessageScreen
   useEffect(() => {
@@ -296,12 +356,25 @@ export default function ChatRoomScreen({ route, navigation }) {
   }, [recipientName, recipientPhone, recipientPhoto]);
 
   async function loadUser() {
-    // Try Supabase session first
     const { data } = await supabase.auth.getUser();
-    if (data?.user) { setMyId(data.user.id); return; }
-    // Fall back to AsyncStorage
+    if (data?.user) {
+      setMyId(data.user.id);
+      // Fetch handle for typing indicator
+      const { data: p } = await supabase.from('profiles').select('handle').eq('id', data.user.id).single().catch(() => ({ data: null }));
+      if (p?.handle) setMyHandle(p.handle);
+      // Mark existing messages as read
+      markRoomAsRead(roomId, data.user.id);
+      return;
+    }
     const raw = await AsyncStorage.getItem('vaultchat_user');
-    if (raw) { const u = JSON.parse(raw); setMyId(u.id || u.phone || 'local'); }
+    if (raw) {
+      const u = JSON.parse(raw);
+      const uid = u.id || u.phone || 'local';
+      setMyId(uid);
+      const h = await AsyncStorage.getItem('vaultchat_display_name');
+      if (h) setMyHandle(h);
+      markRoomAsRead(roomId, uid);
+    }
   }
 
   async function fetchMessages() {
@@ -356,6 +429,12 @@ export default function ChatRoomScreen({ route, navigation }) {
         await AsyncStorage.setItem(`vaultchat_msgs_${roomId}`, JSON.stringify([...existing, saved])).catch(() => {});
       }
     } catch {
+      // Network failure — queue for retry
+      await enqueue({
+        tempId,
+        table: 'messages',
+        payload: { room_id: roomId, sender_id: myId, content },
+      });
       const raw = await AsyncStorage.getItem(`vaultchat_msgs_${roomId}`);
       const existing = raw ? JSON.parse(raw) : [];
       await AsyncStorage.setItem(`vaultchat_msgs_${roomId}`, JSON.stringify([...existing, newMsg])).catch(() => {});
@@ -592,6 +671,20 @@ export default function ChatRoomScreen({ route, navigation }) {
         }
       />
 
+      {/* Typing indicator */}
+      {typingUsers.length > 0 && (
+        <View style={[s.typingBar, { backgroundColor: card, borderTopColor: border }]}>
+          <View style={s.typingDots}>
+            <View style={[s.dot, { backgroundColor: sub }]} />
+            <View style={[s.dot, { backgroundColor: sub, opacity: 0.6 }]} />
+            <View style={[s.dot, { backgroundColor: sub, opacity: 0.3 }]} />
+          </View>
+          <Text style={[s.typingTx, { color: sub }]}>
+            {typingUsers.map(t => t.handle || 'Someone').join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing…
+          </Text>
+        </View>
+      )}
+
       {/* Reply bar */}
       {replyTo && (
         <View style={[s.replyBar, { backgroundColor: card, borderTopColor: border }]}>
@@ -684,7 +777,13 @@ export default function ChatRoomScreen({ route, navigation }) {
           <TextInput
             style={[s.input, { backgroundColor: inputBg, color: tx }]}
             placeholder={replyTo ? 'Type your reply...' : 'Message...'}
-            placeholderTextColor={sub} value={text} onChangeText={setText} multiline
+            placeholderTextColor={sub} value={text}
+            onChangeText={v => {
+              setText(v);
+              broadcastTyping(roomId, myId, myHandle || 'them', v.length > 0);
+            }}
+            onBlur={() => broadcastTyping(roomId, myId, myHandle || 'them', false)}
+            multiline
           />
           <TouchableOpacity
             style={[s.sendBtn, { backgroundColor: text.trim() ? accent : inputBg }]}
@@ -904,7 +1003,12 @@ const s = StyleSheet.create({
   replyLabel:  { fontSize: 11, fontWeight: 'bold', marginBottom: 2 },
   replyTx:     { fontSize: 12 },
   replyBar:    { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, borderTopWidth: 1, borderLeftWidth: 4 },
+  timeRow:     { flexDirection: 'row', alignItems: 'center', marginTop: 2, paddingHorizontal: 4 },
   emptyBox:    { alignItems: 'center', paddingTop: 80 },
+  typingBar:   { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth, gap: 8 },
+  typingDots:  { flexDirection: 'row', gap: 3, alignItems: 'center' },
+  dot:         { width: 6, height: 6, borderRadius: 3 },
+  typingTx:    { fontSize: 12, fontStyle: 'italic' },
   emptyTx:     { fontSize: 15, textAlign: 'center' },
   // Staged
   stagedWrap:  { borderTopWidth: 1 },

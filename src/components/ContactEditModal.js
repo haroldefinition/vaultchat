@@ -9,6 +9,7 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { saveContact } from '../services/contactsSync';
+import { supabase } from '../services/supabase';
 
 export default function ContactEditModal({ visible, contact, onClose, onSave, colors = {} }) {
   const {
@@ -55,11 +56,36 @@ export default function ContactEditModal({ visible, contact, onClose, onSave, co
     if (!result.canceled && result.assets?.[0]) setPhoto(result.assets[0].uri);
   }
 
-  function handleSave() {
+  async function handleSave() {
     const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
-    const updated  = {
+    let photoUrl = photo; // default: keep existing (local URI or existing URL)
+
+    // Upload new photo to Supabase Storage if it's a fresh local file URI
+    if (photo && photo.startsWith('file://') || (photo && !photo.startsWith('http') && photo.includes('/'))) {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const ext      = photo.split('.').pop()?.split('?')[0] || 'jpg';
+          const fileName = `contacts/${user.id}/${Date.now()}.${ext}`;
+          // Fetch the local image as a blob
+          const response = await fetch(photo);
+          const blob     = await response.blob();
+          const { data, error } = await supabase.storage
+            .from('avatars')
+            .upload(fileName, blob, { upsert: true, contentType: `image/${ext}` });
+          if (!error && data) {
+            const { data: publicUrl } = supabase.storage.from('avatars').getPublicUrl(fileName);
+            photoUrl = publicUrl.publicUrl;
+          }
+        }
+      } catch {
+        // Upload failed — keep local URI, photo still shows in-app
+      }
+    }
+
+    const updated = {
       ...contact,
-      photo,
+      photo: photoUrl,
       firstName: firstName.trim(),
       lastName:  lastName.trim(),
       name:      fullName || mobile,
@@ -71,7 +97,6 @@ export default function ContactEditModal({ visible, contact, onClose, onSave, co
       url:       url.trim(),
       notes:     notes.trim(),
     };
-    // Save to AsyncStorage + Supabase via sync service
     saveContact(updated).catch(() => {});
     onSave && onSave(updated);
     onClose();

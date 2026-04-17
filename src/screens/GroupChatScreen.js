@@ -7,6 +7,8 @@ import {
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { useTheme } from '../services/theme';
 import { supabase } from '../services/supabase';
+import { subscribeToGroup, subscribeToTyping, broadcastTyping } from '../services/realtimeMessages';
+import { enqueue, flushQueue } from '../services/messageQueue';
 // adsService used only in Discover/OfferInbox — not in private chats
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
@@ -152,6 +154,7 @@ export default function GroupChatScreen({ route, navigation }) {
   const [attachModal,   setAttachModal]   = useState(false);
   const [infoEditModal, setInfoEditModal] = useState(false);
   const [emojiModal,    setEmojiModal]    = useState(false);
+  const [typingUsers,  setTypingUsers]  = useState([]);
   const [editingMsg,    setEditingMsg]    = useState(null);
   const [editText,      setEditText]      = useState('');
 
@@ -164,10 +167,46 @@ export default function GroupChatScreen({ route, navigation }) {
   useEffect(() => {
     initUser();
     loadLocal();        // show cached messages immediately
-    syncSupabase();     // then sync in background
-    pollRef.current = setInterval(syncSupabase, 5000);
+    syncSupabase();
+    flushQueue().catch(() => {});
+
+    // Realtime subscription for instant group messages
+    const unsubGroup = subscribeToGroup(
+      groupId,
+      (newMsg) => {
+        setMessages(prev => {
+          if (prev.find(m => m.id === newMsg.id)) return prev;
+          // Replace matching temp message
+          const replaced = prev.map(m =>
+            m.sender_id === newMsg.sender_id && m.text === newMsg.text && String(m.id).startsWith('temp_')
+              ? newMsg : m
+          );
+          const hasTemp = replaced.some(m => m.id === newMsg.id);
+          const next = hasTemp ? replaced : [...replaced, newMsg];
+          AsyncStorage.setItem(SKEY, JSON.stringify(next.filter(m => !String(m.id).startsWith('temp_')))).catch(() => {});
+          return next;
+        });
+      },
+      (updatedMsg) => {
+        setMessages(prev => prev.map(m => m.id === updatedMsg.id ? { ...m, ...updatedMsg } : m));
+      }
+    );
+
+    // Typing indicators for group
+    const unsubTyping = subscribeToTyping(groupId, ({ userId, handle, isTyping }) => {
+      setTypingUsers(prev => {
+        if (isTyping && userId !== currentUserId) {
+          return prev.find(t => t.userId === userId) ? prev : [...prev, { userId, handle }];
+        }
+        return prev.filter(t => t.userId !== userId);
+      });
+    });
+
+    pollRef.current = setInterval(syncSupabase, 10000); // slower fallback
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
+      unsubGroup();
+      unsubTyping();
     };
   }, [groupId]);
 
@@ -259,7 +298,12 @@ export default function GroupChatScreen({ route, navigation }) {
         });
       }
     } catch {
-      // temp message already saved locally above — it persists
+      // Queue for retry when connection returns
+      await enqueue({
+        tempId,
+        table: 'group_messages',
+        payload: { group_id: groupId, sender_id: currentUserId, sender_handle: currentHandle, text, type },
+      }).catch(() => {});
     }
     // Update group preview
     try {
@@ -531,6 +575,20 @@ export default function GroupChatScreen({ route, navigation }) {
           </View>
         </View>
       ) : (
+        {/* Typing indicator */}
+        {typingUsers.length > 0 && (
+          <View style={[g.typingBar, { backgroundColor: card, borderTopColor: border }]}>
+            <View style={g.typingDots}>
+              <View style={[g.dot, { backgroundColor: sub }]} />
+              <View style={[g.dot, { backgroundColor: sub, opacity: 0.6 }]} />
+              <View style={[g.dot, { backgroundColor: sub, opacity: 0.3 }]} />
+            </View>
+            <Text style={[g.typingTx, { color: sub }]}>
+              {typingUsers.map(t => t.handle || 'Someone').join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing…
+            </Text>
+          </View>
+        )}
+
         <View style={[g.inputBar, { backgroundColor: card, borderTopColor: border }]}>
           <TouchableOpacity style={[g.plusBtn, { backgroundColor: inputBg, borderColor: accent }]} onPress={() => setAttachModal(true)}>
             <Text style={[g.plusTx, { color: accent }]}>+</Text>
@@ -538,7 +596,13 @@ export default function GroupChatScreen({ route, navigation }) {
           <TextInput
             style={[g.input, { color: tx, backgroundColor: inputBg }]}
             placeholder="Message..." placeholderTextColor={sub}
-            value={inputText} onChangeText={setInputText} multiline maxLength={2000} />
+            value={inputText}
+            onChangeText={v => {
+              setInputText(v);
+              broadcastTyping(groupId, currentUserId, currentHandle || 'member', v.length > 0);
+            }}
+            onBlur={() => broadcastTyping(groupId, currentUserId, currentHandle || 'member', false)}
+            multiline maxLength={2000} />
           <TouchableOpacity
             style={[g.sendBtn, { backgroundColor: inputText.trim() ? accent : inputBg }]}
             onPress={() => sendText()} disabled={!inputText.trim() || sending}>
@@ -732,6 +796,10 @@ const g = StyleSheet.create({
   sheetHandle:    { width: 40, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 16 },
   sheetTitle:     { fontWeight: 'bold', fontSize: 16, marginBottom: 16, textAlign: 'center' },
   attachGrid:     { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-around', gap: 16 },
+  typingBar:      { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth, gap: 8 },
+  typingDots:     { flexDirection: 'row', gap: 3, alignItems: 'center' },
+  dot:            { width: 6, height: 6, borderRadius: 3 },
+  typingTx:       { fontSize: 12, fontStyle: 'italic' },
   attachItem:     { alignItems: 'center', width: 72 },
   attachIcon:     { width: 56, height: 56, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
   attachLabel:    { fontSize: 11 },

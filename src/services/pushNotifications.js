@@ -1,87 +1,120 @@
-import { Platform, Alert } from 'react-native';
+// pushNotifications.js — Push notification setup and local notification helpers
+// Push notifications require a native/EAS build — they do NOT work in Expo Go.
+// All code is ready; run `eas build` after Apple Developer enrollment to activate.
+import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-let Notifications;
-try { Notifications = require('expo-notifications'); } catch (e) { Notifications = null; }
+let Notifications = null;
+try { Notifications = require('expo-notifications'); } catch {}
 
-// SECURITY: Never include message content in notifications
-// This counters iOS notification storage extraction vulnerability
+const BACKEND = 'https://vaultchat-production-3a96.up.railway.app';
+
+// ── Notification appearance ────────────────────────────────────
+if (Notifications) {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge:  true,
+    }),
+  });
+}
+
+// ── Request permissions and register device token ─────────────
 export async function setupPushNotifications() {
   if (!Notifications) return null;
   try {
-    Notifications.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldShowAlert: true,
-        shouldPlaySound: true,
-        shouldSetBadge: true,
-      }),
-    });
+    const { status: existing } = await Notifications.getPermissionsAsync();
+    let status = existing;
+    if (existing !== 'granted') {
+      const { status: asked } = await Notifications.requestPermissionsAsync();
+      status = asked;
+    }
+    if (status !== 'granted') return null;
 
-    const { status: existingStatus } = await Notifications.getPermissionsAsync();
-    let finalStatus = existingStatus;
-
-    if (existingStatus !== 'granted') {
-      const { status } = await Notifications.requestPermissionsAsync();
-      finalStatus = status;
+    // Android channel
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync('messages', {
+        name: 'Messages',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 250, 250],
+        sound: true,
+      });
     }
 
-    if (finalStatus !== 'granted') return null;
-
-    let token;
+    // Get Expo push token
+    let token = null;
     try {
-      token = await Notifications.getExpoPushTokenAsync({ projectId: 'cdcdbb60-34c6-4acb-9728-7c321313ebc6' });
-    } catch (e) {
-      // Project ID not configured yet - push notifications will activate after Expo project setup
-      console.log('Push token pending Expo project setup');
+      const t = await Notifications.getExpoPushTokenAsync({
+        projectId: 'cdcdbb60-34c6-4acb-9728-7c321313ebc6',
+      });
+      token = t.data;
+    } catch {
+      // Token unavailable in Expo Go — will work after EAS build
       return null;
     }
 
-    await AsyncStorage.setItem('vaultchat_push_token', token.data);
-    await registerTokenWithServer(token.data);
-    return token.data;
-  } catch (e) {
-    console.log('Push setup error:', e);
-    return null;
-  }
+    if (token) {
+      await AsyncStorage.setItem('vaultchat_push_token', token);
+      await registerTokenWithServer(token);
+    }
+
+    return token;
+  } catch { return null; }
 }
 
+// ── Register token with backend so server can send to this device ──
 async function registerTokenWithServer(token) {
   try {
-    await fetch('https://vaultchat-production-3a96.up.railway.app/push/register', {
+    const raw = await AsyncStorage.getItem('vaultchat_user');
+    if (!raw) return;
+    const user = JSON.parse(raw);
+    await fetch(`${BACKEND}/register-push-token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, platform: Platform.OS }),
+      body: JSON.stringify({ userId: user.id || user.phone, token, platform: Platform.OS }),
     });
-  } catch (e) {}
+  } catch {}
 }
 
-export async function sendPushNotification(expoPushToken, senderName) {
-  // SECURITY: Never include message content in notification body
-  const message = {
-    to: expoPushToken,
-    sound: 'default',
-    title: 'VaultChat',
-    body: `New message from ${senderName || 'someone'}`, // No message content
-    data: { type: 'new_message' }, // No message content in data either
-  };
-
+// ── Send a local notification (works in Expo Go for testing) ──
+export async function showLocalNotification(title, body) {
+  if (!Notifications) return;
   try {
-    await fetch('https://exp.host/--/api/v2/push/send', {
-      method: 'POST',
-      headers: { Accept: 'application/json', 'Accept-encoding': 'gzip, deflate', 'Content-Type': 'application/json' },
-      body: JSON.stringify(message),
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title,
+        body,
+        sound: true,
+        // SECURITY: Never put message content in title or body
+        // Use generic text only — content is end-to-end encrypted
+      },
+      trigger: null, // immediate
     });
-  } catch (e) {}
+  } catch {}
 }
 
-export function addNotificationListener(handler) {
-  if (!Notifications) return () => {};
-  const sub = Notifications.addNotificationReceivedListener(handler);
-  return () => sub.remove();
+// ── Show a new-message notification (content-free for privacy) ──
+export async function notifyNewMessage(senderName, roomId) {
+  await showLocalNotification(
+    'VaultChat',
+    `New message from ${senderName || 'someone'}`
+    // Note: never include actual message content — security requirement
+  );
 }
 
-export function addNotificationResponseListener(handler) {
+// ── Clear badge count when user opens app ─────────────────────
+export async function clearBadge() {
+  if (!Notifications) return;
+  try { await Notifications.setBadgeCountAsync(0); } catch {}
+}
+
+// ── Listen for notification taps to navigate to the right chat ─
+export function addNotificationResponseListener(onResponse) {
   if (!Notifications) return () => {};
-  const sub = Notifications.addNotificationResponseReceivedListener(handler);
+  const sub = Notifications.addNotificationResponseReceivedListener(response => {
+    const data = response.notification.request.content.data;
+    if (data?.roomId && onResponse) onResponse(data);
+  });
   return () => sub.remove();
 }
