@@ -27,7 +27,7 @@ export function ThemeProvider({ children }) {
     border:    lightMode ? '#d0e8ff' : '#1a2035',
     inputBg:   lightMode ? '#e8f4ff' : '#141828',
     // Fiji teal — tropical blue-green, bright and vibrant
-    accent:    lightMode ? '#0079bf' : '#00C2A8',
+    accent:    lightMode ? '#0079bf' : '#90D5FF',
     sectionBg: lightMode ? '#ddeeff' : '#080b12',
   };
 

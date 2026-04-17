@@ -314,7 +314,7 @@ export default function SettingsScreen({ navigation }) {
   return (
     <View style={{ flex: 1, backgroundColor: bg }}>
       <ScrollView contentContainerStyle={{ paddingBottom: 60 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 4 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 56, paddingBottom: 8 }}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={{ marginRight: 12 }}>
             <Text style={{ color: accent, fontSize: 28, fontWeight: 'bold' }}>‹</Text>
           </TouchableOpacity>
@@ -441,7 +441,7 @@ export default function SettingsScreen({ navigation }) {
 }
 
 const st = StyleSheet.create({
-  header: { fontSize: 28, fontWeight: 'bold', padding: 20, paddingTop: 60 },
+  header: { fontSize: 28, fontWeight: 'bold' },
   navBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 56, paddingBottom: 14, borderBottomWidth: 1 },
   navTitle: { fontSize: 16, fontWeight: 'bold', textAlign: 'center' },
   profileCard: { margin: 16, borderRadius: 20, borderWidth: 1, padding: 16, flexDirection: 'row', alignItems: 'center' },

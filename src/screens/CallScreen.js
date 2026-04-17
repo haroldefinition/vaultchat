@@ -181,6 +181,8 @@ export default function CallScreen({ navigation }) {
   const [tab,            setTab]            = useState('recent');
   const [dialInput,      setDialInput]      = useState('');
   const [editCallModal,  setEditCallModal]  = useState(false);
+  const [infoModal,      setInfoModal]      = useState(false);
+  const [infoTarget,     setInfoTarget]     = useState(null);
   const [editCallTarget, setEditCallTarget] = useState(null);
 
   useEffect(() => {
@@ -299,6 +301,11 @@ export default function CallScreen({ navigation }) {
                   {item.duration ? <Text style={[s.callDuration, { color: sub }]}>⏱ {item.duration}</Text> : null}
                 </View>
                 <View style={s.callActions}>
+                  <TouchableOpacity
+                    style={[s.infoBtn, { borderColor: accent }]}
+                    onPress={() => { setInfoTarget(item); setInfoModal(true); }}>
+                    <Text style={[s.infoBtnText, { color: accent }]}>i</Text>
+                  </TouchableOpacity>
                   <TouchableOpacity style={[s.callBtn, { backgroundColor: '#34C759' }]} onPress={() => makeCall(item.name, item.number, 'voice')}>
                     <Text style={{ fontSize: 18 }}>📞</Text>
                   </TouchableOpacity>
@@ -318,6 +325,60 @@ export default function CallScreen({ navigation }) {
           />
         </View>
       )}
+
+      {/* Call info modal */}
+      <Modal visible={infoModal} transparent animationType="fade" onRequestClose={() => setInfoModal(false)}>
+        <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' }} activeOpacity={1} onPress={() => setInfoModal(false)}>
+          <View style={[s.infoSheet, { backgroundColor: card }]}>
+            {/* Caller avatar */}
+            <View style={[s.infoAvatar, { backgroundColor: infoTarget?.type === 'missed' ? '#ff444433' : accent + '33' }]}>
+              <Text style={[s.infoAvatarTx, { color: infoTarget?.type === 'missed' ? '#ff4444' : accent }]}>
+                {(infoTarget?.name || '?')[0]}
+              </Text>
+            </View>
+            <Text style={[s.infoName, { color: tx }]}>{infoTarget?.name || 'Unknown'}</Text>
+            <Text style={[s.infoNumber, { color: sub }]}>{infoTarget?.number || ''}</Text>
+
+            {/* Detail rows */}
+            <View style={[s.infoDivider, { backgroundColor: border }]} />
+            {[
+              { icon: typeIcon(infoTarget?.type || 'incoming'), label: 'Type',     val: infoTarget?.type === 'incoming' ? 'Incoming Call' : infoTarget?.type === 'outgoing' ? 'Outgoing Call' : 'Missed Call' },
+              { icon: '🕐',                                      label: 'Time',     val: infoTarget?.time || '—' },
+              { icon: '⏱',                                      label: 'Duration', val: infoTarget?.duration || 'N/A' },
+            ].map(row => (
+              <View key={row.label} style={[s.infoRow, { borderBottomColor: border }]}>
+                <Text style={{ fontSize: 18, width: 30 }}>{row.icon}</Text>
+                <Text style={[s.infoRowLabel, { color: sub }]}>{row.label}</Text>
+                <Text style={[s.infoRowVal, { color: tx }]}>{row.val}</Text>
+              </View>
+            ))}
+            <View style={[s.infoDivider, { backgroundColor: border }]} />
+
+            {/* Action buttons */}
+            <View style={s.infoActions}>
+              <TouchableOpacity style={[s.infoActionBtn, { backgroundColor: '#34C75922' }]}
+                onPress={() => { setInfoModal(false); makeCall(infoTarget?.name, infoTarget?.number, 'voice'); }}>
+                <Text style={{ fontSize: 22 }}>📞</Text>
+                <Text style={{ color: '#34C759', fontSize: 12, fontWeight: '600', marginTop: 4 }}>Call Back</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[s.infoActionBtn, { backgroundColor: '#1a73e822' }]}
+                onPress={() => { setInfoModal(false); makeCall(infoTarget?.name, infoTarget?.number, 'video'); }}>
+                <Text style={{ fontSize: 22 }}>📹</Text>
+                <Text style={{ color: '#1a73e8', fontSize: 12, fontWeight: '600', marginTop: 4 }}>FaceTime</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[s.infoActionBtn, { backgroundColor: accent + '22' }]}
+                onPress={() => { setInfoModal(false); setEditCallTarget(infoTarget); setEditCallModal(true); }}>
+                <Text style={{ fontSize: 22 }}>✏️</Text>
+                <Text style={[{ fontSize: 12, fontWeight: '600', marginTop: 4, color: accent }]}>Edit</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity style={[s.infoDismiss, { borderTopColor: border }]} onPress={() => setInfoModal(false)}>
+              <Text style={{ color: sub, fontWeight: '600', fontSize: 16 }}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {/* Universal contact edit modal */}
       <ContactEditModal
@@ -373,4 +434,19 @@ const s = StyleSheet.create({
   greenCallBtn:     { width: 70, height: 70, borderRadius: 35, backgroundColor: '#34C759', alignItems: 'center', justifyContent: 'center' },
   greenCallIcon:    { fontSize: 30 },
   facetimeCallBtn:  { marginTop: 16, paddingHorizontal: 28, paddingVertical: 14, backgroundColor: '#1a73e8', borderRadius: 30, alignItems: 'center' },
+  infoBtn:         { width: 32, height: 32, borderRadius: 16, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  infoBtnText:     { fontSize: 14, fontWeight: '800', lineHeight: 18 },
+  infoSheet:       { borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingBottom: 40, paddingTop: 8 },
+  infoAvatar:      { width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center', alignSelf: 'center', marginTop: 20, marginBottom: 12 },
+  infoAvatarTx:    { fontSize: 34, fontWeight: '700' },
+  infoName:        { fontSize: 22, fontWeight: '700', textAlign: 'center' },
+  infoNumber:      { fontSize: 14, textAlign: 'center', marginTop: 4, marginBottom: 16 },
+  infoDivider:     { height: 1, marginHorizontal: 0, marginVertical: 8 },
+  infoRow:         { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 24, paddingVertical: 13, borderBottomWidth: StyleSheet.hairlineWidth, gap: 12 },
+  infoRowLabel:    { fontSize: 14, width: 70 },
+  infoRowVal:      { fontSize: 14, fontWeight: '600', flex: 1 },
+  infoActions:     { flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: 24, paddingVertical: 16 },
+  infoActionBtn:   { alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, borderRadius: 18, minWidth: 90 },
+  infoDismiss:     { alignItems: 'center', paddingVertical: 16, borderTopWidth: StyleSheet.hairlineWidth },
+
 });
