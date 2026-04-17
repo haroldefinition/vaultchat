@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, Modal, Image, Alert } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, Modal, Image, Alert, ScrollView } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../services/theme';
@@ -204,6 +204,29 @@ export default function ChatsScreen({ navigation }) {
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
+      </Modal>
+
+      {/* Edit avatar/contact modal */}
+      <Modal visible={editModalVis} animationType="slide" transparent onRequestClose={() => setEditModalVis(false)}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
+          <EditChatContact
+            item={editTarget}
+            onClose={() => { setEditModalVis(false); setEditTarget(null); }}
+            onSave={async (updated) => {
+              try {
+                const raw = await AsyncStorage.getItem('vaultchat_chats');
+                if (raw) {
+                  const parsed = JSON.parse(raw);
+                  const next = parsed.map(ch => ch.roomId === updated.roomId ? { ...ch, ...updated } : ch);
+                  await AsyncStorage.setItem('vaultchat_chats', JSON.stringify(next));
+                  setChats(next);
+                }
+              } catch {}
+              setEditModalVis(false); setEditTarget(null);
+            }}
+            accent={accent} bg={bg} card={card} tx={tx} sub={sub} border={border} inputBg={inputBg}
+          />
+        </View>
       </Modal>
     </View>
   );

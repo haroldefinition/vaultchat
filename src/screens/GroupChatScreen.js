@@ -142,6 +142,7 @@ export default function GroupChatScreen({ route, navigation }) {
   const [fullImgUri,    setFullImgUri]    = useState(null);
   const [vidUri,        setVidUri]        = useState(null);
   const [attachModal,   setAttachModal]   = useState(false);
+  const [emojiModal,    setEmojiModal]    = useState(false);
 
   const flatRef      = useRef(null);
   const pollRef      = useRef(null);
@@ -341,6 +342,8 @@ export default function GroupChatScreen({ route, navigation }) {
       sendText(`📍 https://maps.google.com/?q=${loc.coords.latitude},${loc.coords.longitude}`);
     } else if (type === 'gif') {
       setGifVisible(true);
+    } else if (type === 'emoji') {
+      setEmojiModal(true);
     }
   }
 
@@ -363,7 +366,21 @@ export default function GroupChatScreen({ route, navigation }) {
     { icon: '📸', label: 'Camera',   type: 'camera'   },
     { icon: '📁', label: 'File',     type: 'file'     },
     { icon: '🎭', label: 'GIF',      type: 'gif'      },
+    { icon: '😀', label: 'Emoji',    type: 'emoji'    },
     { icon: '📍', label: 'Location', type: 'location' },
+  ];
+
+  const EMOJIS = [
+    '😀','😃','😄','😁','😆','😅','🤣','😂','🙂','🙃','😉','😊','😇','🥰','😍','🤩',
+    '😘','😋','😛','😜','🤪','😝','🤑','🤗','🤭','🤫','🤔','🤐','🤨','😐','😑','😏',
+    '😒','🙄','😬','😌','😔','😪','😴','😷','🤒','🤕','🤢','🤮','🤧','🥵','🥶','😵',
+    '🤯','🤠','🥳','😎','😕','😟','🙁','☹️','😮','😯','😲','😳','🥺','😦','😧','😨',
+    '😰','😥','😢','😭','😱','🥱','😤','😡','😠','🤬','😈','👿','💀','☠️','💩','🤡',
+    '👋','✋','👌','✌️','🤞','🤙','👈','👉','👆','👇','☝️','👍','👎','✊','👊','👏',
+    '🙌','🫶','🙏','💪','❤️','🧡','💛','💚','💙','💜','🖤','🤍','💔','❤️‍🔥','💕',
+    '🎉','🎊','🎁','🎀','🏆','🥇','🎯','🎲','🎮','🎵','🎶','🌸','🌺','🌻','🌹',
+    '💐','🌿','☘️','🍀','🦋','🐶','🐱','🍕','🍔','🌮','🍜','🍣','🍦','🎂','🍰',
+    '☕','🚀','✈️','🏠','🌍','🌈','⭐','🌙','☀️','⚡','🔥','💥','❄️','💎','💯','✨',
   ];
 
   return (
@@ -528,6 +545,30 @@ export default function GroupChatScreen({ route, navigation }) {
             </View>
           </View>
         </TouchableOpacity>
+      </Modal>
+
+      {/* Emoji picker modal */}
+      <Modal visible={emojiModal} transparent animationType="slide">
+        <View style={[g.modalOverlay]}>
+          <View style={[g.sheet, { backgroundColor: card, maxHeight: '65%' }]}>
+            <View style={[g.sheetHandle, { backgroundColor: border }]} />
+            <Text style={[g.sheetTitle, { color: tx }]}>Emoji</Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, paddingBottom: 20 }}>
+                {EMOJIS.map((e, i) => (
+                  <TouchableOpacity key={i}
+                    style={{ width: 46, height: 46, borderRadius: 10, backgroundColor: inputBg, alignItems: 'center', justifyContent: 'center' }}
+                    onPress={() => { setEmojiModal(false); postMsg(e); }}>
+                    <Text style={{ fontSize: 26 }}>{e}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </ScrollView>
+            <TouchableOpacity style={{ borderRadius: 12, padding: 12, alignItems: 'center', marginTop: 8, backgroundColor: inputBg }} onPress={() => setEmojiModal(false)}>
+              <Text style={{ color: sub, fontWeight: 'bold' }}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </Modal>
 
       {/* GIF picker */}
