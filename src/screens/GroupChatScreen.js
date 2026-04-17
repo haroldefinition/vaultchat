@@ -575,21 +575,22 @@ export default function GroupChatScreen({ route, navigation }) {
           </View>
         </View>
       ) : (
-        {/* Typing indicator */}
-        {typingUsers.length > 0 && (
-          <View style={[g.typingBar, { backgroundColor: card, borderTopColor: border }]}>
-            <View style={g.typingDots}>
-              <View style={[g.dot, { backgroundColor: sub }]} />
-              <View style={[g.dot, { backgroundColor: sub, opacity: 0.6 }]} />
-              <View style={[g.dot, { backgroundColor: sub, opacity: 0.3 }]} />
+        <>
+          {/* Typing indicator */}
+          {typingUsers.length > 0 && (
+            <View style={[g.typingBar, { backgroundColor: card, borderTopColor: border }]}>
+              <View style={g.typingDots}>
+                <View style={[g.dot, { backgroundColor: sub }]} />
+                <View style={[g.dot, { backgroundColor: sub, opacity: 0.6 }]} />
+                <View style={[g.dot, { backgroundColor: sub, opacity: 0.3 }]} />
+              </View>
+              <Text style={[g.typingTx, { color: sub }]}>
+                {typingUsers.map(t => t.handle || 'Someone').join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing…
+              </Text>
             </View>
-            <Text style={[g.typingTx, { color: sub }]}>
-              {typingUsers.map(t => t.handle || 'Someone').join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing…
-            </Text>
-          </View>
-        )}
+          )}
 
-        <View style={[g.inputBar, { backgroundColor: card, borderTopColor: border }]}>
+          <View style={[g.inputBar, { backgroundColor: card, borderTopColor: border }]}>
           <TouchableOpacity style={[g.plusBtn, { backgroundColor: inputBg, borderColor: accent }]} onPress={() => setAttachModal(true)}>
             <Text style={[g.plusTx, { color: accent }]}>+</Text>
           </TouchableOpacity>
@@ -609,6 +610,7 @@ export default function GroupChatScreen({ route, navigation }) {
             {sending ? <ActivityIndicator color="#fff" size="small" /> : <Text style={{ color: inputText.trim() ? '#000' : sub, fontSize: 18 }}>➤</Text>}
           </TouchableOpacity>
         </View>
+        </>
       )}
 
       {/* Viewer modals */}
