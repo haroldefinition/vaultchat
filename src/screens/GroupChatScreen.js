@@ -111,7 +111,7 @@ function Bubble({ item, currentUserId, colors, onFullScreen, onPlay, onLongPress
     <TouchableOpacity activeOpacity={0.85} onLongPress={onLongPress} delayLongPress={450}
       style={[g.msgWrapper, isMe ? g.right : g.left]}>
       {!isMe && <Text style={[g.senderHandle, { color: accent }]}>@{item.sender_handle || 'member'}</Text>}
-      <View style={[g.bubble, isMedia && g.mediaPad, { backgroundColor: isMe ? (accent || '#6C63FF') : card }]}>
+      <View style={[g.bubble, isMedia && g.mediaPad, { backgroundColor: isMe ? '#0057a8' : card }]}>
         {body()}
         <Text style={[g.msgTime, { color: isMe ? 'rgba(255,255,255,0.6)' : sub }]}>
           {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
