@@ -1,129 +1,48 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput, Alert,
-  Modal, KeyboardAvoidingView, Platform, FlatList, ScrollView,
-  Animated, Dimensions, Share,
+  Modal, KeyboardAvoidingView, Platform, ScrollView, Share,
 } from 'react-native';
 import { useTheme } from '../services/theme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../services/supabase';
 import { getMyHandle } from '../services/vaultHandle';
+import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Location from 'expo-location';
-import GifPickerModal from '../components/GifPickerModal';
 
-const { width: SW } = Dimensions.get('window');
-const BACKEND = 'https://vaultchat-production-3a96.up.railway.app';
-
-// ── iMessage-style emoji categories ──────────────────────────
-const EMOJI_CATEGORIES = [
-  {
-    label: '😀', title: 'Smileys',
-    emojis: [
-      '😀','😃','😄','😁','😆','😅','🤣','😂','🙂','🙃','🫠','😉','😊','😇',
-      '🥰','😍','🤩','😘','😗','😚','😙','🥲','😋','😛','😜','🤪','😝','🤑',
-      '🤗','🤭','🫢','🫣','🤫','🤔','🫡','🤐','🤨','😐','😑','😶','🫥','😏',
-      '😒','🙄','😬','🤥','😌','😔','😪','🤤','😴','😷','🤒','🤕','🤢','🤮',
-      '🤧','🥵','🥶','🥴','😵','🤯','🤠','🥳','🥸','😎','🤓','🧐','😕','🫤',
-      '😟','🙁','☹️','😮','😯','😲','😳','🥺','🫹','😦','😧','😨','😰','😥',
-      '😢','😭','😱','😖','😣','😞','😓','😩','😫','🥱','😤','😡','😠','🤬',
-      '😈','👿','💀','☠️','💩','🤡','👹','👺','👻','👽','👾','🤖',
-    ],
-  },
-  {
-    label: '👋', title: 'People & Hands',
-    emojis: [
-      '👋','🤚','🖐','✋','🖖','🫱','🫲','🫳','🫴','👌','🤌','🤏','✌️','🤞',
-      '🫰','🤟','🤘','🤙','👈','👉','👆','🖕','👇','☝️','🫵','👍','👎','✊',
-      '👊','🤛','🤜','👏','🙌','🫶','👐','🤲','🤝','🙏','✍️','💅','🤳','💪',
-      '🦾','🦵','🦶','👂','🦻','👃','👀','👁','👅','🫦','👄','🦷','👶','🧒',
-      '👦','👧','🧑','👱','👨','🧔','👩','🧓','👴','👵','🙍','🙎','🙅','🙆',
-      '💁','🙋','🧏','🙇','🤦','🤷','👮','🕵','💂','🥷','👷','🫅','🤴','👸',
-      '👰','🤵','🫄','🤰','🤱','👼','🎅','🤶','🦸','🦹','🧙','🧝','🧛','🧟',
-      '🧞','🧜','🧚','🧑‍🤝‍🧑','👫','👬','👭','💏','💑','👪',
-    ],
-  },
-  {
-    label: '🐶', title: 'Animals',
-    emojis: [
-      '🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐻‍❄️','🐨','🐯','🦁','🐮','🐷',
-      '🐸','🐵','🙈','🙉','🙊','🐔','🐧','🐦','🐤','🦆','🦅','🦉','🦇','🐺',
-      '🐗','🐴','🦄','🐝','🪱','🐛','🦋','🐌','🐞','🐜','🪲','🦟','🦗','🕷',
-      '🦂','🐢','🐍','🦎','🦖','🦕','🐙','🦑','🦐','🦞','🦀','🐡','🐠','🐟',
-      '🐬','🐳','🐋','🦈','🦭','🐊','🐅','🐆','🦓','🦍','🦧','🦣','🐘','🦛',
-      '🦏','🐪','🐫','🦒','🦘','🦬','🐃','🐂','🐄','🐎','🐖','🐏','🐑','🦙',
-      '🐐','🦌','🐕','🐩','🦮','🐕‍🦺','🐈','🐈‍⬛','🪶','🐓','🦃','🦤','🦚','🦜',
-      '🦢','🕊','🐇','🦝','🦨','🦡','🦫','🦦','🦥','🐁','🐀','🐿','🦔','🐾',
-    ],
-  },
-  {
-    label: '🍕', title: 'Food & Drink',
-    emojis: [
-      '🍏','🍎','🍐','🍊','🍋','🍌','🍉','🍇','🍓','🫐','🍈','🍑','🥭','🍍',
-      '🥥','🥝','🍅','🫒','🥑','🍆','🥔','🥕','🌽','🌶','🫑','🥒','🥬','🥦',
-      '🧄','🧅','🥜','🫘','🌰','🍞','🥐','🥖','🫓','🥨','🥯','🥞','🧇','🧀',
-      '🍖','🍗','🥩','🥓','🌭','🍔','🍟','🍕','🫔','🌮','🌯','🥙','🧆','🥚',
-      '🍳','🥘','🍲','🫕','🥣','🥗','🍿','🧂','🥫','🍱','🍘','🍙','🍚','🍛',
-      '🍜','🍝','🍠','🍢','🍣','🍤','🍥','🥮','🍡','🥟','🥠','🥡','🦪','🍦',
-      '🍧','🍨','🍩','🍪','🎂','🍰','🧁','🥧','🍫','🍬','🍭','🍮','🍯','🍼',
-      '🥛','☕','🫖','🍵','🧃','🥤','🧋','🍶','🍺','🍻','🥂','🍷','🥃','🍸',
-    ],
-  },
-  {
-    label: '⚽', title: 'Activities',
-    emojis: [
-      '⚽','🏀','🏈','⚾','🥎','🎾','🏐','🏉','🥏','🎱','🪀','🏓','🏸','🏒',
-      '🏑','🥍','🏏','🪃','🥅','⛳','🪁','🛝','🎣','🤿','🎽','🎿','🛷','🥌',
-      '🎯','🪃','🎱','🎮','🎰','🧩','🪄','♟','🎭','🎨','🖼','🎪','🤹','🎬',
-      '🎤','🎧','🎼','🎵','🎶','🎷','🪗','🎸','🎹','🥁','🪘','🎺','🎻','🪕',
-      '🏆','🥇','🥈','🥉','🏅','🎖','🎗','🏵','🎫','🎟','🎪','🤸','🏋','🤼',
-      '🤺','🤾','⛷','🏂','🏄','🚣','🧗','🚵','🚴','🏇','🤽','🧘','🧗','🏊',
-    ],
-  },
-  {
-    label: '🌍', title: 'Travel & Places',
-    emojis: [
-      '🌍','🌎','🌏','🌐','🗺','🧭','🌋','🏔','⛰','🗻','🏕','🏖','🏜','🏝',
-      '🏞','🏟','🏛','🏗','🧱','🏘','🏚','🏠','🏡','🏢','🏣','🏤','🏥','🏦',
-      '🏨','🏩','🏪','🏫','🏬','🏭','🏯','🏰','💒','🗼','🗽','⛪','🕌','🛕',
-      '🕍','⛩','🕋','⛲','⛺','🌁','🌃','🏙','🌄','🌅','🌆','🌇','🌉','🌌',
-      '🎠','🎡','🎢','✈️','🛩','🚀','🛸','🚁','🛶','⛵','🚤','🛥','🛳','⛴',
-      '🚂','🚃','🚄','🚅','🚆','🚇','🚈','🚉','🚊','🚞','🚝','🚋','🚌','🚍',
-      '🚎','🏎','🚓','🚑','🚒','🚐','🛻','🚚','🚛','🚜','🦯','🦽','🦼','🛴',
-      '🛵','🏍','🚲','🛺','🚨','🚥','🚦','🛑','⛽','🚧','⚓','🛟','🚏','🗺',
-    ],
-  },
-  {
-    label: '💡', title: 'Objects',
-    emojis: [
-      '⌚','📱','📲','💻','⌨️','🖥','🖨','🖱','🖲','💾','💿','📀','📷','📸',
-      '📹','🎥','📽','🎞','📞','☎️','📟','📠','📺','📻','🧭','⏱','⏲','⏰',
-      '🕰','⌛','⏳','📡','🔋','🔌','💡','🔦','🕯','🪔','🧯','💰','💴','💵',
-      '💶','💷','💸','💳','🪙','💹','📈','📉','📊','📦','📫','📪','📬','📭',
-      '📮','🗳','✏️','✒️','🖋','🖊','📝','💼','📁','📂','🗂','📅','📆','🗒',
-      '🗓','📇','📋','📌','📍','✂️','🗃','🗄','🗑','🔒','🔓','🔏','🔐','🔑',
-      '🗝','🔨','🪓','⛏','⚒','🛠','🗡','⚔️','🛡','🪚','🔧','🪛','🔩','⚙️',
-      '🗜','⚗️','🧪','🧫','🧬','🔬','🔭','📡','💊','🩺','🩹','🩻','🩼','🏥',
-    ],
-  },
-  {
-    label: '❤️', title: 'Symbols',
-    emojis: [
-      '❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❤️‍🔥','❤️‍🩹','❣️','💕',
-      '💞','💓','💗','💖','💘','💝','💟','☮️','✝️','☪️','🕉','✡️','🔯','🕎',
-      '☯️','☦️','🛐','⛎','♈','♉','♊','♋','♌','♍','♎','♏','♐','♑','♒','♓',
-      '🆔','⚛️','🉑','☢️','☣️','📴','📳','🈶','🈚','🈸','🈺','🈷️','✴️','🆚',
-      '💮','🉐','㊙️','㊗️','🈴','🈵','🈹','🈲','🅰️','🅱️','🆎','🆑','🅾️','🆘',
-      '❌','⭕','🛑','⛔','📛','🚫','💯','💢','♨️','🚷','🚯','🚳','🚱','🔞',
-      '📵','🔕','🔇','💤','🔃','🔄','🔙','🔚','🔛','🔜','🔝','⚜️','🔱','📛',
-      '🔰','♻️','✅','🈯','💹','❇️','✳️','❎','🌐','💠','Ⓜ️','🌀','💲','➕',
-      '➖','➗','✖️','🟰','♾️','‼️','⁉️','❓','❔','❕','❗','〰️','💱','⚠️',
-      '⬆️','↗️','➡️','↘️','⬇️','↙️','⬅️','↖️','↕️','↔️','↩️','↪️','⤴️','⤵️',
-      '🔀','🔁','🔂','🔼','🔽','⏩','⏪','⏫','⏬','⏭','⏮','⏯','🔊','📣',
-      '🔔','🔕','🎵','🎶','💬','💭','🗯','🔇','📢','🔉','🔈','🔔','🃏','🀄',
-    ],
-  },
+const GIFS = [
+  { emoji: '😂', name: 'Haha',  msg: '😂' },
+  { emoji: '🎉', name: 'Party', msg: '🎉' },
+  { emoji: '👋', name: 'Wave',  msg: '👋' },
+  { emoji: '🔥', name: 'Fire',  msg: '🔥' },
+  { emoji: '💯', name: '100',   msg: '💯' },
+  { emoji: '🤯', name: 'Wow',   msg: '🤯' },
+  { emoji: '👀', name: 'Eyes',  msg: '👀' },
+  { emoji: '💪', name: 'Flex',  msg: '💪' },
+  { emoji: '😎', name: 'Cool',  msg: '😎' },
+  { emoji: '🥳', name: 'Party', msg: '🥳' },
+  { emoji: '❤️', name: 'Love',  msg: '❤️' },
+  { emoji: '🏆', name: 'Win',   msg: '🏆' },
+  { emoji: '😭', name: 'Cry',   msg: '😭' },
+  { emoji: '🤣', name: 'Lol',   msg: '🤣' },
+  { emoji: '💀', name: 'Dead',  msg: '💀' },
+  { emoji: '🫶', name: 'Love',  msg: '🫶' },
 ];
+const EMOJIS = [
+  '😀','😃','😄','😁','😆','😅','🤣','😂','🙂','🙃','😉','😊','😇','🥰','😍','🤩','😘','☺️',
+  '😋','😛','😜','🤪','😝','🤑','🤗','🤭','🤫','🤔','🤐','🤨','😐','😑','😏','😒','🙄','😬',
+  '😌','😔','😪','😴','😷','🤒','🤕','🤢','🤮','🤧','🥵','🥶','🥴','😵','🤯','🤠','🥳','😎',
+  '😕','😟','🙁','☹️','😮','😯','😲','😳','🥺','😦','😧','😨','😰','😥','😢','😭','😱',
+  '🥱','😤','😡','😠','🤬','😈','👿','💀','☠️','💩','🤡','👻','👽','👾','🤖',
+  '👋','✋','👌','✌️','🤞','🤙','👈','👉','👆','👇','☝️','👍','👎','✊','👊','👏','🙌','🫶','🙏','💪',
+  '❤️','🧡','💛','💚','💙','💜','🖤','🤍','💔','❤️‍🔥','💕','💗','💖','💘',
+  '🎉','🎊','🎁','🎀','🏆','🥇','🎯','🎲','🎮','🎵','🎶',
+  '🌸','🌺','🌻','🌹','💐','🌿','☘️','🍀','🦋','🐶','🐱',
+  '🍕','🍔','🌮','🍜','🍣','🍦','🎂','🍰','☕',
+  '🚀','✈️','🏠','🌍','🌈','⭐','🌙','☀️','⚡','🔥','💥','❄️','💎','💯','✨',
+];
+
 
 function generateRoomId(phone1, phone2) {
   const sorted = [phone1.replace(/\D/g,''), phone2.replace(/\D/g,'')].sort();
@@ -140,50 +59,7 @@ function generateRoomId(phone1, phone2) {
 }
 
 // ── Emoji picker panel ────────────────────────────────────────
-function EmojiPicker({ onPick, accent, card, sub, inputBg, border }) {
-  const [catIdx, setCatIdx] = useState(0);
-  const cat = EMOJI_CATEGORIES[catIdx];
-  return (
-    <View style={[ep.wrap, { backgroundColor: card, borderTopColor: border }]}>
-      {/* Category tabs */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}
-        style={[ep.tabs, { borderBottomColor: border }]}
-        contentContainerStyle={{ gap: 2, paddingHorizontal: 8 }}>
-        {EMOJI_CATEGORIES.map((c, i) => (
-          <TouchableOpacity key={i}
-            style={[ep.tab, i === catIdx && { backgroundColor: accent + '33', borderRadius: 10 }]}
-            onPress={() => setCatIdx(i)}>
-            <Text style={{ fontSize: 22 }}>{c.label}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-      {/* Category title */}
-      <Text style={[ep.catTitle, { color: sub }]}>{cat.title.toUpperCase()}</Text>
-      {/* Emojis grid */}
-      <FlatList
-        data={cat.emojis}
-        keyExtractor={(item, i) => `${catIdx}-${i}`}
-        numColumns={8}
-        style={{ maxHeight: 220 }}
-        contentContainerStyle={{ paddingHorizontal: 4, paddingBottom: 8 }}
-        renderItem={({ item }) => (
-          <TouchableOpacity style={ep.emojiBtn} onPress={() => onPick(item)}>
-            <Text style={{ fontSize: 28 }}>{item}</Text>
-          </TouchableOpacity>
-        )}
-      />
-    </View>
-  );
-}
-const ep = StyleSheet.create({
-  wrap:     { borderTopWidth: StyleSheet.hairlineWidth },
-  tabs:     { borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 6 },
-  tab:      { paddingHorizontal: 6, paddingVertical: 4 },
-  catTitle: { fontSize: 10, fontWeight: '700', letterSpacing: 0.8, paddingHorizontal: 14, paddingTop: 8, paddingBottom: 4 },
-  emojiBtn: { flex: 1, aspectRatio: 1, alignItems: 'center', justifyContent: 'center' },
-});
 
-// ── Main Screen ───────────────────────────────────────────────
 export default function NewMessageScreen({ navigation, route }) {
   const { bg, card, tx, sub, border, inputBg, accent } = useTheme();
   const [toInput,       setToInput]       = useState('');
@@ -191,10 +67,12 @@ export default function NewMessageScreen({ navigation, route }) {
   const [user,          setUser]          = useState(null);
   const [selectedName,  setSelectedName]  = useState('');
   const [myHandle,      setMyHandle]      = useState('');
-  const [showEmoji,     setShowEmoji]     = useState(false);
+  // Attachment modals — exact mirror of ChatRoomScreen
   const [attachModal,   setAttachModal]   = useState(false);
-  const [gifVisible,    setGifVisible]    = useState(false);
-  const msgRef        = useRef(null);
+  const [gifModal,      setGifModal]      = useState(false);
+  const [emojiModal,    setEmojiModal]    = useState(false);
+  const [emojiTab,      setEmojiTab]      = useState('emoji');
+
   const pendingAttach = useRef(null);
 
   useEffect(() => {
@@ -206,33 +84,69 @@ export default function NewMessageScreen({ navigation, route }) {
 
   useEffect(() => {
     if (route.params?.selectedContact) {
-      const c = route.params.selectedContact;
-      setToInput(c.handle || c.phone || '');
-      setSelectedName(c.name || c.firstName || '');
+      const ct = route.params.selectedContact;
+      setToInput(ct.handle || ct.phone || '');
+      setSelectedName(ct.name || ct.firstName || '');
     }
   }, [route.params?.selectedContact]);
 
-  // Fire attachment picker AFTER attachModal is fully closed
-  // (native pickers don't open reliably while a Modal is still animating out)
+  // Fire attachment handler AFTER modal is fully dismissed (700ms — same as ChatRoomScreen)
   useEffect(() => {
     if (!attachModal && pendingAttach.current) {
-      const type = pendingAttach.current;
-      pendingAttach.current = null;
-      setTimeout(() => runAttach(type), 600);
+      const t = pendingAttach.current; pendingAttach.current = null;
+      setTimeout(() => handleAttachType(t), 700);
     }
   }, [attachModal]);
 
-  function pickEmoji(e) {
-    setMsg(prev => prev + e);
+  function pickAttach(type) {
+    pendingAttach.current = type;
+    setAttachModal(false);
   }
 
-  function pickGif(gif) {
-    setGifVisible(false);
-    if (gif.isEmoji) {
-      setMsg(prev => prev + gif.url);
-    } else {
-      setMsg(prev => prev + (prev ? ' ' : '') + gif.url);
-    }
+  async function handleAttachType(type) {
+    if (type === 'photo') {
+      const p = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!p.granted) { Alert.alert('Permission needed'); return; }
+      const r = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: 'images', quality: 0.85, allowsMultipleSelection: false,
+      });
+      if (!r.canceled && r.assets?.[0])
+        setMsg(prev => prev + (prev ? '\n' : '') + '🖼️ ' + r.assets[0].uri.split('/').pop());
+    } else if (type === 'video') {
+      const p = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!p.granted) { Alert.alert('Permission needed'); return; }
+      const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'videos', quality: 1 });
+      if (!r.canceled && r.assets?.[0])
+        setMsg(prev => prev + (prev ? '\n' : '') + '🎥 ' + r.assets[0].uri.split('/').pop());
+    } else if (type === 'camera') {
+      const p = await ImagePicker.requestCameraPermissionsAsync();
+      if (!p.granted) { Alert.alert('Permission needed'); return; }
+      const r = await ImagePicker.launchCameraAsync({ quality: 0.85 });
+      if (!r.canceled && r.assets?.[0])
+        setMsg(prev => prev + (prev ? '\n' : '') + '📷 Photo captured');
+    } else if (type === 'file') {
+      const r = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
+      if (!r.canceled && r.assets?.[0])
+        setMsg(prev => prev + (prev ? '\n' : '') + '📁 ' + r.assets[0].name);
+    } else if (type === 'airdrop') {
+      try {
+        const p = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!p.granted) { Alert.alert('Permission needed'); return; }
+        const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'all', quality: 1, allowsMultipleSelection: false });
+        if (!r.canceled && r.assets?.[0]) {
+          await Share.share(
+            { url: r.assets[0].uri, message: 'Shared via VaultChat — encrypted messaging' },
+            { dialogTitle: 'Send via AirDrop or Nearby Share' }
+          );
+        }
+      } catch { /* dismissed */ }
+    } else if (type === 'location') {
+      const p = await Location.requestForegroundPermissionsAsync();
+      if (!p.granted) { Alert.alert('Permission needed'); return; }
+      const loc = await Location.getCurrentPositionAsync({});
+      setMsg(prev => prev + (prev ? '\n' : '') + `📍 https://maps.google.com/?q=${loc.coords.latitude},${loc.coords.longitude}`);
+    } else if (type === 'gif')   { setGifModal(true);
+    } else if (type === 'emoji') { setEmojiModal(true); }
   }
 
   const ATTACHMENTS = [
@@ -246,61 +160,6 @@ export default function NewMessageScreen({ navigation, route }) {
     { icon: '📍', label: 'Location', type: 'location' },
   ];
 
-  // Called from attachment sheet — just closes modal, stores type
-  function pickAttach(type) {
-    pendingAttach.current = type;
-    setAttachModal(false);
-  }
-
-  // Called by useEffect after modal is fully dismissed
-  async function runAttach(type) {
-    if (type === 'photo') {
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) { Alert.alert('Permission needed'); return; }
-      const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 0.85 });
-      if (!r.canceled && r.assets?.[0]) setMsg(prev => prev + '🖼️ ' + r.assets[0].uri.split('/').pop());
-    } else if (type === 'video') {
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) { Alert.alert('Permission needed'); return; }
-      const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'videos', quality: 1 });
-      if (!r.canceled && r.assets?.[0]) setMsg(prev => prev + '🎥 ' + r.assets[0].uri.split('/').pop());
-    } else if (type === 'camera') {
-      const perm = await ImagePicker.requestCameraPermissionsAsync();
-      if (!perm.granted) { Alert.alert('Permission needed'); return; }
-      const r = await ImagePicker.launchCameraAsync({ quality: 0.85 });
-      if (!r.canceled && r.assets?.[0]) setMsg(prev => prev + '📷 Photo captured');
-    } else if (type === 'file') {
-      const r = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
-      if (!r.canceled && r.assets?.[0]) {
-        const f = r.assets[0];
-        // Store file reference in message — can be opened when sent
-        setMsg(prev => prev + (prev ? ' ' : '') + `📁 ${f.name}`);
-      }
-    } else if (type === 'gif') {
-      setGifVisible(true);
-    } else if (type === 'emoji') {
-      setShowEmoji(v => !v);
-    } else if (type === 'airdrop') {
-      try {
-        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (!perm.granted) { Alert.alert('Permission needed', 'Allow photo access to use AirDrop/Nearby Share.'); return; }
-        const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'all', quality: 1, allowsMultipleSelection: false });
-        if (!r.canceled && r.assets?.[0]) {
-          await Share.share(
-            { url: r.assets[0].uri, message: 'Shared via VaultChat — encrypted messaging' },
-            { dialogTitle: 'Send via AirDrop or Nearby Share' }
-          );
-        }
-      } catch {
-        // Share dismissed — not an error
-      }
-    } else if (type === 'location') {
-      const perm = await Location.requestForegroundPermissionsAsync();
-      if (!perm.granted) { Alert.alert('Permission needed'); return; }
-      const loc = await Location.getCurrentPositionAsync({});
-      setMsg(prev => prev + `📍 https://maps.google.com/?q=${loc.coords.latitude.toFixed(5)},${loc.coords.longitude.toFixed(5)}`);
-    }
-  }
 
   async function startChat() {
     const cleaned = toInput.trim();
@@ -355,8 +214,7 @@ export default function NewMessageScreen({ navigation, route }) {
   return (
     <KeyboardAvoidingView
       style={[s.container, { backgroundColor: bg }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={0}>
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
 
       {/* Header */}
       <View style={[s.header, { backgroundColor: card, borderBottomColor: border }]}>
@@ -381,11 +239,9 @@ export default function NewMessageScreen({ navigation, route }) {
           value={toInput}
           onChangeText={v => { setToInput(v); setSelectedName(''); }}
           autoCapitalize="none"
-          keyboardType="default"
           autoFocus
           returnKeyType="done"
         />
-        {/* + button → ContactPicker */}
         <TouchableOpacity
           style={[s.toPickBtn, { backgroundColor: accent }]}
           onPress={() => navigation.navigate('ContactPicker')}>
@@ -407,51 +263,35 @@ export default function NewMessageScreen({ navigation, route }) {
 
       <View style={{ flex: 1 }} />
 
-      {/* Emoji picker panel (slides up above input bar) */}
-      {showEmoji && (
-        <EmojiPicker
-          onPick={pickEmoji}
-          accent={accent} card={card} sub={sub} inputBg={inputBg} border={border}
-        />
-      )}
-
-      {/* Input bar */}
+      {/* Input bar — identical to ChatRoomScreen */}
       <View style={[s.inputBar, { backgroundColor: card, borderTopColor: border }]}>
-        {/* + Attachments button — matches GroupChatScreen plusBtn */}
         <TouchableOpacity
           style={[s.plusBtn, { backgroundColor: inputBg, borderColor: accent }]}
           onPress={() => setAttachModal(true)}>
           <Text style={[s.plusTx, { color: accent }]}>+</Text>
         </TouchableOpacity>
-
         <TextInput
-          ref={msgRef}
-          style={[s.msgInput, { backgroundColor: inputBg, color: tx }]}
+          style={[s.input, { backgroundColor: inputBg, color: tx }]}
           placeholder="Message…"
           placeholderTextColor={sub}
           value={msg}
           onChangeText={setMsg}
-          onFocus={() => setShowEmoji(false)}
           multiline
           maxLength={2000}
         />
-
-        {/* Send */}
         <TouchableOpacity
           style={[s.sendBtn, { backgroundColor: toInput.trim().length >= 3 ? accent : inputBg }]}
           onPress={startChat}
           disabled={toInput.trim().length < 3}>
-          <Text style={{ color: toInput.trim().length >= 3 ? '#000' : sub, fontSize: 18, fontWeight: '700' }}>
-            ➤
-          </Text>
+          <Text style={{ color: toInput.trim().length >= 3 ? '#000' : sub, fontSize: 18 }}>➤</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Attachment sheet */}
+      {/* Attach sheet — identical to ChatRoomScreen */}
       <Modal visible={attachModal} transparent animationType="slide">
-        <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setAttachModal(false)}>
+        <TouchableOpacity style={s.overlay} activeOpacity={1} onPress={() => setAttachModal(false)}>
           <View style={[s.sheet, { backgroundColor: card }]}>
-            <View style={[s.sheetHandle, { backgroundColor: border }]} />
+            <View style={[s.handle, { backgroundColor: border }]} />
             <View style={s.sheetHeaderRow}>
               <Text style={[s.sheetTitle, { color: tx }]}>Attachments</Text>
               <TouchableOpacity style={[s.sheetXBtn, { backgroundColor: accent }]} onPress={() => setAttachModal(false)}>
@@ -461,10 +301,10 @@ export default function NewMessageScreen({ navigation, route }) {
             <View style={s.attachGrid}>
               {ATTACHMENTS.map((a, i) => (
                 <TouchableOpacity key={i} style={s.attachItem} onPress={() => pickAttach(a.type)}>
-                  <View style={[s.attachIconBox, { backgroundColor: inputBg }]}>
+                  <View style={[s.attachIcon, { backgroundColor: inputBg }]}>
                     <Text style={{ fontSize: 28 }}>{a.icon}</Text>
                   </View>
-                  <Text style={{ fontSize: 11, color: sub, marginTop: 4 }}>{a.label}</Text>
+                  <Text style={[s.attachLabel, { color: sub }]}>{a.label}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -472,60 +312,112 @@ export default function NewMessageScreen({ navigation, route }) {
         </TouchableOpacity>
       </Modal>
 
-      {/* Emoji picker panel (shown above input when emoji attachment tapped) */}
-      {showEmoji && (
-        <View style={[s.emojiPanel, { backgroundColor: card, borderTopColor: border }]}>
-          {/* Header row with title + ✕ inside the panel */}
-          <View style={s.sheetHeaderRow}>
-            <Text style={[s.sheetTitle, { color: tx }]}>Emoji</Text>
-            <TouchableOpacity
-              style={[s.sheetXBtn, { backgroundColor: accent }]}
-              onPress={() => setShowEmoji(false)}>
-              <Text style={s.sheetXTx}>✕</Text>
-            </TouchableOpacity>
+      {/* GIF modal — identical to ChatRoomScreen */}
+      <Modal visible={gifModal} transparent animationType="slide">
+        <View style={s.overlay}>
+          <View style={[s.sheet, { backgroundColor: card, maxHeight: '60%' }]}>
+            <View style={[s.handle, { backgroundColor: border }]} />
+            <View style={s.sheetHeaderRow}>
+              <Text style={[s.sheetTitle, { color: tx }]}>GIFs</Text>
+              <TouchableOpacity style={[s.sheetXBtn, { backgroundColor: accent }]} onPress={() => setGifModal(false)}>
+                <Text style={s.sheetXTx}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={s.gifGrid}>
+              {GIFS.map((g, i) => (
+                <TouchableOpacity key={i} style={[s.gifItem, { backgroundColor: inputBg }]}
+                  onPress={() => { setGifModal(false); setMsg(prev => prev + g.msg); }}>
+                  <Text style={{ fontSize: 32 }}>{g.emoji}</Text>
+                  <Text style={{ fontSize: 10, color: sub, marginTop: 4 }}>{g.name}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
           </View>
-          <EmojiPicker
-            onPick={e => pickEmoji(e)}
-            accent={accent} card={card} sub={sub} inputBg={inputBg} border={border}
-          />
         </View>
-      )}
+      </Modal>
 
-      {/* GIF picker */}
-      <GifPickerModal
-        visible={gifVisible}
-        onClose={() => setGifVisible(false)}
-        onSelectGif={pickGif}
-        colors={{ card, tx, sub, inputBg, border, accent }}
-      />
+      {/* Emoji modal — identical to ChatRoomScreen */}
+      <Modal visible={emojiModal} transparent animationType="slide">
+        <View style={s.overlay}>
+          <View style={[s.sheet, { backgroundColor: card, maxHeight: '65%' }]}>
+            <View style={[s.handle, { backgroundColor: border }]} />
+            <View style={s.sheetHeaderRow}>
+              <Text style={[s.sheetTitle, { color: tx }]}>Emoji & GIFs</Text>
+              <TouchableOpacity style={[s.sheetXBtn, { backgroundColor: accent }]} onPress={() => setEmojiModal(false)}>
+                <Text style={s.sheetXTx}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={[s.tabRow, { backgroundColor: inputBg }]}>
+              {['emoji', 'gif'].map(t => (
+                <TouchableOpacity key={t} style={[s.tab, emojiTab === t && { backgroundColor: card }]}
+                  onPress={() => setEmojiTab(t)}>
+                  <Text style={{ fontSize: 13, fontWeight: 'bold', color: tx }}>
+                    {t === 'emoji' ? '😀 Emoji' : '🎭 GIF'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {emojiTab === 'gif' ? (
+                <View style={s.gifGrid}>
+                  {GIFS.map((g, i) => (
+                    <TouchableOpacity key={i} style={[s.gifItem, { backgroundColor: inputBg }]}
+                      onPress={() => { setEmojiModal(false); setMsg(prev => prev + g.msg); }}>
+                      <Text style={{ fontSize: 32 }}>{g.emoji}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : (
+                <View style={s.emojiGrid}>
+                  {EMOJIS.map((e, i) => (
+                    <TouchableOpacity key={i} style={[s.emojiItem, { backgroundColor: inputBg }]}
+                      onPress={() => { setEmojiModal(false); setMsg(prev => prev + e); }}>
+                      <Text style={{ fontSize: 26 }}>{e}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
 
+
 const s = StyleSheet.create({
-  container:   { flex: 1 },
-  header:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 56, paddingBottom: 14, borderBottomWidth: StyleSheet.hairlineWidth },
-  headerTitle: { fontSize: 17, fontWeight: '700' },
-  toRow:       { flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth, paddingLeft: 16, minHeight: 56 },
-  toLabel:     { fontWeight: '700', fontSize: 16, width: 28 },
-  toInput:     { flex: 1, fontSize: 16, paddingVertical: 14, paddingHorizontal: 8 },
-  toPickBtn:   { width: 52, height: 52, alignItems: 'center', justifyContent: 'center' },
-  badge:       { flexDirection: 'row', alignItems: 'center', margin: 12, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, borderWidth: 1 },
-  inputBar:    { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 8, paddingBottom: 28, borderTopWidth: StyleSheet.hairlineWidth, gap: 6 },
-  toolBtn:     { width: 38, height: 38, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  msgInput:    { flex: 1, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 22, fontSize: 15, maxHeight: 100, minHeight: 42 },
-  sendBtn:     { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
-  plusBtn:      { width: 44, height: 44, borderRadius: 22, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
-  plusTx:       { fontSize: 26, fontWeight: '300', lineHeight: 30 },
-  sheetHeaderRow:{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 4, marginBottom: 8 },
-  sheetXBtn:    { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
-  sheetXTx:     { color: '#000', fontWeight: '900', fontSize: 14 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  sheet:        { borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 20, paddingBottom: 44 },
-  sheetHandle:  { width: 40, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 16, backgroundColor: '#555' },
-  sheetTitle:   { fontWeight: '700', fontSize: 16, textAlign: 'center', marginBottom: 16 },
-  attachGrid:   { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-around', gap: 16 },
-  attachItem:   { alignItems: 'center', width: 72 },
-  attachIconBox:{ width: 56, height: 56, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  emojiPanel:   { position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 100, borderTopWidth: StyleSheet.hairlineWidth },
+  container:      { flex: 1 },
+  header:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 56, paddingBottom: 14, borderBottomWidth: StyleSheet.hairlineWidth },
+  headerTitle:    { fontSize: 17, fontWeight: '700' },
+  toRow:          { flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth, paddingLeft: 16, minHeight: 56 },
+  toLabel:        { fontWeight: '700', fontSize: 16, width: 28 },
+  toInput:        { flex: 1, fontSize: 16, paddingVertical: 14, paddingHorizontal: 8 },
+  toPickBtn:      { width: 52, height: 52, alignItems: 'center', justifyContent: 'center' },
+  badge:          { flexDirection: 'row', alignItems: 'center', margin: 12, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, borderWidth: 1 },
+  // Input bar — mirrors ChatRoomScreen exactly
+  inputBar:       { flexDirection: 'row', alignItems: 'center', padding: 10, paddingHorizontal: 12, borderTopWidth: 1, gap: 8, paddingBottom: 24, minHeight: 70 },
+  plusBtn:        { width: 44, height: 44, borderRadius: 22, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  plusTx:         { fontSize: 26, fontWeight: '300', lineHeight: 30 },
+  input:          { flex: 1, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 22, fontSize: 15, maxHeight: 100, minHeight: 42 },
+  sendBtn:        { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  // Attachment sheet — mirrors ChatRoomScreen exactly
+  overlay:        { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  sheet:          { borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 20, paddingBottom: 44 },
+  handle:         { width: 40, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 16 },
+  sheetHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 4, marginBottom: 8 },
+  sheetTitle:     { fontWeight: 'bold', fontSize: 16, marginBottom: 0, textAlign: 'center' },
+  sheetXBtn:      { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  sheetXTx:       { color: '#000', fontWeight: '900', fontSize: 14 },
+  attachGrid:     { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-around', gap: 16 },
+  attachItem:     { alignItems: 'center', width: 72 },
+  attachIcon:     { width: 58, height: 58, borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
+  attachLabel:    { fontSize: 11 },
+  // GIF + Emoji modals — mirrors ChatRoomScreen exactly
+  gifGrid:        { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingBottom: 12 },
+  gifItem:        { width: '22%', borderRadius: 14, padding: 10, alignItems: 'center' },
+  emojiGrid:      { flexDirection: 'row', flexWrap: 'wrap', gap: 4, paddingBottom: 12 },
+  emojiItem:      { width: 46, height: 46, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  tabRow:         { flexDirection: 'row', marginBottom: 12, borderRadius: 12, padding: 4 },
+  tab:            { flex: 1, padding: 8, borderRadius: 10, alignItems: 'center' },
 });
