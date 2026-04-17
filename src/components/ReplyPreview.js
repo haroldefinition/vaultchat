@@ -1,20 +1,26 @@
-// ReplyPreview — renders reply quotes with actual photo/gallery/video previews.
-// Used in both ChatRoomScreen and GroupChatScreen:
-//   1. Inside the sent message bubble (viewing a reply)
-//   2. In the compose reply bar (before typing a reply)
+// ReplyPreview — renders reply quotes at the same size as the original media bubbles.
+// Used in ChatRoomScreen and GroupChatScreen in both the message bubble and compose bar.
 import React, { useState, useEffect } from 'react';
-import { View, Text, Image, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, Image, StyleSheet, ActivityIndicator, Dimensions } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Loads a local image stored in AsyncStorage by key
+const SW = Dimensions.get('window').width;
+
+// Same widths as the actual chat bubbles (max ~82% of screen, matches bubble maxWidth)
+const PHOTO_W = Math.min(SW * 0.72, 240);
+const PHOTO_H = PHOTO_W * 0.78;          // same ~4:3 ratio as bubble photos
+const VIDEO_W = PHOTO_W;
+const VIDEO_H = PHOTO_W * 0.58;          // same aspect as video bubbles
+
+// Loads a local image from AsyncStorage by key
 function LocalThumb({ msgKey, style }) {
   const [uri, setUri] = useState(null);
   useEffect(() => {
     AsyncStorage.getItem(msgKey).then(v => { if (v) setUri(v); }).catch(() => {});
   }, [msgKey]);
   if (!uri) return (
-    <View style={[style, rp.loadingThumb]}>
-      <ActivityIndicator size="small" color="#555" />
+    <View style={[style, rp.loadingBg]}>
+      <ActivityIndicator size="small" color="#888" />
     </View>
   );
   return <Image source={{ uri }} style={style} resizeMode="cover" />;
@@ -22,30 +28,29 @@ function LocalThumb({ msgKey, style }) {
 
 /**
  * ReplyPreview
- * @param {string} content      — raw content of the message being replied to
- * @param {string} label        — e.g. "↩ Reply" or "↩ Username"
- * @param {string} labelColor   — color for the label text
- * @param {string} textColor    — color for the description text
- * @param {string} borderColor  — left accent border color
+ * @param {string} content     — raw content of the message being replied to
+ * @param {string} label       — "↩ Reply" or "↩ Username"
+ * @param {string} labelColor
+ * @param {string} textColor
+ * @param {string} borderColor — left accent bar color
  */
 export default function ReplyPreview({ content, label, labelColor, textColor, borderColor }) {
   if (!content) return null;
+  const c = (content || '').trim();
 
-  // Larger thumbnail — 80×80 so it's clearly visible
-  const THUMB = { width: 80, height: 80, borderRadius: 10 };
+  const PHOTO_STYLE  = { width: PHOTO_W, height: PHOTO_H, borderRadius: 12 };
+  const VIDEO_STYLE  = { width: VIDEO_W, height: VIDEO_H, borderRadius: 12 };
 
-  const renderContent = () => {
-    const c = (content || '').trim();
+  const renderMedia = () => {
 
     // ── Single local photo ──────────────────────────────────────
     if (c.startsWith('LOCALIMG:')) {
       const key = c.replace('LOCALIMG:', '').split('\n')[0].trim();
       return (
-        <View style={rp.mediaRow}>
-          <LocalThumb msgKey={key} style={THUMB} />
-          <View style={rp.mediaMeta}>
-            <Text style={{ fontSize: 22 }}>📷</Text>
-            <Text style={[rp.mediaLabel, { color: textColor }]}>Photo</Text>
+        <View>
+          <LocalThumb msgKey={key} style={PHOTO_STYLE} />
+          <View style={rp.mediaTag}>
+            <Text style={rp.mediaTagTx}>📷 Photo</Text>
           </View>
         </View>
       );
@@ -55,11 +60,10 @@ export default function ReplyPreview({ content, label, labelColor, textColor, bo
     if (c.startsWith('IMG:')) {
       const uri = c.replace('IMG:', '').split('\n')[0].trim();
       return (
-        <View style={rp.mediaRow}>
-          <Image source={{ uri }} style={THUMB} resizeMode="cover" />
-          <View style={rp.mediaMeta}>
-            <Text style={{ fontSize: 22 }}>📷</Text>
-            <Text style={[rp.mediaLabel, { color: textColor }]}>Photo</Text>
+        <View>
+          <Image source={{ uri }} style={PHOTO_STYLE} resizeMode="cover" />
+          <View style={rp.mediaTag}>
+            <Text style={rp.mediaTagTx}>📷 Photo</Text>
           </View>
         </View>
       );
@@ -71,19 +75,25 @@ export default function ReplyPreview({ content, label, labelColor, textColor, bo
       const count = keys.length;
       const first = keys[0];
       const isLocal = first && !first.startsWith('http');
+      const second  = count > 1 ? keys[1] : null;
+      const HALF_W  = (PHOTO_W - 4) / 2;
+
       return (
-        <View style={rp.mediaRow}>
-          <View style={rp.galleryWrap}>
-            {/* First photo — full size */}
-            {isLocal
-              ? <LocalThumb msgKey={first} style={THUMB} />
-              : <Image source={{ uri: first }} style={THUMB} resizeMode="cover" />}
-            {/* Second photo peeking if there are 2+ */}
-            {count > 1 && keys[1] && (
-              <View style={[rp.galleryPeek, { width: THUMB.width * 0.55, height: THUMB.height, borderRadius: THUMB.borderRadius }]}>
-                {keys[1].startsWith('http')
-                  ? <Image source={{ uri: keys[1] }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-                  : <LocalThumb msgKey={keys[1]} style={StyleSheet.absoluteFill} />}
+        <View>
+          <View style={[rp.galleryRow, { width: PHOTO_W, height: PHOTO_H }]}>
+            {/* First photo — full width if only 1, half width if 2+ */}
+            <View style={{ width: second ? HALF_W : PHOTO_W, height: PHOTO_H, borderRadius: 12, overflow: 'hidden' }}>
+              {isLocal
+                ? <LocalThumb msgKey={first} style={{ width: '100%', height: '100%' }} />
+                : <Image source={{ uri: first }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />}
+            </View>
+
+            {/* Second photo with +N overlay if more remain */}
+            {second && (
+              <View style={{ width: HALF_W, height: PHOTO_H, borderRadius: 12, overflow: 'hidden', marginLeft: 4 }}>
+                {second.startsWith('http')
+                  ? <Image source={{ uri: second }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                  : <LocalThumb msgKey={second} style={{ width: '100%', height: '100%' }} />}
                 {count > 2 && (
                   <View style={rp.countOverlay}>
                     <Text style={rp.countTx}>+{count - 1}</Text>
@@ -92,28 +102,24 @@ export default function ReplyPreview({ content, label, labelColor, textColor, bo
               </View>
             )}
           </View>
-          <View style={rp.mediaMeta}>
-            <Text style={{ fontSize: 22 }}>🖼️</Text>
-            <Text style={[rp.mediaLabel, { color: textColor }]}>
-              {count} photo{count > 1 ? 's' : ''}
-            </Text>
+          <View style={rp.mediaTag}>
+            <Text style={rp.mediaTagTx}>🖼️ {count} photo{count > 1 ? 's' : ''}</Text>
           </View>
         </View>
       );
     }
 
-    // ── Single local video ──────────────────────────────────────
+    // ── Single video ────────────────────────────────────────────
     if (c.startsWith('LOCALVID:') || c.startsWith('VID:')) {
       return (
-        <View style={rp.mediaRow}>
-          <View style={[THUMB, rp.videoBg]}>
+        <View>
+          <View style={[VIDEO_STYLE, rp.videoBg]}>
             <View style={rp.playCircle}>
-              <Text style={{ fontSize: 26, marginLeft: 3 }}>▶</Text>
+              <Text style={rp.playIcon}>▶</Text>
             </View>
           </View>
-          <View style={rp.mediaMeta}>
-            <Text style={{ fontSize: 22 }}>🎥</Text>
-            <Text style={[rp.mediaLabel, { color: textColor }]}>Video</Text>
+          <View style={rp.mediaTag}>
+            <Text style={rp.mediaTagTx}>🎥 Video</Text>
           </View>
         </View>
       );
@@ -123,17 +129,14 @@ export default function ReplyPreview({ content, label, labelColor, textColor, bo
     if (c.startsWith('VIDEOS:')) {
       const count = c.replace('VIDEOS:', '').split('\n')[0].split('|').filter(Boolean).length;
       return (
-        <View style={rp.mediaRow}>
-          <View style={[THUMB, rp.videoBg]}>
+        <View>
+          <View style={[VIDEO_STYLE, rp.videoBg]}>
             <View style={rp.playCircle}>
-              <Text style={{ fontSize: 26, marginLeft: 3 }}>▶</Text>
+              <Text style={rp.playIcon}>▶</Text>
             </View>
           </View>
-          <View style={rp.mediaMeta}>
-            <Text style={{ fontSize: 22 }}>🎥</Text>
-            <Text style={[rp.mediaLabel, { color: textColor }]}>
-              {count} video{count > 1 ? 's' : ''}
-            </Text>
+          <View style={rp.mediaTag}>
+            <Text style={rp.mediaTagTx}>🎥 {count} video{count > 1 ? 's' : ''}</Text>
           </View>
         </View>
       );
@@ -143,14 +146,9 @@ export default function ReplyPreview({ content, label, labelColor, textColor, bo
     if (c.startsWith('FILE:')) {
       const fname = c.replace('FILE:', '').split('|')[0].trim();
       return (
-        <View style={rp.mediaRow}>
-          <View style={[THUMB, rp.fileBg]}>
-            <Text style={{ fontSize: 32 }}>📄</Text>
-          </View>
-          <View style={rp.mediaMeta}>
-            <Text style={{ fontSize: 22 }}>📁</Text>
-            <Text style={[rp.mediaLabel, { color: textColor }]} numberOfLines={2}>{fname}</Text>
-          </View>
+        <View style={rp.fileRow}>
+          <Text style={{ fontSize: 28 }}>📄</Text>
+          <Text style={[rp.fileLabel, { color: textColor }]} numberOfLines={2}>{fname}</Text>
         </View>
       );
     }
@@ -158,55 +156,48 @@ export default function ReplyPreview({ content, label, labelColor, textColor, bo
     // ── Location ────────────────────────────────────────────────
     if (c.startsWith('📍')) {
       return (
-        <View style={rp.mediaRow}>
-          <View style={[THUMB, rp.fileBg]}>
-            <Text style={{ fontSize: 32 }}>📍</Text>
-          </View>
-          <View style={rp.mediaMeta}>
-            <Text style={{ fontSize: 22 }}>🗺️</Text>
-            <Text style={[rp.mediaLabel, { color: textColor }]}>Location</Text>
-          </View>
+        <View style={rp.fileRow}>
+          <Text style={{ fontSize: 28 }}>📍</Text>
+          <Text style={[rp.fileLabel, { color: textColor }]}>Location</Text>
         </View>
       );
     }
 
-    // ── Plain text / emoji / GIF emoji ─────────────────────────
+    // ── Plain text ──────────────────────────────────────────────
     return (
-      <Text style={[rp.textPreview, { color: textColor }]} numberOfLines={2}>
-        {c.startsWith('REPLY:') ? c.substring(c.indexOf('|') + 1) : c}
+      <Text style={[rp.textPreview, { color: textColor }]} numberOfLines={3}>
+        {c}
       </Text>
     );
   };
 
   return (
     <View style={[rp.wrap, { borderLeftColor: borderColor }]}>
-      {label ? (
-        <Text style={[rp.label, { color: labelColor }]}>{label}</Text>
-      ) : null}
-      {renderContent()}
+      {label ? <Text style={[rp.label, { color: labelColor }]}>{label}</Text> : null}
+      {renderMedia()}
     </View>
   );
 }
 
 const rp = StyleSheet.create({
-  wrap:         { borderLeftWidth: 3, paddingLeft: 10, paddingVertical: 6, borderRadius: 4, marginBottom: 8 },
-  label:        { fontSize: 12, fontWeight: '700', marginBottom: 6 },
-  // Media rows
-  mediaRow:     { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  mediaMeta:    { flex: 1, gap: 4 },
-  mediaLabel:   { fontSize: 14, fontWeight: '600' },
+  wrap:        { borderLeftWidth: 3, paddingLeft: 10, paddingVertical: 6, borderRadius: 4, marginBottom: 8 },
+  label:       { fontSize: 12, fontWeight: '700', marginBottom: 6 },
   // Gallery
-  galleryWrap:  { flexDirection: 'row', borderRadius: 10, overflow: 'hidden' },
-  galleryPeek:  { overflow: 'hidden', marginLeft: 3, position: 'relative' },
-  countOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center' },
-  countTx:      { color: '#fff', fontSize: 14, fontWeight: '800' },
+  galleryRow:  { flexDirection: 'row', overflow: 'hidden', borderRadius: 12 },
+  countOverlay:{ ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center' },
+  countTx:     { color: '#fff', fontSize: 20, fontWeight: '800' },
   // Video
-  videoBg:      { backgroundColor: '#111', alignItems: 'center', justifyContent: 'center', borderRadius: 10 },
-  playCircle:   { width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' },
-  // File / location
-  fileBg:       { backgroundColor: '#1a1a2e', alignItems: 'center', justifyContent: 'center', borderRadius: 10 },
-  // Loading
-  loadingThumb: { backgroundColor: '#1a1a2e', alignItems: 'center', justifyContent: 'center' },
+  videoBg:     { backgroundColor: '#111', alignItems: 'center', justifyContent: 'center' },
+  playCircle:  { width: 56, height: 56, borderRadius: 28, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' },
+  playIcon:    { color: '#fff', fontSize: 24, marginLeft: 4 },
+  // Tag beneath media
+  mediaTag:    { flexDirection: 'row', alignItems: 'center', marginTop: 5 },
+  mediaTagTx:  { color: 'rgba(255,255,255,0.75)', fontSize: 12, fontWeight: '600' },
+  // Loading placeholder
+  loadingBg:   { backgroundColor: '#1a1a2e', alignItems: 'center', justifyContent: 'center', borderRadius: 12 },
+  // File / location row
+  fileRow:     { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 },
+  fileLabel:   { fontSize: 14, fontWeight: '600', flex: 1 },
   // Text
-  textPreview:  { fontSize: 13, lineHeight: 18 },
+  textPreview: { fontSize: 13, lineHeight: 18 },
 });
