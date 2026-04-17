@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, TextInput, Modal, StyleSheet,
-  Alert, StatusBar, SafeAreaView, KeyboardAvoidingView, Platform, ScrollView,
+  Alert, StatusBar, KeyboardAvoidingView, Platform, ScrollView,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import ContactEditModal from '../components/ContactEditModal';
 import { useTheme } from '../services/theme';

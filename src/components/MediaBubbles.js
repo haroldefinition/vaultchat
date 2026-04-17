@@ -3,7 +3,7 @@ import {
   View, Text, Image, TouchableOpacity, Modal, StyleSheet,
   Animated, PanResponder, Dimensions, ActivityIndicator,
 } from 'react-native';
-import { Video, ResizeMode } from 'expo-av';
+import { VideoView, useVideoPlayer } from 'expo-video';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width: SW, height: SH } = Dimensions.get('window');
@@ -255,15 +255,20 @@ export function PhotoStack({ keys, onLongPress }) {
   );
 }
 
+// Single video player — useVideoPlayer must be at top level of a component
+function SingleVideoPlayer({ uri, style }) {
+  const player = useVideoPlayer({ uri }, p => { p.pause(); });
+  return <VideoView player={player} style={style} nativeControls contentFit="contain" />;
+}
+
 export function VideoCarousel({ uris, onLongPress }) {
   const [index, setIndex] = useState(0);
-  const videoRef = useRef(null);
-  useEffect(() => { if (videoRef.current) videoRef.current.pauseAsync().catch(()=>{}); }, [index]);
   if (!uris || !uris.length) return null;
   const count = uris.length;
   return (
     <TouchableOpacity activeOpacity={1} onLongPress={onLongPress} delayLongPress={500} style={s.vcRoot}>
-      <Video ref={videoRef} source={{uri:uris[index]}} style={s.vcVideo} resizeMode={ResizeMode.CONTAIN} useNativeControls shouldPlay={false}/>
+      {/* key forces remount (and new useVideoPlayer) when video index changes */}
+      <SingleVideoPlayer key={uris[index]} uri={uris[index]} style={s.vcVideo} />
       {count > 1 && (
         <View style={s.vcNav}>
           <TouchableOpacity style={[s.vcBtn,index===0&&{opacity:0.3}]} onPress={() => setIndex(i=>Math.max(0,i-1))} disabled={index===0}><Text style={s.vcArrow}>‹</Text></TouchableOpacity>

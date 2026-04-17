@@ -4,7 +4,7 @@ import {
   KeyboardAvoidingView, Platform, Image, Modal, Alert, ActivityIndicator,
   ScrollView, Linking,
 } from 'react-native';
-import { Video, ResizeMode } from 'expo-av';
+import { VideoView, useVideoPlayer } from 'expo-video';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
@@ -62,12 +62,14 @@ function FullScreenImg({ uri, visible, onClose }) {
   );
 }
 
-// ── In-app video player ───────────────────────────────────────
+// ── In-app video player (expo-video) ─────────────────────────
+// VideoPlayerInner: hook must be at component top level
+function VideoPlayerInner({ uri, style }) {
+  const player = useVideoPlayer({ uri }, p => { p.play(); });
+  return <VideoView player={player} style={style} nativeControls contentFit="contain" />;
+}
+
 function VideoModal({ uri, visible, onClose }) {
-  const vref = useRef(null);
-  useEffect(() => {
-    if (!visible && vref.current) vref.current.pauseAsync().catch(() => {});
-  }, [visible]);
   if (!visible) return null;
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
@@ -75,8 +77,7 @@ function VideoModal({ uri, visible, onClose }) {
         <TouchableOpacity style={s.fsClose} onPress={onClose}>
           <Text style={s.fsCloseTx}>✕  Close</Text>
         </TouchableOpacity>
-        <Video ref={vref} source={{ uri }} style={s.fsVideo}
-          resizeMode={ResizeMode.CONTAIN} shouldPlay useNativeControls />
+        {uri ? <VideoPlayerInner uri={uri} style={s.fsVideo} /> : null}
       </View>
     </Modal>
   );

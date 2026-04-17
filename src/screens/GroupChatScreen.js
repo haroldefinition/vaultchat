@@ -4,7 +4,7 @@ import {
   KeyboardAvoidingView, Platform, Image, Modal, Alert, Linking,
   ActivityIndicator, ScrollView, Vibration,
 } from 'react-native';
-import { Video, ResizeMode } from 'expo-av';
+import { VideoView, useVideoPlayer } from 'expo-video';
 import { useTheme } from '../services/theme';
 import { supabase } from '../services/supabase';
 // adsService used only in Discover/OfferInbox — not in private chats
@@ -59,9 +59,13 @@ function FullScreenImg({ uri, onClose }) {
   );
 }
 
+// VideoPlayerInner: useVideoPlayer hook must live at component top level
+function VideoPlayerInner({ uri }) {
+  const player = useVideoPlayer({ uri }, p => { p.play(); });
+  return <VideoView player={player} style={{ width: '100%', height: 300 }} nativeControls contentFit="contain" />;
+}
+
 function VideoModal({ uri, onClose }) {
-  const vref = useRef(null);
-  useEffect(() => { return () => { if (vref.current) vref.current.pauseAsync().catch(() => {}); }; }, []);
   if (!uri) return null;
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
@@ -69,7 +73,7 @@ function VideoModal({ uri, onClose }) {
         <TouchableOpacity style={{ position: 'absolute', top: 56, right: 20, zIndex: 10, backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8 }} onPress={onClose}>
           <Text style={{ color: '#fff', fontWeight: 'bold' }}>✕  Close</Text>
         </TouchableOpacity>
-        <Video ref={vref} source={{ uri }} style={{ width: '100%', height: 300 }} resizeMode={ResizeMode.CONTAIN} shouldPlay useNativeControls />
+        <VideoPlayerInner uri={uri} />
       </View>
     </Modal>
   );
