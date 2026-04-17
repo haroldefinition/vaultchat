@@ -194,7 +194,8 @@ export default function NewMessageScreen({ navigation, route }) {
   const [showEmoji,     setShowEmoji]     = useState(false);
   const [attachModal,   setAttachModal]   = useState(false);
   const [gifVisible,    setGifVisible]    = useState(false);
-  const msgRef = useRef(null);
+  const msgRef        = useRef(null);
+  const pendingAttach = useRef(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -210,6 +211,16 @@ export default function NewMessageScreen({ navigation, route }) {
       setSelectedName(c.name || c.firstName || '');
     }
   }, [route.params?.selectedContact]);
+
+  // Fire attachment picker AFTER attachModal is fully closed
+  // (native pickers don't open reliably while a Modal is still animating out)
+  useEffect(() => {
+    if (!attachModal && pendingAttach.current) {
+      const type = pendingAttach.current;
+      pendingAttach.current = null;
+      setTimeout(() => runAttach(type), 600);
+    }
+  }, [attachModal]);
 
   function pickEmoji(e) {
     setMsg(prev => prev + e);
@@ -235,9 +246,14 @@ export default function NewMessageScreen({ navigation, route }) {
     { icon: '📍', label: 'Location', type: 'location' },
   ];
 
-  async function handleAttach(type) {
+  // Called from attachment sheet — just closes modal, stores type
+  function pickAttach(type) {
+    pendingAttach.current = type;
     setAttachModal(false);
-    await new Promise(r => setTimeout(r, 400)); // wait for modal to close
+  }
+
+  // Called by useEffect after modal is fully dismissed
+  async function runAttach(type) {
     if (type === 'photo') {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) { Alert.alert('Permission needed'); return; }
@@ -444,7 +460,7 @@ export default function NewMessageScreen({ navigation, route }) {
             </View>
             <View style={s.attachGrid}>
               {ATTACHMENTS.map((a, i) => (
-                <TouchableOpacity key={i} style={s.attachItem} onPress={() => handleAttach(a.type)}>
+                <TouchableOpacity key={i} style={s.attachItem} onPress={() => pickAttach(a.type)}>
                   <View style={[s.attachIconBox, { backgroundColor: inputBg }]}>
                     <Text style={{ fontSize: 28 }}>{a.icon}</Text>
                   </View>
@@ -458,13 +474,16 @@ export default function NewMessageScreen({ navigation, route }) {
 
       {/* Emoji picker panel (shown above input when emoji attachment tapped) */}
       {showEmoji && (
-        <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 100 }}>
-          {/* ✕ close button top-right of emoji panel */}
-          <TouchableOpacity
-            style={[s.emojiXBtn, { backgroundColor: accent }]}
-            onPress={() => setShowEmoji(false)}>
-            <Text style={s.emojiXTx}>✕</Text>
-          </TouchableOpacity>
+        <View style={[s.emojiPanel, { backgroundColor: card, borderTopColor: border }]}>
+          {/* Header row with title + ✕ inside the panel */}
+          <View style={s.sheetHeaderRow}>
+            <Text style={[s.sheetTitle, { color: tx }]}>Emoji</Text>
+            <TouchableOpacity
+              style={[s.sheetXBtn, { backgroundColor: accent }]}
+              onPress={() => setShowEmoji(false)}>
+              <Text style={s.sheetXTx}>✕</Text>
+            </TouchableOpacity>
+          </View>
           <EmojiPicker
             onPick={e => pickEmoji(e)}
             accent={accent} card={card} sub={sub} inputBg={inputBg} border={border}
@@ -508,6 +527,5 @@ const s = StyleSheet.create({
   attachGrid:   { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-around', gap: 16 },
   attachItem:   { alignItems: 'center', width: 72 },
   attachIconBox:{ width: 56, height: 56, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  emojiXBtn:    { position: 'absolute', top: -14, right: 12, zIndex: 101, width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
-  emojiXTx:     { color: '#000', fontWeight: '900', fontSize: 14 },
+  emojiPanel:   { position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 100, borderTopWidth: StyleSheet.hairlineWidth },
 });
