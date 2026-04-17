@@ -74,11 +74,18 @@ export default function ChatsScreen({ navigation }) {
           <Text style={[s.title, { color: accent }]}>Chats</Text>
           {myHandle ? <Text style={[s.handle, { color: '#5856d6' }]}>{myHandle}</Text> : null}
         </View>
-        <TouchableOpacity style={{ paddingHorizontal: 8 }} onPress={() => navigation.navigate('Contacts')}>
-          <Text style={{ fontSize: 22 }}>👤</Text>
+        {/* Person + plus → Contacts page (tap to view or add contacts) */}
+        <TouchableOpacity
+          style={[s.iconBtn, { backgroundColor: accent + '22', borderColor: accent + '55' }]}
+          onPress={() => navigation.navigate('Contacts')}>
+          <Text style={{ fontSize: 15 }}>👤</Text>
+          <Text style={[s.iconBtnPlus, { color: accent }]}>+</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[s.addBtn, { backgroundColor: accent }]} onPress={() => navigation.navigate('NewMessage')}>
-          <Text style={s.addBtnText}>+</Text>
+        {/* Pencil → compose new message */}
+        <TouchableOpacity
+          style={[s.iconBtn, { backgroundColor: accent + '22', borderColor: accent + '55' }]}
+          onPress={() => navigation.navigate('NewMessage')}>
+          <Text style={{ fontSize: 18 }}>✏️</Text>
         </TouchableOpacity>
       </View>
 
@@ -196,8 +203,8 @@ const s = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 60, paddingBottom: 12, borderBottomWidth: 1 },
   title: { fontSize: 24, fontWeight: 'bold' },
   handle: { fontSize: 11, fontWeight: 'bold', marginTop: 2 },
-  addBtn: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
-  addBtnText: { color: '#fff', fontSize: 26, fontWeight: '300', lineHeight: 30 },
+  iconBtn:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 1, height: 36, paddingHorizontal: 10, borderRadius: 18, borderWidth: 1 },
+  iconBtnPlus: { fontSize: 13, fontWeight: '800', lineHeight: 16 },
   searchBar: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginVertical: 10, borderRadius: 14, borderWidth: 1, paddingHorizontal: 14 },
   searchIcon: { fontSize: 16, marginRight: 8 },
   searchInput: { flex: 1, padding: 10, fontSize: 15 },
