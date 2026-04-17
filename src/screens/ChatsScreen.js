@@ -74,6 +74,9 @@ export default function ChatsScreen({ navigation }) {
           <Text style={[s.title, { color: accent }]}>Chats</Text>
           {myHandle ? <Text style={[s.handle, { color: '#5856d6' }]}>{myHandle}</Text> : null}
         </View>
+        <TouchableOpacity style={{ paddingHorizontal: 8 }} onPress={() => navigation.navigate('Contacts')}>
+          <Text style={{ fontSize: 22 }}>👤</Text>
+        </TouchableOpacity>
         <TouchableOpacity style={[s.addBtn, { backgroundColor: accent }]} onPress={() => navigation.navigate('NewMessage')}>
           <Text style={s.addBtnText}>+</Text>
         </TouchableOpacity>
@@ -114,7 +117,7 @@ export default function ChatsScreen({ navigation }) {
             delayLongPress={400}
           >
             <TouchableOpacity style={[s.avatar, { backgroundColor: accent }]}
-              onPress={() => { setEditTarget(item); setEditModalVis(true); }}>
+              onPress={() => navigation.navigate('ContactView', { contact: { name: item.name, phone: item.phone, photo: item.photo, email: item.email || '', notes: item.notes || '' } })}>
               {item.photo
                 ? <Image source={{ uri: item.photo }} style={s.avatarImg} />
                 : <Text style={s.avatarText}>{(item.name || '?')[0].toUpperCase()}</Text>}

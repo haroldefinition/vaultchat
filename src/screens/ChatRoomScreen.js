@@ -461,7 +461,7 @@ export default function ChatRoomScreen({ route, navigation }) {
         </TouchableOpacity>
         <TouchableOpacity
           style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10 }}
-          onPress={() => setContactEditVis(true)}
+          onPress={() => navigation.navigate('ContactView', { contact: contactData || { name: recipientName, phone: recipientPhone, photo: recipientPhoto } })}
           activeOpacity={0.7}>
           <View style={[s.hAvatar, { backgroundColor: accent }]}>
             {contactData?.photo
@@ -486,7 +486,7 @@ export default function ChatRoomScreen({ route, navigation }) {
         ref={listRef}
         data={messages}
         keyExtractor={(item, i) => String(item.id || i)}
-        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+        onLayout={() => listRef.current?.scrollToEnd({ animated: false })}
         contentContainerStyle={{ padding: 12, paddingBottom: 8 }}
         renderItem={({ item }) => (
           <Bubble
