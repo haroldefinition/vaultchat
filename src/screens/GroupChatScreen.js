@@ -393,7 +393,7 @@ export default function GroupChatScreen({ route, navigation }) {
   ];
 
   return (
-    <KeyboardAvoidingView style={[g.container, { backgroundColor: bg }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={90}>
+    <KeyboardAvoidingView style={[g.container, { backgroundColor: bg }]} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       {/* Header */}
       <View style={[g.header, { backgroundColor: card, borderBottomColor: border }]}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={{ padding: 4 }}>
