@@ -1,112 +1,156 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator, Image } from 'react-native';
+import {
+  View, Text, TextInput, TouchableOpacity, StyleSheet,
+  ScrollView, Alert, ActivityIndicator, Image,
+} from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-
-const BACKEND = 'https://vaultchat-production-3a96.up.railway.app';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useTheme } from '../services/theme';
 
 export default function NewContactScreen({ route, navigation }) {
-  const { user, phone, onSave } = route.params;
+  const { bg, card, tx, sub, border, inputBg, accent } = useTheme();
+  // Safe destructure — route.params may be undefined
+  const { onSave } = route?.params || {};
+
+  const [photo,     setPhoto]     = useState(null);
   const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
-  const [nickname, setNickname] = useState('');
-  const [photo, setPhoto] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [lastName,  setLastName]  = useState('');
+  const [mobile,    setMobile]    = useState('');
+  const [email,     setEmail]     = useState('');
+  const [address,   setAddress]   = useState('');
+  const [birthday,  setBirthday]  = useState('');
+  const [url,       setUrl]       = useState('');
+  const [notes,     setNotes]     = useState('');
+  const [loading,   setLoading]   = useState(false);
 
   async function pickPhoto() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') { Alert.alert('Permission needed', 'Please allow photo access'); return; }
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [1, 1], quality: 0.5 });
-    if (!result.canceled) setPhoto(result.assets[0].uri);
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Allow photo access in Settings.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: 'images', allowsEditing: true, aspect: [1, 1], quality: 0.85,
+    });
+    if (!result.canceled && result.assets?.[0]) setPhoto(result.assets[0].uri);
   }
 
   async function saveContact() {
+    if (!firstName.trim() && !mobile.trim()) {
+      Alert.alert('Required', 'Enter at least a first name or phone number.');
+      return;
+    }
     setLoading(true);
-    const name = nickname || `${firstName} ${lastName}`.trim();
+    const contact = {
+      id:        `contact_${Date.now()}`,
+      photo,
+      firstName: firstName.trim(),
+      lastName:  lastName.trim(),
+      name:      `${firstName.trim()} ${lastName.trim()}`.trim() || mobile,
+      phone:     mobile.replace(/\D/g, ''),
+      mobile:    mobile.replace(/\D/g, ''),
+      email:     email.trim(),
+      address:   address.trim(),
+      birthday:  birthday.trim(),
+      url:       url.trim(),
+      notes:     notes.trim(),
+    };
+    // Save to AsyncStorage contacts store
     try {
-      await fetch(`${BACKEND}/contacts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ owner_id: user?.id, phone: `1${phone}`, first_name: firstName, last_name: lastName, nickname: name }),
-      });
-    } catch (err) {}
+      const raw  = await AsyncStorage.getItem('vaultchat_contacts');
+      const list = raw ? JSON.parse(raw) : [];
+      list.push(contact);
+      await AsyncStorage.setItem('vaultchat_contacts', JSON.stringify(list));
+    } catch {}
 
-    if (onSave) onSave(name, photo);
-    
-    // roomId derived from user phones at chat creation time
-    navigation.replace('ChatRoom', { roomId, recipientPhone: phone, recipientName: name, recipientPhoto: photo, user });
+    // Notify caller if a callback was provided
+    if (typeof onSave === 'function') onSave(contact);
+
+    Alert.alert('Saved!', `${contact.name} has been added to your contacts.`, [
+      { text: 'OK', onPress: () => navigation.goBack() },
+    ]);
     setLoading(false);
   }
 
+  const FIELDS = [
+    { label: 'First Name',   val: firstName, set: setFirstName, kb: 'default',       multi: false },
+    { label: 'Last Name',    val: lastName,  set: setLastName,  kb: 'default',       multi: false },
+    { label: 'Mobile',       val: mobile,    set: setMobile,    kb: 'phone-pad',     multi: false },
+    { label: 'Email',        val: email,     set: setEmail,     kb: 'email-address', multi: false },
+    { label: 'Address',      val: address,   set: setAddress,   kb: 'default',       multi: true  },
+    { label: 'Birthday',     val: birthday,  set: setBirthday,  kb: 'default',       multi: false },
+    { label: 'URL',          val: url,       set: setUrl,       kb: 'url',           multi: false },
+    { label: 'Notes',        val: notes,     set: setNotes,     kb: 'default',       multi: true  },
+  ];
+
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Text style={styles.cancelText}>Cancel</Text>
+    <View style={[s.container, { backgroundColor: bg }]}>
+      {/* Header */}
+      <View style={[s.header, { backgroundColor: card, borderBottomColor: border }]}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={s.headerBtn}>
+          <Text style={[s.cancelTx, { color: sub }]}>Cancel</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>New Contact</Text>
-        <TouchableOpacity onPress={saveContact} disabled={loading}>
-          {loading ? <ActivityIndicator color="#00ffa3" /> : <Text style={styles.doneText}>Done</Text>}
+        <Text style={[s.headerTitle, { color: tx }]}>New Contact</Text>
+        <TouchableOpacity onPress={saveContact} disabled={loading} style={s.headerBtn}>
+          {loading
+            ? <ActivityIndicator color={accent} size="small" />
+            : <Text style={[s.doneTx, { color: accent }]}>Done</Text>}
         </TouchableOpacity>
       </View>
 
-      <TouchableOpacity style={styles.photoContainer} onPress={pickPhoto}>
-        {photo ? (
-          <Image source={{ uri: photo }} style={styles.photo} />
-        ) : (
-          <View style={styles.photoPlaceholder}>
-            <Text style={styles.photoIcon}>📷</Text>
-            <Text style={styles.photoText}>Add Photo</Text>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={s.scroll}
+        keyboardShouldPersistTaps="handled">
+
+        {/* Photo picker */}
+        <TouchableOpacity onPress={pickPhoto} style={s.photoWrap}>
+          {photo
+            ? <Image source={{ uri: photo }} style={s.photo} />
+            : <View style={[s.photoPlaceholder, { backgroundColor: accent + '22' }]}>
+                <Text style={{ fontSize: 38 }}>📷</Text>
+              </View>
+          }
+          <Text style={[s.photoHint, { color: accent }]}>
+            {photo ? 'Change Photo' : 'Add Photo'}
+          </Text>
+        </TouchableOpacity>
+
+        {/* Fields */}
+        {FIELDS.map(({ label, val, set, kb, multi }) => (
+          <View key={label} style={[s.field, { backgroundColor: card, borderColor: border }]}>
+            <Text style={[s.fieldLabel, { color: sub }]}>{label.toUpperCase()}</Text>
+            <TextInput
+              style={[s.fieldInput, { color: tx }, multi && { minHeight: 60, textAlignVertical: 'top' }]}
+              value={val}
+              onChangeText={set}
+              keyboardType={kb}
+              autoCapitalize={kb === 'default' ? 'words' : 'none'}
+              multiline={multi}
+              placeholder={`Add ${label.toLowerCase()}…`}
+              placeholderTextColor={sub + '88'}
+              returnKeyType={multi ? 'default' : 'next'}
+            />
           </View>
-        )}
-      </TouchableOpacity>
-
-      <View style={styles.section}>
-        <View style={styles.field}>
-          <Text style={styles.fieldLabel}>Phone</Text>
-          <Text style={styles.fieldValue}>+1{phone}</Text>
-        </View>
-      </View>
-
-      <View style={styles.section}>
-        <View style={styles.field}>
-          <Text style={styles.fieldLabel}>First Name</Text>
-          <TextInput style={styles.fieldInput} placeholder="First name" placeholderTextColor="#555" value={firstName} onChangeText={setFirstName} />
-        </View>
-        <View style={[styles.field, styles.fieldBorder]}>
-          <Text style={styles.fieldLabel}>Last Name</Text>
-          <TextInput style={styles.fieldInput} placeholder="Last name" placeholderTextColor="#555" value={lastName} onChangeText={setLastName} />
-        </View>
-        <View style={[styles.field, styles.fieldBorder]}>
-          <Text style={styles.fieldLabel}>Nickname</Text>
-          <TextInput style={styles.fieldInput} placeholder="Nickname (optional)" placeholderTextColor="#555" value={nickname} onChangeText={setNickname} />
-        </View>
-      </View>
-
-      <TouchableOpacity style={styles.startChatBtn} onPress={saveContact} disabled={loading}>
-        <Text style={styles.startChatText}>💬 Start Secure Chat</Text>
-      </TouchableOpacity>
-    </ScrollView>
+        ))}
+      </ScrollView>
+    </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#080b12' },
-  content: { paddingBottom: 40 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, paddingTop: 60 },
-  headerTitle: { fontSize: 16, fontWeight: 'bold', color: '#fff' },
-  cancelText: { color: '#888', fontSize: 15 },
-  doneText: { color: '#00ffa3', fontSize: 15, fontWeight: 'bold' },
-  photoContainer: { alignItems: 'center', marginVertical: 24 },
-  photo: { width: 100, height: 100, borderRadius: 50 },
-  photoPlaceholder: { width: 100, height: 100, borderRadius: 50, backgroundColor: '#0e1220', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#00ffa3', borderStyle: 'dashed' },
-  photoIcon: { fontSize: 28 },
-  photoText: { color: '#00ffa3', fontSize: 11, marginTop: 4 },
-  section: { backgroundColor: '#0e1220', marginHorizontal: 16, borderRadius: 16, marginBottom: 16, overflow: 'hidden' },
-  field: { flexDirection: 'row', alignItems: 'center', padding: 16 },
-  fieldBorder: { borderTopWidth: 1, borderTopColor: '#141828' },
-  fieldLabel: { color: '#00ffa3', width: 90, fontSize: 14 },
-  fieldValue: { color: '#fff', fontSize: 15 },
-  fieldInput: { flex: 1, color: '#fff', fontSize: 15 },
-  startChatBtn: { backgroundColor: '#00ffa3', margin: 16, padding: 16, borderRadius: 16, alignItems: 'center' },
-  startChatText: { color: '#000', fontWeight: 'bold', fontSize: 16 },
+const s = StyleSheet.create({
+  container:        { flex: 1 },
+  header:           { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 56, paddingBottom: 14, borderBottomWidth: StyleSheet.hairlineWidth },
+  headerBtn:        { minWidth: 60 },
+  headerTitle:      { fontSize: 17, fontWeight: '700' },
+  cancelTx:         { fontSize: 16 },
+  doneTx:           { fontSize: 16, fontWeight: '700' },
+  scroll:           { paddingBottom: 48 },
+  photoWrap:        { alignItems: 'center', paddingVertical: 28 },
+  photo:            { width: 100, height: 100, borderRadius: 50 },
+  photoPlaceholder: { width: 100, height: 100, borderRadius: 50, alignItems: 'center', justifyContent: 'center' },
+  photoHint:        { fontSize: 14, fontWeight: '600', marginTop: 10 },
+  field:            { borderRadius: 14, borderWidth: 1, paddingHorizontal: 16, paddingVertical: 12, marginHorizontal: 16, marginBottom: 10 },
+  fieldLabel:       { fontSize: 10, fontWeight: '700', letterSpacing: 0.5, marginBottom: 5 },
+  fieldInput:       { fontSize: 16, lineHeight: 22 },
 });
