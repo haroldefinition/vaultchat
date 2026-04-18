@@ -99,6 +99,7 @@ export default function ChatsScreen({ navigation }) {
           value={search}
           onChangeText={setSearch}
           autoCapitalize="none"
+          returnKeyType="search"
         />
         {search.length > 0 && (
           <TouchableOpacity onPress={() => setSearch('')}>
@@ -142,9 +143,15 @@ export default function ChatsScreen({ navigation }) {
         )}
         ListEmptyComponent={
           <View style={s.empty}>
-            <Text style={s.emptyIcon}>🔒</Text>
-            <Text style={[s.emptyTitle, { color: tx }]}>No chats yet</Text>
-            <Text style={[s.emptySub, { color: sub }]}>Tap + to start a secure chat</Text>
+            <Text style={s.emptyIcon}>{search ? '🔍' : '🔒'}</Text>
+            <Text style={[s.emptyTitle, { color: tx }]}>
+              {search ? 'No chats found' : 'No chats yet'}
+            </Text>
+            <Text style={[s.emptySub, { color: sub }]}>
+              {search
+                ? `No chats matching "${search}"`
+                : 'Tap ✏️ to start a secure chat'}
+            </Text>
           </View>
         }
         ListFooterComponent={
@@ -206,7 +213,7 @@ const s = StyleSheet.create({
   iconBtn:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 1, height: 36, paddingHorizontal: 10, borderRadius: 18, borderWidth: 1 },
   iconBtnPlus: { fontSize: 13, fontWeight: '800', lineHeight: 16 },
   searchBar: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginVertical: 6, borderRadius: 12, borderWidth: 1, paddingHorizontal: 10 },
-  searchIcon: { fontSize: 16, marginRight: 8 },
+  searchIcon: { fontSize: 14, marginRight: 6, opacity: 0.6 },
   searchInput: { flex: 1, paddingVertical: 8, paddingHorizontal: 6, fontSize: 14 },
   clearBtn: { fontSize: 16, paddingHorizontal: 8 },
   row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1 },
