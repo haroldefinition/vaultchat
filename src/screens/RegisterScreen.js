@@ -340,14 +340,11 @@ const s = StyleSheet.create({
   logoContainer:  {
     width: 220,
     height: 220,
-    borderRadius: 40,
-    backgroundColor: '#000',
-    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 28,
   },
-  logo:           { width: 210, height: 210 },
+  logo:           { width: 220, height: 220 },
 
   // Headings
   heading:        { fontSize: 26, fontWeight: '800', color: C.tx, textAlign: 'center', marginBottom: 6 },
