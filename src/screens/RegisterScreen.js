@@ -334,7 +334,7 @@ export default function RegisterScreen({ route, onLoginCallback }) {
 
 const s = StyleSheet.create({
   root:           { flex: 1, backgroundColor: C.bg },
-  scroll:         { flexGrow: 1, paddingVertical: 0, paddingTop: 8 },
+  scroll:         { flexGrow: 1 },
   content:        { alignItems: 'center', paddingHorizontal: 24 },
 
   // Logo — dark rounded container hides the PNG's black background
@@ -343,12 +343,12 @@ const s = StyleSheet.create({
     height: SW * 0.75 * 1.4,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 0,
+    marginBottom: -12,
   },
   logo:           { width: SW * 0.75, height: SW * 0.75 * 1.4 },
 
   // Headings
-  heading:        { fontSize: 26, fontWeight: '800', color: C.tx, textAlign: 'center', marginBottom: 6 },
+  heading:        { fontSize: 26, fontWeight: '800', color: C.tx, textAlign: 'center', marginBottom: 4 },
   subheading:     { fontSize: 15, color: C.sub, textAlign: 'center', marginBottom: 22 },
 
   // Slogan box
