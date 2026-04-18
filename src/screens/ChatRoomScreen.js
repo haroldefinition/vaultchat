@@ -12,7 +12,8 @@ import * as Location from 'expo-location';
 import { useTheme } from '../services/theme';
 import { uploadMedia } from '../services/mediaUpload';
 import ContactEditModal from '../components/ContactEditModal';
-import ReplyPreview from '../components/ReplyPreview';
+import ReplyPreview       from '../components/ReplyPreview';
+import StagedPhotosPicker from '../components/StagedPhotosPicker';
 import { supabase } from '../services/supabase';
 import { subscribeToRoom, subscribeToTyping, broadcastTyping } from '../services/realtimeMessages';
 import { enqueue, flushQueue } from '../services/messageQueue';
@@ -767,32 +768,12 @@ export default function ChatRoomScreen({ route, navigation }) {
       {hasStaged && (
         <View style={[s.stagedWrap, { borderTopColor: border }]}>
           {stagedPhotos.length > 0 && (
-            <View style={{ position: 'relative' }}>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ gap: 6, padding: 10 }}>
-                {stagedPhotos.map((p, i) => (
-                  <View key={i} style={{ position: 'relative' }}>
-                    <Image source={{ uri: p.uri }} style={s.thumb} resizeMode="cover" />
-                    <TouchableOpacity style={s.removeBadge}
-                      onPress={() => setStagedPhotos(prev => prev.filter((_, j) => j !== i))}>
-                      <Text style={{ color: '#fff', fontSize: 12, fontWeight: '900', lineHeight: 16 }}>✕</Text>
-                    </TouchableOpacity>
-                  </View>
-                ))}
-                {stagedPhotos.length < 20 && (
-                  <TouchableOpacity style={[s.addMore, { backgroundColor: inputBg, borderColor: border }]}
-                    onPress={() => handleAttachType('photo')}>
-                    <Text style={{ fontSize: 24, color: sub }}>+</Text>
-                    <Text style={{ fontSize: 10, color: sub }}>Add</Text>
-                  </TouchableOpacity>
-                )}
-              </ScrollView>
-              <View style={[s.countBadge, { backgroundColor: accent }]}>
-                <Text style={{ color: '#000', fontSize: 11, fontWeight: '800' }}>
-                  {stagedPhotos.length} photo{stagedPhotos.length > 1 ? 's' : ''}
-                </Text>
-              </View>
-            </View>
+            <StagedPhotosPicker
+              photos={stagedPhotos}
+              onRemove={i => setStagedPhotos(prev => prev.filter((_, j) => j !== i))}
+              onAddMore={() => handleAttachType('photo')}
+              accent={accent} inputBg={inputBg} border={border} sub={sub} tx={tx}
+            />
           )}
           {stagedVideos.length > 0 && (
             <View style={[s.vidPreview, { backgroundColor: inputBg }]}>

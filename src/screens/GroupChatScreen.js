@@ -16,7 +16,8 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as Location from 'expo-location';
 import { uploadMedia } from '../services/mediaUpload';
 import GifPickerModal from '../components/GifPickerModal';
-import ReplyPreview from '../components/ReplyPreview';
+import ReplyPreview       from '../components/ReplyPreview';
+import StagedPhotosPicker from '../components/StagedPhotosPicker';
 import ContactEditModal from '../components/ContactEditModal';
 import PremiumModal from '../components/PremiumModal';
 import { ResolvedPhotoStack, ResolvedVideoCarousel } from '../components/MediaBubbles';
@@ -581,28 +582,12 @@ export default function GroupChatScreen({ route, navigation }) {
       {hasStaged ? (
         <View style={{ borderTopWidth: 1, borderTopColor: border }}>
           {stagedPhotos.length > 0 && (
-            <View style={{ position: 'relative' }}>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, padding: 10 }}>
-                {stagedPhotos.map((p, i) => (
-                  <View key={i} style={{ position: 'relative' }}>
-                    <Image source={{ uri: p.uri }} style={{ width: 88, height: 88, borderRadius: 12 }} resizeMode="cover" />
-                    <TouchableOpacity style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: 10, backgroundColor: '#ff3b30', alignItems: 'center', justifyContent: 'center', zIndex: 10 }}
-                      onPress={() => setStagedPhotos(prev => prev.filter((_, j) => j !== i))}>
-                      <Text style={{ color: '#fff', fontSize: 11, fontWeight: '900' }}>✕</Text>
-                    </TouchableOpacity>
-                  </View>
-                ))}
-                {stagedPhotos.length < 20 && (
-                  <TouchableOpacity style={{ width: 88, height: 88, borderRadius: 12, borderWidth: 1.5, borderStyle: 'dashed', borderColor: border, backgroundColor: inputBg, alignItems: 'center', justifyContent: 'center' }}
-                    onPress={() => handleAttach('photo')}>
-                    <Text style={{ fontSize: 22, color: sub }}>+</Text>
-                  </TouchableOpacity>
-                )}
-              </ScrollView>
-              <View style={{ position: 'absolute', top: 14, left: 14, backgroundColor: accent, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 }}>
-                <Text style={{ color: '#000', fontSize: 10, fontWeight: '800' }}>{stagedPhotos.length} photo{stagedPhotos.length > 1 ? 's' : ''}</Text>
-              </View>
-            </View>
+            <StagedPhotosPicker
+              photos={stagedPhotos}
+              onRemove={i => setStagedPhotos(prev => prev.filter((_, j) => j !== i))}
+              onAddMore={() => handleAttach('photo')}
+              accent={accent} inputBg={inputBg} border={border} sub={sub} tx={tx}
+            />
           )}
           {stagedVideos.length > 0 && (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, backgroundColor: inputBg, marginHorizontal: 12, borderRadius: 12, marginBottom: 4 }}>
