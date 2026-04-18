@@ -10,7 +10,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const SW       = Dimensions.get('window').width;
 const SH       = Dimensions.get('window').height;
-const FS_SWIPE = SW * 0.28;
+const FS_SWIPE = SW * 0.08;
 
 // Media sizes match actual chat bubble dimensions
 const PHOTO_W = Math.min(SW * 0.72, 240);
@@ -70,7 +70,7 @@ function FullscreenGallery({ uris, startIndex = 0, visible, onClose }) {
     if (count <= 1) return;
     animating.current = true;
     const dest = dir === 'left' ? -SW : SW;
-    Animated.timing(slideX, { toValue: dest, duration: 220, useNativeDriver: true }).start(() => {
+    Animated.timing(slideX, { toValue: dest, duration: 160, useNativeDriver: true }).start(() => {
       const next = dir === 'left'
         ? (idxRef.current + 1) % count
         : (idxRef.current - 1 + count) % count;
@@ -84,13 +84,13 @@ function FullscreenGallery({ uris, startIndex = 0, visible, onClose }) {
   const pr = useRef(PanResponder.create({
     onStartShouldSetPanResponder:  () => false,
     onMoveShouldSetPanResponder:   (_, g) =>
-      !animating.current && Math.abs(g.dx) > 8 && Math.abs(g.dx) > Math.abs(g.dy),
+      !animating.current && Math.abs(g.dx) > 4 && Math.abs(g.dx) > Math.abs(g.dy) * 0.8,
     onPanResponderMove:   (_, g) => { if (!animating.current) slideX.setValue(g.dx); },
     onPanResponderRelease:(_, g) => {
       const count = urisRef.current.length;
       if (count <= 1) { Animated.spring(slideX, { toValue: 0, useNativeDriver: true }).start(); return; }
-      if      (g.dx < -FS_SWIPE || g.vx < -0.6) commit('left');
-      else if (g.dx >  FS_SWIPE || g.vx >  0.6) commit('right');
+      if      (g.dx < -FS_SWIPE || g.vx < -0.2) commit('left');
+      else if (g.dx >  FS_SWIPE || g.vx >  0.2) commit('right');
       else Animated.spring(slideX, { toValue: 0, friction: 6, tension: 60, useNativeDriver: true }).start();
     },
     onPanResponderTerminate: () => Animated.spring(slideX, { toValue: 0, useNativeDriver: true }).start(),

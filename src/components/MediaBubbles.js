@@ -10,7 +10,7 @@ const { width: SW, height: SH } = Dimensions.get('window');
 const CARD_W     = Math.min(SW * 0.64, 255);
 const CARD_H     = CARD_W;
 const DECK_SWIPE = CARD_W * 0.22;
-const FS_SWIPE   = SW * 0.20;
+const FS_SWIPE   = SW * 0.08;
 
 function FullScreenViewer({ uris, startIndex, visible, onClose }) {
   const [idx, setIdx] = useState(0);
@@ -38,7 +38,7 @@ function FullScreenViewer({ uris, startIndex, visible, onClose }) {
     if (count <= 1) return;
     animatingFS.current = true;
     const dest = dir === 'left' ? -SW : SW;
-    Animated.timing(slideX, { toValue:dest, duration:220, useNativeDriver:true }).start(() => {
+    Animated.timing(slideX, { toValue:dest, duration:160, useNativeDriver:true }).start(() => {
       const next = dir === 'left'
         ? (idxRef.current + 1) % count
         : (idxRef.current - 1 + count) % count;
@@ -52,13 +52,13 @@ function FullScreenViewer({ uris, startIndex, visible, onClose }) {
   const fsPR = useRef(PanResponder.create({
     onStartShouldSetPanResponder:  () => false,
     onMoveShouldSetPanResponder:   (_, g) =>
-      !animatingFS.current && Math.abs(g.dx) > 8 && Math.abs(g.dx) > Math.abs(g.dy),
+      !animatingFS.current && Math.abs(g.dx) > 4 && Math.abs(g.dx) > Math.abs(g.dy) * 0.8,
     onPanResponderMove:  (_, g) => { if (!animatingFS.current) slideX.setValue(g.dx); },
     onPanResponderRelease: (_, g) => {
       const count = urisRef.current.length;
       if (count <= 1) { Animated.spring(slideX, { toValue:0, useNativeDriver:true }).start(); return; }
-      if      (g.dx < -FS_SWIPE || g.vx < -0.6) commitFS('left');
-      else if (g.dx >  FS_SWIPE || g.vx >  0.6) commitFS('right');
+      if      (g.dx < -FS_SWIPE || g.vx < -0.2) commitFS('left');
+      else if (g.dx >  FS_SWIPE || g.vx >  0.2) commitFS('right');
       else Animated.spring(slideX, { toValue:0, friction:6, tension:60, useNativeDriver:true }).start();
     },
     onPanResponderTerminate: () => Animated.spring(slideX, { toValue:0, useNativeDriver:true }).start(),
