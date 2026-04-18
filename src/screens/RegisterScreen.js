@@ -338,13 +338,13 @@ const s = StyleSheet.create({
 
   // Logo — dark rounded container hides the PNG's black background
   logoContainer:  {
-    width: 220,
-    height: 220,
+    width: 300,
+    height: 340,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 28,
+    marginBottom: 8,
   },
-  logo:           { width: 220, height: 220 },
+  logo:           { width: 300, height: 340 },
 
   // Headings
   heading:        { fontSize: 26, fontWeight: '800', color: C.tx, textAlign: 'center', marginBottom: 6 },

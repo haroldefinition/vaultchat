@@ -35,8 +35,8 @@ const s = StyleSheet.create({
     justifyContent: 'center',
   },
   logo: {
-    width: 260,
-    height: 260,
+    width: 300,
+    height: 340,
     marginBottom: 32,
   },
   badge: {
