@@ -82,19 +82,8 @@ app.post('/register-push-token', (req, res) => {
   res.json({ success: true });
 });
 
-// Send a content-free push notification to a specific user.
-//
-// PRIVACY RULE: title and body are HARDCODED — callers cannot inject
-// message content. Only routing data (roomId, type) is passed through.
-// This prevents iOS/Android from storing any message preview in:
-//   - iOS notification storage (/var/mobile/Library/UserNotifications/)
-//   - Android notification shade history
-//   - Lock-screen previews on either platform
-//
-// mutable_content is intentionally omitted (defaults to false/0).
-// Setting it to 1 would cause iOS to write a full payload copy to disk
-// before any Notification Service Extension can modify it.
-async function sendPushToUser(userId, data = {}) {
+// Helper: send Expo push notification to a specific user
+async function sendPushToUser(userId, title, body, data = {}) {
   const entry = pushTokens.get(userId);
   if (!entry?.token) return;
   try {
@@ -102,17 +91,13 @@ async function sendPushToUser(userId, data = {}) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify({
-        to:        entry.token,
-        title:     'VaultChat',           // always generic — never sender name
-        body:      'New message received', // always generic — never content preview
-        data,                              // routing only: { roomId, type }
-        sound:     'default',
-        badge:     1,
+        to: entry.token,
+        title,
+        body,
+        data,
+        sound: 'default',
+        badge: 1,
         channelId: 'messages',
-        // Android lock screen: PRIVATE (1) shows "Contents hidden"
-        // instead of the notification body on the lock screen.
-        priority:  'high',
-        android:   { visibility: 'private' },
       }),
     });
   } catch (e) {
@@ -250,13 +235,6 @@ io.on('connection', (socket) => {
 
     // Deliver to everyone in the room
     io.to(roomId).emit('message:received', message);
-
-    // Send content-free push to recipients who are offline
-    // (sendPushToUser only passes routing data — never message content)
-    const connectedInRoom = io.sockets.adapter.rooms.get(roomId)?.size || 0;
-    if (connectedInRoom < 2 && message.recipientId) {
-      sendPushToUser(message.recipientId, { roomId, type: type || 'chat' });
-    }
     console.log(`📨 Message [${type}] → room:${roomId} channel:${channelId || 'direct'}`);
   });
 
