@@ -1,20 +1,31 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ActivityIndicator, Alert, Animated, KeyboardAvoidingView,
-  Platform, Dimensions, Image,
+  ActivityIndicator, Alert, KeyboardAvoidingView,
+  Platform, ScrollView, Image, Linking,
 } from 'react-native';
 import { supabase } from '../services/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useTheme } from '../services/theme';
 import { saveHandle } from '../services/vaultHandle';
 
 const LOGO    = require('../../assets/vaultchat-logo.png');
-const BACKEND  = 'https://vaultchat-production-3a96.up.railway.app';
-const { width } = Dimensions.get('window');
+const BACKEND = 'https://vaultchat-production-3a96.up.railway.app';
+
+// ── Colours (fixed — Register is always light like the website) ──
+const C = {
+  bg:       '#FFFFFF',
+  card:     '#F2F4F8',
+  blue:     '#1A7AE8',    // button + flag text + links
+  blueSoft: '#EBF3FD',    // slogan box bg
+  blueBorder:'#BFDBFE',  // slogan box border
+  tx:       '#0F172A',    // headings
+  sub:      '#64748B',    // subtitles / legal
+  border:   '#E2E8F0',    // input border
+  inputBg:  '#F8FAFC',    // input background
+  placeholder:'#94A3B8',
+};
 
 export default function RegisterScreen({ route, onLoginCallback }) {
-  const { bg, card, tx, sub, border, inputBg, accent } = useTheme();
   const onLogin = onLoginCallback || route?.params?.onLogin;
 
   const [phone,   setPhone]   = useState('');
@@ -24,25 +35,9 @@ export default function RegisterScreen({ route, onLoginCallback }) {
   const [loading, setLoading] = useState(false);
   const [userId,  setUserId]  = useState('');
 
-  // Animation values
-  const fadeAnim  = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(30)).current;
-
-  useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fadeAnim,  { toValue: 1, duration: 700, useNativeDriver: true }),
-      Animated.timing(slideAnim, { toValue: 0, duration: 700, useNativeDriver: true }),
-    ]).start();
-  }, [step]);
-
-  const animateStep = (nextStep) => {
-    fadeAnim.setValue(0);
-    slideAnim.setValue(24);
-    setStep(nextStep);
-  };
-
+  // ── Send OTP ──────────────────────────────────────────────────
   async function sendOTP() {
-    if (!phone || phone.length < 10) {
+    if (phone.length < 10) {
       Alert.alert('Invalid Number', 'Enter a valid 10-digit phone number.');
       return;
     }
@@ -53,27 +48,21 @@ export default function RegisterScreen({ route, onLoginCallback }) {
         body: JSON.stringify({ phone: `+1${phone}` }),
       });
       const data = await res.json();
-      if (data.success) {
-        Alert.alert('Code Sent', 'Check your phone for the verification code.');
-        animateStep('otp');
-      } else {
-        // Fallback: try Supabase
-        const { error } = await supabase.auth.signInWithOtp({ phone: `+1${phone}` });
-        if (!error) {
-          Alert.alert('Code Sent', 'Check your phone for the verification code.');
-          animateStep('otp');
-        } else throw new Error(error.message);
-      }
+      if (data.success) { setStep('otp'); } else throw new Error();
     } catch {
-      // Dev fallback
-      Alert.alert('Code Sent (Dev)', 'Use code 123456 to continue.');
-      animateStep('otp');
+      try {
+        const { error } = await supabase.auth.signInWithOtp({ phone: `+1${phone}` });
+        if (!error) { setStep('otp'); return; }
+      } catch {}
+      // Dev fallback — always succeeds
+      setStep('otp');
     }
     setLoading(false);
   }
 
+  // ── Verify OTP ────────────────────────────────────────────────
   async function verifyOTP() {
-    if (!otp || otp.length < 6) { Alert.alert('Enter the 6-digit code'); return; }
+    if (otp.length < 6) { Alert.alert('Enter the 6-digit code'); return; }
     setLoading(true);
     try {
       const { data, error } = await supabase.auth.verifyOtp({
@@ -81,41 +70,39 @@ export default function RegisterScreen({ route, onLoginCallback }) {
       });
       if (!error && data?.user) {
         setUserId(data.user.id);
-        // Check if handle already set
-        const { data: profile } = await supabase.from('profiles').select('handle').eq('id', data.user.id).single();
+        const { data: profile } = await supabase
+          .from('profiles').select('handle').eq('id', data.user.id).single();
         if (profile?.handle) {
           await AsyncStorage.setItem('vaultchat_user', JSON.stringify({ phone: `+1${phone}`, id: data.user.id }));
-          onLogin?.();
-          return;
+          onLogin?.(); return;
         }
-        animateStep('handle');
-        return;
+        setStep('handle'); setLoading(false); return;
       }
     } catch {}
-    // Dev fallback
+    // Dev fallback: code 123456
     if (otp === '123456') {
       const testId = '550e8400-e29b-41d4-a716-' + phone.padStart(12, '0');
       setUserId(testId);
       await AsyncStorage.setItem('vaultchat_user', JSON.stringify({ phone: `+1${phone}`, id: testId }));
-      animateStep('handle');
+      setStep('handle');
     } else {
-      Alert.alert('Invalid Code', 'Check the code and try again.');
+      Alert.alert('Invalid Code', 'Check the code and try again. (Use 123456 in dev)');
     }
     setLoading(false);
   }
 
+  // ── Save handle & enter app ───────────────────────────────────
   async function saveHandleAndLogin() {
-    const cleanHandle = handle.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
-    if (cleanHandle.length < 3) { Alert.alert('Handle too short', 'At least 3 characters.'); return; }
+    const clean = handle.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+    if (clean.length < 3) { Alert.alert('Too short', 'At least 3 characters required.'); return; }
     setLoading(true);
     try {
       await fetch(`${BACKEND}/register`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: userId, handle: `@${cleanHandle}`, phone: `+1${phone}` }),
+        body: JSON.stringify({ user_id: userId, handle: `@${clean}`, phone: `+1${phone}` }),
       });
-      await saveHandle(`@${cleanHandle}`);
-      await AsyncStorage.setItem('vaultchat_user', JSON.stringify({ phone: `+1${phone}`, id: userId }));
-      await AsyncStorage.setItem('vaultchat_display_name', cleanHandle);
+      await saveHandle(`@${clean}`);
+      await AsyncStorage.setItem('vaultchat_display_name', clean);
     } catch {}
     setLoading(false);
     onLogin?.();
@@ -128,171 +115,208 @@ export default function RegisterScreen({ route, onLoginCallback }) {
     onLogin?.();
   }
 
-  // Step metadata
-  const stepConfig = {
-    phone:  { title: 'Welcome to VaultChat',   sub: 'Enter your number to get started' },
-    otp:    { title: 'Verify Your Number',      sub: `Code sent to +1 ${phone}` },
-    handle: { title: 'Create Your Identity',    sub: 'Your handle keeps your number private' },
-  };
-  const cfg = stepConfig[step];
+  // ── Phone step ────────────────────────────────────────────────
+  const PhoneStep = () => (
+    <View style={s.content}>
+      {/* Logo */}
+      <Image source={LOGO} style={s.logo} resizeMode="contain" />
+
+      {/* Heading */}
+      <Text style={s.heading}>Welcome to VaultChat</Text>
+      <Text style={s.subheading}>Enter your number to get started</Text>
+
+      {/* Slogan box */}
+      <View style={s.sloganBox}>
+        <Text style={s.sloganText}>
+          Stay connected and secured—{'\n'}no matter how far out you are.
+        </Text>
+      </View>
+
+      {/* Phone input */}
+      <View style={s.inputBox}>
+        <Text style={s.flagCode}>🇺🇸 +1</Text>
+        <View style={s.inputDivider} />
+        <TextInput
+          style={s.phoneInput}
+          placeholder="(000) 000-0000"
+          placeholderTextColor={C.placeholder}
+          keyboardType="phone-pad"
+          value={phone}
+          onChangeText={v => setPhone(v.replace(/\D/g, '').slice(0, 10))}
+          maxLength={10}
+        />
+      </View>
+
+      {/* Legal text */}
+      <Text style={s.legal}>
+        By providing your phone number, you agree to receive automated promotional and personalized marketing text messages from VaultChat.co. Consent is not a condition of purchase. Msg & data rates may apply. Msg frequency varies. Reply HELP for help or STOP to cancel. View our{' '}
+        <Text style={s.legalLink} onPress={() => Linking.openURL('https://encrypted-hug-chat.lovable.app/privacy')}>
+          Privacy Policy
+        </Text>
+        {' '}and{' '}
+        <Text style={s.legalLink} onPress={() => Linking.openURL('https://encrypted-hug-chat.lovable.app/terms')}>
+          Terms of Service
+        </Text>
+        .
+      </Text>
+
+      {/* Send Code button */}
+      <TouchableOpacity
+        style={[s.btn, phone.length < 10 && s.btnDisabled]}
+        onPress={sendOTP}
+        disabled={loading || phone.length < 10}>
+        {loading
+          ? <ActivityIndicator color="#fff" />
+          : <Text style={s.btnText}>Send Code →</Text>}
+      </TouchableOpacity>
+
+      {/* Footer badge */}
+      <Text style={s.badge}>🔒 End-to-end encrypted · Metadata private · No ads</Text>
+    </View>
+  );
+
+  // ── OTP step ──────────────────────────────────────────────────
+  const OtpStep = () => (
+    <View style={s.content}>
+      <Image source={LOGO} style={s.logo} resizeMode="contain" />
+      <Text style={s.heading}>Verify Your Number</Text>
+      <Text style={s.subheading}>Code sent to +1 {phone}</Text>
+
+      <TextInput
+        style={s.otpInput}
+        placeholder="123456"
+        placeholderTextColor={C.placeholder}
+        keyboardType="number-pad"
+        value={otp}
+        onChangeText={setOtp}
+        maxLength={6}
+        autoFocus
+        textAlign="center"
+      />
+
+      <TouchableOpacity
+        style={[s.btn, otp.length < 6 && s.btnDisabled]}
+        onPress={verifyOTP}
+        disabled={loading || otp.length < 6}>
+        {loading
+          ? <ActivityIndicator color="#fff" />
+          : <Text style={s.btnText}>Verify →</Text>}
+      </TouchableOpacity>
+
+      <TouchableOpacity style={s.backBtn} onPress={() => { setStep('phone'); setOtp(''); }}>
+        <Text style={s.backText}>← Change number</Text>
+      </TouchableOpacity>
+
+      <Text style={s.badge}>🔒 End-to-end encrypted · Metadata private · No ads</Text>
+    </View>
+  );
+
+  // ── Handle step ───────────────────────────────────────────────
+  const HandleStep = () => (
+    <View style={s.content}>
+      <Image source={LOGO} style={s.logo} resizeMode="contain" />
+      <Text style={s.heading}>Create Your Identity</Text>
+      <Text style={s.subheading}>Your handle keeps your number private</Text>
+
+      <View style={s.inputBox}>
+        <Text style={s.flagCode}>@</Text>
+        <View style={s.inputDivider} />
+        <TextInput
+          style={s.phoneInput}
+          placeholder="yourhandle"
+          placeholderTextColor={C.placeholder}
+          value={handle}
+          onChangeText={t => setHandle(t.replace(/[^a-zA-Z0-9_]/g, ''))}
+          maxLength={20}
+          autoCapitalize="none"
+          autoCorrect={false}
+          autoFocus
+        />
+      </View>
+
+      {handle.length > 0 && (
+        <Text style={s.handlePreview}>@{handle.toLowerCase()}</Text>
+      )}
+
+      <Text style={s.hint}>
+        3–20 characters · Letters, numbers & underscores{'\n'}Your phone number stays private
+      </Text>
+
+      <TouchableOpacity
+        style={[s.btn, handle.length < 3 && s.btnDisabled]}
+        onPress={saveHandleAndLogin}
+        disabled={loading || handle.length < 3}>
+        {loading
+          ? <ActivityIndicator color="#fff" />
+          : <Text style={s.btnText}>Create Handle →</Text>}
+      </TouchableOpacity>
+
+      <TouchableOpacity style={s.backBtn} onPress={skipHandle}>
+        <Text style={s.backText}>Skip for now</Text>
+      </TouchableOpacity>
+
+      <Text style={s.badge}>🔒 End-to-end encrypted · Metadata private · No ads</Text>
+    </View>
+  );
 
   return (
     <KeyboardAvoidingView
-      style={[s.root, { backgroundColor: bg }]}
+      style={s.root}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-
-      {/* Background decorative circles */}
-      <View style={[s.circle1, { borderColor: accent + '18' }]} />
-      <View style={[s.circle2, { borderColor: accent + '10' }]} />
-
-      <Animated.View style={[s.content, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
-
-        {/* VaultChat logo — PNG includes shield icon + text */}
-        <Image source={LOGO} style={s.logo} resizeMode="contain" />
-
-        {/* Title */}
-        <Text style={[s.title, { color: tx }]}>{cfg.title}</Text>
-        <Text style={[s.sub, { color: sub }]}>{cfg.sub}</Text>
-
-        {/* Slogan — only on phone step */}
-        {step === 'phone' && (
-          <View style={[s.sloganWrap, { borderColor: accent + '30', backgroundColor: accent + '08' }]}>
-            <Text style={[s.sloganText, { color: accent }]}>
-              Stay connected and secured—{'\n'}no matter how far out you are.
-            </Text>
-          </View>
-        )}
-
-        {/* Phone input step */}
-        {step === 'phone' && (
-          <View style={s.inputGroup}>
-            <View style={[s.phoneRow, { backgroundColor: inputBg, borderColor: border }]}>
-              <Text style={[s.countryCode, { color: accent }]}>🇺🇸 +1</Text>
-              <View style={[s.divider, { backgroundColor: border }]} />
-              <TextInput
-                style={[s.phoneInput, { color: tx }]}
-                placeholder="(000) 000-0000"
-                placeholderTextColor={sub}
-                keyboardType="phone-pad"
-                value={phone}
-                onChangeText={v => setPhone(v.replace(/\D/g, '').slice(0, 10))}
-                maxLength={10}
-              />
-            </View>
-            <TouchableOpacity
-              style={[s.btn, { backgroundColor: phone.length === 10 ? accent : accent + '60' }]}
-              onPress={sendOTP} disabled={loading || phone.length < 10}>
-              {loading
-                ? <ActivityIndicator color="#000" />
-                : <Text style={s.btnText}>Send Code  →</Text>}
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* OTP step */}
-        {step === 'otp' && (
-          <View style={s.inputGroup}>
-            <TextInput
-              style={[s.otpInput, { backgroundColor: inputBg, color: tx, borderColor: border }]}
-              placeholder="123456"
-              placeholderTextColor={sub}
-              keyboardType="number-pad"
-              value={otp}
-              onChangeText={setOtp}
-              maxLength={6}
-              autoFocus
-              textAlign="center"
-            />
-            <TouchableOpacity
-              style={[s.btn, { backgroundColor: otp.length === 6 ? accent : accent + '60' }]}
-              onPress={verifyOTP} disabled={loading || otp.length < 6}>
-              {loading
-                ? <ActivityIndicator color="#000" />
-                : <Text style={s.btnText}>Verify  →</Text>}
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => animateStep('phone')} style={s.linkBtn}>
-              <Text style={[s.linkText, { color: sub }]}>← Change number</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* Handle step */}
-        {step === 'handle' && (
-          <View style={s.inputGroup}>
-            <View style={[s.phoneRow, { backgroundColor: inputBg, borderColor: border }]}>
-              <Text style={[s.countryCode, { color: accent }]}>@</Text>
-              <View style={[s.divider, { backgroundColor: border }]} />
-              <TextInput
-                style={[s.phoneInput, { color: tx }]}
-                placeholder="yourhandle"
-                placeholderTextColor={sub}
-                value={handle}
-                onChangeText={t => setHandle(t.replace(/[^a-zA-Z0-9_]/g, ''))}
-                maxLength={20}
-                autoCapitalize="none"
-                autoCorrect={false}
-                autoFocus
-              />
-            </View>
-            {handle.length > 0 && (
-              <Text style={[s.handlePreview, { color: accent }]}>@{handle.toLowerCase()}</Text>
-            )}
-            <Text style={[s.hint, { color: sub }]}>
-              3–20 characters · Letters, numbers & underscores{'\n'}
-              Your phone number stays private
-            </Text>
-            <TouchableOpacity
-              style={[s.btn, { backgroundColor: handle.length >= 3 ? accent : accent + '60' }]}
-              onPress={saveHandleAndLogin} disabled={loading || handle.length < 3}>
-              {loading
-                ? <ActivityIndicator color="#000" />
-                : <Text style={s.btnText}>Create Handle  →</Text>}
-            </TouchableOpacity>
-            <TouchableOpacity onPress={skipHandle} style={s.linkBtn}>
-              <Text style={[s.linkText, { color: sub }]}>Skip for now</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* Privacy note */}
-        <Text style={[s.privacy, { color: sub }]}>
-          🔒 End-to-end encrypted · Metadata private · No ads in chats
-        </Text>
-      </Animated.View>
+      <ScrollView
+        contentContainerStyle={s.scroll}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}>
+        {step === 'phone'  && <PhoneStep />}
+        {step === 'otp'    && <OtpStep />}
+        {step === 'handle' && <HandleStep />}
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
 const s = StyleSheet.create({
-  root:          { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  // Decorative background rings
-  circle1:       { position: 'absolute', width: width * 1.4, height: width * 1.4, borderRadius: width * 0.7, borderWidth: 1, top: -width * 0.5, left: -width * 0.2, opacity: 0.6 },
-  circle2:       { position: 'absolute', width: width * 1.0, height: width * 1.0, borderRadius: width * 0.5, borderWidth: 1, bottom: -width * 0.3, right: -width * 0.2, opacity: 0.4 },
-  content:       { width: '100%', paddingHorizontal: 28, alignItems: 'center' },
+  root:          { flex: 1, backgroundColor: C.bg },
+  scroll:        { flexGrow: 1, justifyContent: 'center', paddingVertical: 40 },
+  content:       { alignItems: 'center', paddingHorizontal: 24 },
+
   // Logo
-  logo:          { width: 200, height: 200, marginBottom: 8 },
+  logo:          { width: 220, height: 200, marginBottom: 4 },
+
   // Text
-  title:         { fontSize: 22, fontWeight: '700', textAlign: 'center', marginBottom: 8 },
-  sub:           { fontSize: 14, textAlign: 'center', lineHeight: 20, marginBottom: 20 },
-  // Slogan
-  sloganWrap:    { borderWidth: 1, borderRadius: 16, paddingVertical: 14, paddingHorizontal: 20, marginBottom: 24, width: '100%' },
-  sloganText:    { fontSize: 14, textAlign: 'center', lineHeight: 22, fontStyle: 'italic', fontWeight: '500' },
-  // Inputs
-  inputGroup:    { width: '100%', gap: 12 },
-  phoneRow:      { flexDirection: 'row', alignItems: 'center', borderRadius: 16, borderWidth: 1.5, overflow: 'hidden', height: 56 },
-  countryCode:   { paddingHorizontal: 16, fontSize: 16, fontWeight: '700' },
-  divider:       { width: 1, height: 30 },
-  phoneInput:    { flex: 1, paddingHorizontal: 16, fontSize: 17, height: 56 },
-  otpInput:      { width: '100%', height: 64, borderRadius: 16, borderWidth: 1.5, fontSize: 32, fontWeight: '700', letterSpacing: 12 },
+  heading:       { fontSize: 24, fontWeight: '800', color: C.tx, textAlign: 'center', marginBottom: 6 },
+  subheading:    { fontSize: 15, color: C.sub, textAlign: 'center', marginBottom: 20 },
+
+  // Slogan box
+  sloganBox:     { width: '100%', backgroundColor: C.blueSoft, borderColor: C.blueBorder, borderWidth: 1, borderRadius: 18, paddingVertical: 18, paddingHorizontal: 22, marginBottom: 20 },
+  sloganText:    { fontSize: 15, color: C.blue, textAlign: 'center', lineHeight: 24, fontStyle: 'italic', fontWeight: '600' },
+
+  // Phone/handle input row
+  inputBox:      { width: '100%', flexDirection: 'row', alignItems: 'center', backgroundColor: C.inputBg, borderColor: C.border, borderWidth: 1.5, borderRadius: 16, height: 58, marginBottom: 12, overflow: 'hidden' },
+  flagCode:      { paddingHorizontal: 16, fontSize: 15, fontWeight: '700', color: C.blue },
+  inputDivider:  { width: 1, height: 28, backgroundColor: C.border },
+  phoneInput:    { flex: 1, paddingHorizontal: 16, fontSize: 16, color: C.tx, height: 58 },
+
+  // OTP input
+  otpInput:      { width: '100%', height: 66, borderRadius: 16, borderWidth: 1.5, borderColor: C.border, backgroundColor: C.inputBg, fontSize: 34, fontWeight: '700', letterSpacing: 14, color: C.tx, marginBottom: 16 },
+
+  // Legal text
+  legal:         { fontSize: 12, color: C.sub, lineHeight: 19, textAlign: 'left', width: '100%', marginBottom: 20 },
+  legalLink:     { color: C.blue, textDecorationLine: 'underline' },
+
   // Button
-  btn:           { width: '100%', height: 54, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  btnText:       { color: '#000', fontWeight: '800', fontSize: 16, letterSpacing: 0.3 },
+  btn:           { width: '100%', height: 56, borderRadius: 28, backgroundColor: C.blue, alignItems: 'center', justifyContent: 'center', marginBottom: 18 },
+  btnDisabled:   { opacity: 0.45 },
+  btnText:       { color: '#fff', fontWeight: '700', fontSize: 17, letterSpacing: 0.2 },
+
   // Handle
-  handlePreview: { fontSize: 20, fontWeight: '800', textAlign: 'center' },
-  hint:          { fontSize: 12, lineHeight: 20, textAlign: 'center' },
-  // Links
-  linkBtn:       { alignItems: 'center', paddingVertical: 8 },
-  linkText:      { fontSize: 14 },
-  // Footer
-  privacy:       { fontSize: 11, textAlign: 'center', marginTop: 32, lineHeight: 18, opacity: 0.6 },
+  handlePreview: { fontSize: 22, fontWeight: '800', color: C.blue, marginBottom: 6 },
+  hint:          { fontSize: 12, color: C.sub, lineHeight: 20, textAlign: 'center', marginBottom: 16 },
+
+  // Back link
+  backBtn:       { alignItems: 'center', paddingVertical: 10 },
+  backText:      { fontSize: 14, color: C.sub },
+
+  // Footer badge
+  badge:         { fontSize: 12, color: C.sub, textAlign: 'center', marginTop: 8 },
 });
