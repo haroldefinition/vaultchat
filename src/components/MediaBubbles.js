@@ -132,8 +132,11 @@ export function PhotoStack({ keys, onLongPress }) {
     (async () => {
       const resolved = await Promise.all(keys.map(async k => {
         if (!k) return null;
-        if (k.startsWith('http')) return k;
-        try { return await AsyncStorage.getItem(k); } catch { return null; }
+        if (k.startsWith('http')) return k;  // Remote URL — always loads
+        try {
+          const v = await AsyncStorage.getItem(k);
+          return v || null; // null = local key not in storage (old message / different device)
+        } catch { return null; }
       }));
       if (!cancelled) {
         const valid = resolved.filter(Boolean);

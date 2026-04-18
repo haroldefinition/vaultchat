@@ -52,11 +52,12 @@ const Tab   = createBottomTabNavigator();
 function MoreScreen({ navigation }) {
   const { bg, card, tx, sub, border, accent } = useTheme();
   const items = [
-    { icon:'🏪', label:'Business',      screen:'Business',     desc:'Dashboard, inbox & plans' },
-    { icon:'🤖', label:'AI Assistant',  screen:'AIAssistant',  desc:'Private, on-device AI' },
-    { icon:'📡', label:'Nearby',        screen:'Nearby',       desc:'Offline mesh messaging' },
-    { icon:'🔒', label:'Privacy Policy',screen:'PrivacyPolicy',desc:'How we protect you' },
-    { icon:'⚙️', label:'Settings',      screen:'Settings',     desc:'Notifications, account' },
+    { icon:'🏪', label:'Business',        screen:'Business',      desc:'Dashboard, inbox & plans' },
+    { icon:'🤖', label:'AI Assistant',    screen:'AIAssistant',   desc:'Private, on-device AI' },
+    { icon:'📡', label:'Nearby',          screen:'Nearby',        desc:'Offline mesh messaging' },
+    { icon:'🔒', label:'Privacy Policy',  screen:'PrivacyPolicy', desc:'How we protect you' },
+    { icon:'📋', label:'Terms of Service',screen:'TermsOfService',desc:'Usage terms & conditions' },
+    { icon:'⚙️', label:'Settings',        screen:'Settings',      desc:'Notifications, account' },
   ];
   return (
     <View style={[m.container,{backgroundColor:bg}]}>

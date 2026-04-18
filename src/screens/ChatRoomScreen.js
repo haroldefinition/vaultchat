@@ -89,14 +89,41 @@ function VideoModal({ uri, visible, onClose }) {
 }
 
 // ── Single lazy photo bubble ──────────────────────────────────
+// Handles both IMG:https://... (remote, always available) and
+// LOCALIMG:key (local AsyncStorage — only on sender's device/session).
 function SinglePhoto({ msgKey, isLocal, onOpen, onReply }) {
-  const [uri, setUri] = useState(null);
+  const [uri,    setUri]    = useState(null);
+  const [failed, setFailed] = useState(false);
+
   useEffect(() => {
-    if (isLocal) AsyncStorage.getItem(msgKey).then(v => { if (v) setUri(v); });
-    else setUri(msgKey);
+    setUri(null); setFailed(false);
+    if (!isLocal) {
+      // Remote https:// URL — always available, load directly
+      setUri(msgKey);
+    } else {
+      // Local key — look up in AsyncStorage
+      AsyncStorage.getItem(msgKey)
+        .then(v => {
+          if (v) setUri(v);
+          else   setFailed(true); // key not in this session's storage
+        })
+        .catch(() => setFailed(true));
+    }
   }, [msgKey]);
+
+  if (failed) return (
+    <View style={{ width: 220, height: 100, borderRadius: 14, backgroundColor: '#1a1a2e',
+        alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+      <Text style={{ fontSize: 22 }}>🖼️</Text>
+      <Text style={{ fontSize: 11, color: '#555', textAlign: 'center', paddingHorizontal: 12 }}>
+        Photo not available{'
+'}(send again to share)
+      </Text>
+    </View>
+  );
   if (!uri) return (
-    <View style={{ width: 220, height: 180, borderRadius: 14, backgroundColor: '#1a1a2e', alignItems: 'center', justifyContent: 'center' }}>
+    <View style={{ width: 220, height: 180, borderRadius: 14, backgroundColor: '#1a1a2e',
+        alignItems: 'center', justifyContent: 'center' }}>
       <ActivityIndicator size="small" color="#555" />
     </View>
   );

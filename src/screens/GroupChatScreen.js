@@ -23,12 +23,35 @@ import { ResolvedPhotoStack, ResolvedVideoCarousel } from '../components/MediaBu
 
 // ── Media helpers ─────────────────────────────────────────────
 function SinglePhoto({ msgKey, isLocal, onOpen, onLongPress }) {
-  const [uri, setUri] = useState(null);
+  const [uri,    setUri]    = useState(null);
+  const [failed, setFailed] = useState(false);
+
   useEffect(() => {
-    if (isLocal) AsyncStorage.getItem(msgKey).then(v => { if (v) setUri(v); });
-    else setUri(msgKey);
+    setUri(null); setFailed(false);
+    if (!isLocal) {
+      setUri(msgKey); // Remote https:// URL — always available
+    } else {
+      AsyncStorage.getItem(msgKey)
+        .then(v => { if (v) setUri(v); else setFailed(true); })
+        .catch(() => setFailed(true));
+    }
   }, [msgKey]);
-  if (!uri) return <View style={{ width: 200, height: 160, borderRadius: 14, backgroundColor: '#111', alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator color="#555" /></View>;
+
+  if (failed) return (
+    <View style={{ width: 200, height: 90, borderRadius: 14, backgroundColor: '#111',
+        alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+      <Text style={{ fontSize: 20 }}>🖼️</Text>
+      <Text style={{ fontSize: 11, color: '#555', textAlign: 'center', paddingHorizontal: 12 }}>
+        Photo not available
+      </Text>
+    </View>
+  );
+  if (!uri) return (
+    <View style={{ width: 200, height: 160, borderRadius: 14, backgroundColor: '#111',
+        alignItems: 'center', justifyContent: 'center' }}>
+      <ActivityIndicator color="#555" />
+    </View>
+  );
   return (
     <TouchableOpacity onPress={() => onOpen(uri)} onLongPress={onLongPress} delayLongPress={450}>
       <Image source={{ uri }} style={{ width: 200, height: 160, borderRadius: 14 }} resizeMode="cover" />
