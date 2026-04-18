@@ -334,18 +334,18 @@ export default function RegisterScreen({ route, onLoginCallback }) {
 
 const s = StyleSheet.create({
   root:           { flex: 1, backgroundColor: C.bg },
-  scroll:         { flexGrow: 1, justifyContent: 'center', paddingVertical: 48 },
+  scroll:         { flexGrow: 1, paddingVertical: 0, paddingTop: 8 },
   content:        { alignItems: 'center', paddingHorizontal: 24 },
 
   // Logo — dark rounded container hides the PNG's black background
   logoContainer:  {
-    width: SW,
-    height: SW * 1.4,
+    width: SW * 0.75,
+    height: SW * 0.75 * 1.4,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 0,
   },
-  logo:           { width: SW, height: SW * 1.4 },
+  logo:           { width: SW * 0.75, height: SW * 0.75 * 1.4 },
 
   // Headings
   heading:        { fontSize: 26, fontWeight: '800', color: C.tx, textAlign: 'center', marginBottom: 6 },
