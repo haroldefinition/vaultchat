@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, Image, StyleSheet, ActivityIndicator, Dimensions,
-  Modal, TouchableOpacity, Animated, PanResponder, ScrollView,
+  Modal, TouchableOpacity, FlatList, ScrollView,
 } from 'react-native';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -45,88 +45,58 @@ function useResolvedKeys(keys) {
   return uris;
 }
 
-// ── Fullscreen photo gallery with finger-swipe ─────────────────
+// ── Fullscreen photo gallery — native pagingEnabled swipe ─────
 function FullscreenGallery({ uris, startIndex = 0, visible, onClose }) {
-  const [idx, setIdx]         = useState(startIndex);
-  const idxRef                = useRef(startIndex);
-  const urisRef               = useRef(uris);
-  const animating             = useRef(false);
-  const slideX                = useRef(new Animated.Value(0)).current;
+  const listRef = useRef(null);
+  const [idx, setIdx] = useState(startIndex);
 
-  useEffect(() => { idxRef.current  = idx;  }, [idx]);
-  useEffect(() => { urisRef.current = uris; }, [uris]);
   useEffect(() => {
-    if (visible) {
-      idxRef.current = startIndex;
+    if (visible && uris?.length) {
       setIdx(startIndex);
-      slideX.setValue(0);
-      animating.current = false;
+      setTimeout(() => {
+        listRef.current?.scrollToIndex({ index: startIndex, animated: false });
+      }, 50);
     }
   }, [visible, startIndex]);
 
-  const commit = useCallback((dir) => {
-    if (animating.current) return;
-    const count = urisRef.current.length;
-    if (count <= 1) return;
-    animating.current = true;
-    const dest = dir === 'left' ? -SW : SW;
-    Animated.timing(slideX, { toValue: dest, duration: 160, useNativeDriver: true }).start(() => {
-      const next = dir === 'left'
-        ? (idxRef.current + 1) % count
-        : (idxRef.current - 1 + count) % count;
-      idxRef.current = next;
-      setIdx(next);
-      slideX.setValue(0);
-      animating.current = false;
-    });
-  }, [slideX]);
-
-  const pr = useRef(PanResponder.create({
-    onStartShouldSetPanResponder:  () => false,
-    onMoveShouldSetPanResponder:   (_, g) =>
-      !animating.current && Math.abs(g.dx) > 4 && Math.abs(g.dx) > Math.abs(g.dy) * 0.8,
-    onPanResponderMove:   (_, g) => { if (!animating.current) slideX.setValue(g.dx); },
-    onPanResponderRelease:(_, g) => {
-      const count = urisRef.current.length;
-      if (count <= 1) { Animated.spring(slideX, { toValue: 0, useNativeDriver: true }).start(); return; }
-      if      (g.dx < -FS_SWIPE || g.vx < -0.2) commit('left');
-      else if (g.dx >  FS_SWIPE || g.vx >  0.2) commit('right');
-      else Animated.spring(slideX, { toValue: 0, friction: 6, tension: 60, useNativeDriver: true }).start();
-    },
-    onPanResponderTerminate: () => Animated.spring(slideX, { toValue: 0, useNativeDriver: true }).start(),
-  })).current;
-
-  if (!visible || !uris || !uris.length) return null;
-
-  const count   = uris.length;
-  const cur     = uris[idx % count];
-  const prev    = count > 1 ? uris[(idx - 1 + count) % count] : null;
-  const next    = count > 1 ? uris[(idx + 1) % count]         : null;
-
-  const prevX = slideX.interpolate({ inputRange: [-SW, 0, SW], outputRange: [-SW * 2, -SW, 0], extrapolate: 'clamp' });
-  const curX  = slideX.interpolate({ inputRange: [-SW, 0, SW], outputRange: [-SW, 0, SW],      extrapolate: 'clamp' });
-  const nextX = slideX.interpolate({ inputRange: [-SW, 0, SW], outputRange: [0, SW, SW * 2],   extrapolate: 'clamp' });
+  if (!visible || !uris?.length) return null;
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={fs.bg} {...pr.panHandlers}>
-        {/* Close */}
-        <TouchableOpacity style={fs.closeBtn} onPress={onClose} hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}>
+    <Modal visible={visible} transparent={false} animationType="fade" onRequestClose={onClose}>
+      <View style={fs.bg}>
+        <TouchableOpacity style={fs.closeBtn} onPress={onClose}
+          hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}>
           <Text style={fs.closeTx}>✕  Close</Text>
         </TouchableOpacity>
-        {/* Counter */}
-        {count > 1 && (
+        {uris.length > 1 && (
           <View style={fs.counter}>
-            <Text style={fs.counterTx}>{(idx % count) + 1} / {count}</Text>
+            <Text style={fs.counterTx}>{idx + 1} / {uris.length}</Text>
           </View>
         )}
-        {/* Photos — three rendered side by side, slide with finger */}
-        {prev && <Animated.Image source={{ uri: prev }} style={[fs.img, { transform: [{ translateX: prevX }] }]} resizeMode="contain" />}
-        <Animated.Image source={{ uri: cur }} style={[fs.img, { transform: [{ translateX: curX }] }]} resizeMode="contain" />
-        {next && <Animated.Image source={{ uri: next }} style={[fs.img, { transform: [{ translateX: nextX }] }]} resizeMode="contain" />}
-        {/* Swipe hint */}
-        {count > 1 && (
-          <Text style={fs.hint}>← swipe to browse →</Text>
+        {/* FlatList pagingEnabled: native scroll, any finger, no conflict with parent */}
+        <FlatList
+          ref={listRef}
+          data={uris}
+          keyExtractor={(_, i) => String(i)}
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          bounces={false}
+          scrollEventThrottle={16}
+          initialScrollIndex={startIndex}
+          getItemLayout={(_, i) => ({ length: SW, offset: SW * i, index: i })}
+          onMomentumScrollEnd={e => {
+            const i = Math.round(e.nativeEvent.contentOffset.x / SW);
+            setIdx(i);
+          }}
+          renderItem={({ item }) => (
+            <View style={{ width: SW, height: SH, justifyContent: 'center', alignItems: 'center' }}>
+              <Image source={{ uri: item }} style={fs.img} resizeMode="contain" />
+            </View>
+          )}
+        />
+        {uris.length > 1 && (
+          <Text style={fs.hint}>swipe to browse</Text>
         )}
       </View>
     </Modal>
@@ -365,13 +335,13 @@ export default function ReplyPreview({ content, label, labelColor, textColor, bo
 
 // ── Fullscreen styles ──────────────────────────────────────────
 const fs = StyleSheet.create({
-  bg:       { flex: 1, backgroundColor: 'rgba(0,0,0,0.97)', alignItems: 'center', justifyContent: 'center' },
+  bg:       { flex: 1, backgroundColor: '#000' },
   closeBtn: { position: 'absolute', top: 56, right: 20, zIndex: 20, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8 },
   closeTx:  { color: '#fff', fontWeight: 'bold', fontSize: 15 },
   counter:  { position: 'absolute', top: 62, left: 20, zIndex: 20 },
   counterTx:{ color: '#fff', fontSize: 15, fontWeight: '700' },
-  img:      { position: 'absolute', width: SW, height: SH * 0.75, top: SH * 0.12 },
-  hint:     { position: 'absolute', bottom: 48, color: 'rgba(255,255,255,0.4)', fontSize: 13 },
+  img:      { width: SW, height: SH * 0.75 },
+  hint:     { position: 'absolute', bottom: 48, color: 'rgba(255,255,255,0.4)', fontSize: 13, alignSelf: 'center' },
 });
 
 // ── Preview styles ─────────────────────────────────────────────

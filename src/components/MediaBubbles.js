@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, Image, TouchableOpacity, Modal, StyleSheet,
-  Animated, PanResponder, Dimensions, ActivityIndicator,
+  FlatList, PanResponder, Animated, Dimensions, ActivityIndicator,
 } from 'react-native';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -13,83 +13,61 @@ const DECK_SWIPE = CARD_W * 0.22;
 const FS_SWIPE   = SW * 0.08;
 
 function FullScreenViewer({ uris, startIndex, visible, onClose }) {
-  const [idx, setIdx] = useState(0);
-  const idxRef      = useRef(0);
-  const urisRef     = useRef([]);
-  const animatingFS = useRef(false);
-  const slideX      = useRef(new Animated.Value(0)).current;
+  const listRef = useRef(null);
+  const [idx, setIdx] = useState(startIndex || 0);
 
-  useEffect(() => { idxRef.current  = idx;  }, [idx]);
-  useEffect(() => { urisRef.current = uris; }, [uris]);
-
+  // Scroll to startIndex when opened
   useEffect(() => {
-    if (visible) {
-      const start = startIndex || 0;
-      idxRef.current = start;
-      setIdx(start);
-      slideX.setValue(0);
-      animatingFS.current = false;
+    if (visible && uris?.length) {
+      const i = startIndex || 0;
+      setIdx(i);
+      // Small delay lets the Modal finish mounting before scrolling
+      setTimeout(() => {
+        listRef.current?.scrollToIndex({ index: i, animated: false });
+      }, 50);
     }
   }, [visible, startIndex]);
 
-  const commitFS = useCallback((dir) => {
-    if (animatingFS.current) return;
-    const count = urisRef.current.length;
-    if (count <= 1) return;
-    animatingFS.current = true;
-    const dest = dir === 'left' ? -SW : SW;
-    Animated.timing(slideX, { toValue:dest, duration:160, useNativeDriver:true }).start(() => {
-      const next = dir === 'left'
-        ? (idxRef.current + 1) % count
-        : (idxRef.current - 1 + count) % count;
-      idxRef.current = next;
-      setIdx(next);
-      slideX.setValue(0);
-      animatingFS.current = false;
-    });
-  }, [slideX]);
-
-  const fsPR = useRef(PanResponder.create({
-    onStartShouldSetPanResponder:  () => false,
-    onMoveShouldSetPanResponder:   (_, g) =>
-      !animatingFS.current && Math.abs(g.dx) > 4 && Math.abs(g.dx) > Math.abs(g.dy) * 0.8,
-    onPanResponderMove:  (_, g) => { if (!animatingFS.current) slideX.setValue(g.dx); },
-    onPanResponderRelease: (_, g) => {
-      const count = urisRef.current.length;
-      if (count <= 1) { Animated.spring(slideX, { toValue:0, useNativeDriver:true }).start(); return; }
-      if      (g.dx < -FS_SWIPE || g.vx < -0.2) commitFS('left');
-      else if (g.dx >  FS_SWIPE || g.vx >  0.2) commitFS('right');
-      else Animated.spring(slideX, { toValue:0, friction:6, tension:60, useNativeDriver:true }).start();
-    },
-    onPanResponderTerminate: () => Animated.spring(slideX, { toValue:0, useNativeDriver:true }).start(),
-  })).current;
-
-  if (!visible || !uris || !uris.length) return null;
-
-  const count   = uris.length;
-  const current = uris[idx % count];
-  const prev    = count > 1 ? uris[(idx - 1 + count) % count] : null;
-  const next    = count > 1 ? uris[(idx + 1) % count]         : null;
-
-  const prevX = slideX.interpolate({ inputRange:[-SW,0,SW], outputRange:[-SW*2,-SW,0],   extrapolate:'clamp' });
-  const currX = slideX.interpolate({ inputRange:[-SW,0,SW], outputRange:[-SW,0,SW],      extrapolate:'clamp' });
-  const nextX = slideX.interpolate({ inputRange:[-SW,0,SW], outputRange:[0,SW,SW*2],     extrapolate:'clamp' });
+  if (!visible || !uris?.length) return null;
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={fs.bg} {...fsPR.panHandlers}>
-        <TouchableOpacity style={fs.closeBtn} onPress={onClose}>
+    <Modal visible={visible} transparent={false} animationType="fade" onRequestClose={onClose}>
+      <View style={fs.bg}>
+        {/* Close */}
+        <TouchableOpacity style={fs.closeBtn} onPress={onClose} hitSlop={{ top:16, bottom:16, left:16, right:16 }}>
           <Text style={fs.closeTx}>✕  Close</Text>
         </TouchableOpacity>
-        {count > 1 && (
+        {/* Counter */}
+        {uris.length > 1 && (
           <View style={fs.counter}>
-            <Text style={fs.counterTx}>{(idx % count) + 1} / {count}</Text>
+            <Text style={fs.counterTx}>{idx + 1} / {uris.length}</Text>
           </View>
         )}
-        {prev && <Animated.Image source={{uri:prev}} style={[fs.img,{transform:[{translateX:prevX}]}]} resizeMode="contain"/>}
-        <Animated.Image source={{uri:current}} style={[fs.img,{transform:[{translateX:currX}]}]} resizeMode="contain"/>
-        {next && <Animated.Image source={{uri:next}} style={[fs.img,{transform:[{translateX:nextX}]}]} resizeMode="contain"/>}
-        {count > 1 && <View style={fs.hint}><Text style={fs.hintTx}>← swipe to browse →</Text></View>}
+        {/* Paging FlatList — native swipe, any finger, no scroll conflict */}
+        <FlatList
+          ref={listRef}
+          data={uris}
+          keyExtractor={(_, i) => String(i)}
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          bounces={false}
+          scrollEventThrottle={16}
+          initialScrollIndex={startIndex || 0}
+          getItemLayout={(_, i) => ({ length: SW, offset: SW * i, index: i })}
+          onMomentumScrollEnd={e => {
+            const i = Math.round(e.nativeEvent.contentOffset.x / SW);
+            setIdx(i);
+          }}
+          renderItem={({ item }) => (
+            <View style={{ width: SW, height: SH, justifyContent: 'center', alignItems: 'center' }}>
+              <Image source={{ uri: item }} style={fs.img} resizeMode="contain" />
+            </View>
+          )}
+        />
+        {uris.length > 1 && (
+          <View style={fs.hint}><Text style={fs.hintTx}>swipe to browse</Text></View>
+        )}
       </View>
     </Modal>
   );
@@ -326,7 +304,7 @@ const fs = StyleSheet.create({
   closeTx:   { color:'#fff', fontWeight:'700', fontSize:15 },
   counter:   { position:'absolute', top:56, left:20, zIndex:20, backgroundColor:'rgba(0,0,0,0.5)', borderRadius:12, paddingHorizontal:10, paddingVertical:4 },
   counterTx: { color:'#fff', fontSize:13, fontWeight:'700' },
-  img:       { position:'absolute', width:SW, height:SH, top:0, left:0 },
+  img:       { width:SW, height:SH * 0.8 },
   hint:      { position:'absolute', bottom:44, left:0, right:0, alignItems:'center' },
   hintTx:    { color:'rgba(255,255,255,0.4)', fontSize:12 },
 });
