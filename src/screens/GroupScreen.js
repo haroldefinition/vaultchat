@@ -119,6 +119,7 @@ export default function GroupScreen({ navigation }) {
   const [groupEditTarget, setGroupEditTarget] = useState(null);
   const [groupName,   setGroupName]   = useState('');
   const [groupDesc,   setGroupDesc]   = useState('');
+  const [groupSearch, setGroupSearch] = useState('');
 
   useEffect(() => {
     loadGroups();
