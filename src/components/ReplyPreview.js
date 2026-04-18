@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, Image, StyleSheet, ActivityIndicator, Dimensions,
-  Modal, TouchableOpacity, FlatList, ScrollView,
+  Modal, TouchableOpacity, ScrollView,
 } from 'react-native';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -45,16 +45,16 @@ function useResolvedKeys(keys) {
   return uris;
 }
 
-// ── Fullscreen photo gallery — native pagingEnabled swipe ─────
+// ── Fullscreen photo gallery — snap swipe (short flick = next photo) ──
 function FullscreenGallery({ uris, startIndex = 0, visible, onClose }) {
-  const listRef = useRef(null);
+  const scrollRef = useRef(null);
   const [idx, setIdx] = useState(startIndex);
 
   useEffect(() => {
     if (visible && uris?.length) {
       setIdx(startIndex);
       setTimeout(() => {
-        listRef.current?.scrollToIndex({ index: startIndex, animated: false });
+        scrollRef.current?.scrollTo({ x: SW * startIndex, animated: false });
       }, 50);
     }
   }, [visible, startIndex]);
@@ -73,28 +73,27 @@ function FullscreenGallery({ uris, startIndex = 0, visible, onClose }) {
             <Text style={fs.counterTx}>{idx + 1} / {uris.length}</Text>
           </View>
         )}
-        {/* FlatList pagingEnabled: native scroll, any finger, no conflict with parent */}
-        <FlatList
-          ref={listRef}
-          data={uris}
-          keyExtractor={(_, i) => String(i)}
+        <ScrollView
+          ref={scrollRef}
           horizontal
-          pagingEnabled
+          snapToInterval={SW}
+          snapToAlignment="start"
+          decelerationRate="fast"
+          disableIntervalMomentum
           showsHorizontalScrollIndicator={false}
-          bounces={false}
           scrollEventThrottle={16}
-          initialScrollIndex={startIndex}
-          getItemLayout={(_, i) => ({ length: SW, offset: SW * i, index: i })}
           onMomentumScrollEnd={e => {
             const i = Math.round(e.nativeEvent.contentOffset.x / SW);
             setIdx(i);
           }}
-          renderItem={({ item }) => (
-            <View style={{ width: SW, height: SH, justifyContent: 'center', alignItems: 'center' }}>
-              <Image source={{ uri: item }} style={fs.img} resizeMode="contain" />
+          contentContainerStyle={{ alignItems: 'center' }}
+        >
+          {uris.map((uri, i) => (
+            <View key={i} style={{ width: SW, height: SH, justifyContent: 'center', alignItems: 'center' }}>
+              <Image source={{ uri }} style={fs.img} resizeMode="contain" />
             </View>
-          )}
-        />
+          ))}
+        </ScrollView>
         {uris.length > 1 && (
           <Text style={fs.hint}>swipe to browse</Text>
         )}

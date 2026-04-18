@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, Image, TouchableOpacity, Modal, StyleSheet,
-  FlatList, PanResponder, Animated, Dimensions, ActivityIndicator,
+  FlatList, ScrollView, PanResponder, Animated, Dimensions, ActivityIndicator,
 } from 'react-native';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -13,17 +13,15 @@ const DECK_SWIPE = CARD_W * 0.22;
 const FS_SWIPE   = SW * 0.08;
 
 function FullScreenViewer({ uris, startIndex, visible, onClose }) {
-  const listRef = useRef(null);
+  const scrollRef = useRef(null);
   const [idx, setIdx] = useState(startIndex || 0);
 
-  // Scroll to startIndex when opened
   useEffect(() => {
     if (visible && uris?.length) {
       const i = startIndex || 0;
       setIdx(i);
-      // Small delay lets the Modal finish mounting before scrolling
       setTimeout(() => {
-        listRef.current?.scrollToIndex({ index: i, animated: false });
+        scrollRef.current?.scrollTo({ x: SW * i, animated: false });
       }, 50);
     }
   }, [visible, startIndex]);
@@ -33,38 +31,43 @@ function FullScreenViewer({ uris, startIndex, visible, onClose }) {
   return (
     <Modal visible={visible} transparent={false} animationType="fade" onRequestClose={onClose}>
       <View style={fs.bg}>
-        {/* Close */}
-        <TouchableOpacity style={fs.closeBtn} onPress={onClose} hitSlop={{ top:16, bottom:16, left:16, right:16 }}>
+        <TouchableOpacity style={fs.closeBtn} onPress={onClose}
+          hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}>
           <Text style={fs.closeTx}>✕  Close</Text>
         </TouchableOpacity>
-        {/* Counter */}
         {uris.length > 1 && (
           <View style={fs.counter}>
             <Text style={fs.counterTx}>{idx + 1} / {uris.length}</Text>
           </View>
         )}
-        {/* Paging FlatList — native swipe, any finger, no scroll conflict */}
-        <FlatList
-          ref={listRef}
-          data={uris}
-          keyExtractor={(_, i) => String(i)}
+        {/*
+          snapToInterval + decelerationRate="fast":
+          - A short flick of any length snaps to the next photo
+          - No need to drag the full screen width
+          - Any finger, any speed
+          - disableIntervalMomentum prevents skipping multiple photos on fast flings
+        */}
+        <ScrollView
+          ref={scrollRef}
           horizontal
-          pagingEnabled
+          snapToInterval={SW}
+          snapToAlignment="start"
+          decelerationRate="fast"
+          disableIntervalMomentum
           showsHorizontalScrollIndicator={false}
-          bounces={false}
           scrollEventThrottle={16}
-          initialScrollIndex={startIndex || 0}
-          getItemLayout={(_, i) => ({ length: SW, offset: SW * i, index: i })}
           onMomentumScrollEnd={e => {
             const i = Math.round(e.nativeEvent.contentOffset.x / SW);
             setIdx(i);
           }}
-          renderItem={({ item }) => (
-            <View style={{ width: SW, height: SH, justifyContent: 'center', alignItems: 'center' }}>
-              <Image source={{ uri: item }} style={fs.img} resizeMode="contain" />
+          contentContainerStyle={{ alignItems: 'center' }}
+        >
+          {uris.map((uri, i) => (
+            <View key={i} style={{ width: SW, height: SH, justifyContent: 'center', alignItems: 'center' }}>
+              <Image source={{ uri }} style={fs.img} resizeMode="contain" />
             </View>
-          )}
-        />
+          ))}
+        </ScrollView>
         {uris.length > 1 && (
           <View style={fs.hint}><Text style={fs.hintTx}>swipe to browse</Text></View>
         )}
@@ -72,6 +75,7 @@ function FullScreenViewer({ uris, startIndex, visible, onClose }) {
     </Modal>
   );
 }
+
 
 export function PhotoStack({ keys, onLongPress }) {
   const [uris,    setUris]    = useState([]);
