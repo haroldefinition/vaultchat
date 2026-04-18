@@ -116,8 +116,7 @@ function SinglePhoto({ msgKey, isLocal, onOpen, onReply }) {
         alignItems: 'center', justifyContent: 'center', gap: 6 }}>
       <Text style={{ fontSize: 22 }}>🖼️</Text>
       <Text style={{ fontSize: 11, color: '#555', textAlign: 'center', paddingHorizontal: 12 }}>
-        Photo not available{'
-'}(send again to share)
+        Photo not available
       </Text>
     </View>
   );
