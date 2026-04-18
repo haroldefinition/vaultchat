@@ -2,13 +2,14 @@ import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ActivityIndicator, Alert, KeyboardAvoidingView,
-  Platform, ScrollView, Image, Linking,
+  Platform, ScrollView, Image, Linking, Dimensions,
 } from 'react-native';
 import { supabase } from '../services/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { saveHandle } from '../services/vaultHandle';
 
 const LOGO    = require('../../assets/vaultchat-logo.png');
+const SW      = Dimensions.get('window').width;
 const BACKEND = 'https://vaultchat-production-3a96.up.railway.app';
 
 // Fixed colours — Register is always light (matching the website)
@@ -338,13 +339,13 @@ const s = StyleSheet.create({
 
   // Logo — dark rounded container hides the PNG's black background
   logoContainer:  {
-    width: 300,
-    height: 340,
+    width: SW,
+    height: SW * 1.4,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 8,
+    marginBottom: 0,
   },
-  logo:           { width: 300, height: 340 },
+  logo:           { width: SW, height: SW * 1.4 },
 
   // Headings
   heading:        { fontSize: 26, fontWeight: '800', color: C.tx, textAlign: 'center', marginBottom: 6 },

@@ -1,7 +1,8 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Image, Text, StyleSheet, Animated } from 'react-native';
+import { View, Image, Text, StyleSheet, Animated, Dimensions } from 'react-native';
 
 const LOGO = require('../../assets/vaultchat-logo.png');
+const SW   = Dimensions.get('window').width;
 
 export default function SplashScreen() {
   const fade  = useRef(new Animated.Value(0)).current;
@@ -35,8 +36,8 @@ const s = StyleSheet.create({
     justifyContent: 'center',
   },
   logo: {
-    width: 300,
-    height: 340,
+    width: SW,
+    height: SW * 1.4,
     marginBottom: 32,
   },
   badge: {
