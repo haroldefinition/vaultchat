@@ -31,7 +31,8 @@ import NewCallScreen       from './src/screens/NewCallScreen';
 import NewMessageScreen    from './src/screens/NewMessageScreen';
 import ContactPickerScreen from './src/screens/ContactPickerScreen';
 import ChannelsScreen      from './src/screens/ChannelsScreen';
-import PrivacyPolicyScreen from './src/screens/PrivacyPolicyScreen';
+import PrivacyPolicyScreen  from './src/screens/PrivacyPolicyScreen';
+import TermsOfServiceScreen from './src/screens/TermsOfServiceScreen';
 import OfferInboxScreen    from './src/screens/OfferInboxScreen';
 import BusinessScreen      from './src/screens/BusinessScreen';
 import BusinessChatScreen  from './src/screens/BusinessChatScreen';
@@ -186,7 +187,8 @@ export default function App() {
               <Stack.Screen name="ContactPicker" component={ContactPickerScreen} />
               <Stack.Screen name="Profile"       component={ProfileScreen} />
               <Stack.Screen name="Channels"      component={ChannelsScreen} />
-              <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
+              <Stack.Screen name="PrivacyPolicy"  component={PrivacyPolicyScreen} />
+              <Stack.Screen name="TermsOfService" component={TermsOfServiceScreen} />
               <Stack.Screen name="Settings"      component={SettingsScreen} />
               <Stack.Screen name="OfferInbox"    component={OfferInboxScreen} />
               <Stack.Screen name="Business"      component={BusinessScreen} />

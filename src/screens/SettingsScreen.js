@@ -428,7 +428,8 @@ export default function SettingsScreen({ navigation }) {
         <Section title="ABOUT">
           <Row icon="ℹ️" label="Version" value="1.0.0" />
           <Row icon="🔐" label="Encryption Protocol" value="Signal" />
-          <Row icon="📄" label="Privacy Policy" onPress={() => navigation.navigate('PrivacyPolicy')} />
+          <Row icon="📄" label="Privacy Policy"    onPress={() => navigation.navigate('PrivacyPolicy')} />
+          <Row icon="📋" label="Terms of Service"  onPress={() => navigation.navigate('TermsOfService')} />
           <Row icon="⭐" label="Rate the App" onPress={() => Alert.alert('Thank you!', 'App Store rating coming soon.')} />
         </Section>
 
