@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 
 const { width: SW, height: SH } = Dimensions.get('window');
-const THUMB = 88;
+const THUMB = 264;
 
 export default function StagedPhotosPicker({
   photos,          // [{ uri, key }]
