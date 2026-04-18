@@ -286,7 +286,7 @@ export default function GroupChatScreen({ route, navigation }) {
     });
     setInputText('');
     setReplyingTo(null);
-    flatRef.current?.scrollToEnd({ animated: true });
+    // inverted FlatList — new messages appear at bottom automatically
 
     try {
       const { data, error } = await supabase.from('group_messages').insert(payload).select().single();
@@ -515,10 +515,10 @@ export default function GroupChatScreen({ route, navigation }) {
       {/* Messages */}
       <FlatList
         ref={flatRef}
-        data={messages}
+        data={[...messages].reverse()}
         keyExtractor={(item, i) => String(item.id || i)}
-        onContentSizeChange={() => flatRef.current?.scrollToEnd({ animated: false })}
-        contentContainerStyle={{ padding: 12, paddingBottom: 8 }}
+        inverted
+        contentContainerStyle={{ padding: 12, paddingTop: 8 }}
         renderItem={({ item }) => {
 
           return (

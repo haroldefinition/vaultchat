@@ -294,7 +294,7 @@ export default function ChatRoomScreen({ route, navigation }) {
           }
           const next = [...prev, newMsg];
           AsyncStorage.setItem(`vaultchat_msgs_${roomId}`, JSON.stringify(next.filter(m => !String(m.id).startsWith('temp_')))).catch(() => {});
-          setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 60);
+          // inverted FlatList — no scrollToEnd needed, new items appear at bottom automatically
           // Mark as delivered when we receive someone else's message
           markDelivered(newMsg.id, myId, newMsg.sender_id);
           return next;
@@ -407,7 +407,7 @@ export default function ChatRoomScreen({ route, navigation }) {
 
     // Optimistic update
     setMessages(prev => [...prev, newMsg]);
-    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 80);
+    // inverted FlatList — new messages appear at bottom automatically
 
     try {
       const { data, error } = await supabase
@@ -684,10 +684,10 @@ export default function ChatRoomScreen({ route, navigation }) {
       {/* Messages */}
       <FlatList
         ref={listRef}
-        data={messages}
+        data={[...messages].reverse()}
         keyExtractor={(item, i) => String(item.id || i)}
-        onLayout={() => listRef.current?.scrollToEnd({ animated: false })}
-        contentContainerStyle={{ padding: 12, paddingBottom: 8 }}
+        inverted
+        contentContainerStyle={{ padding: 12, paddingTop: 8 }}
         renderItem={({ item }) => (
           <Bubble
             item={item} myId={myId} tx={tx} sub={sub} card={card} accent={accent}

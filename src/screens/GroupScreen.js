@@ -126,6 +126,14 @@ export default function GroupScreen({ navigation }) {
     return unsub;
   }, [navigation]);
 
+  // Filtered groups for search
+  const filteredGroups = groupSearch.trim()
+    ? groups.filter(g =>
+        g.name?.toLowerCase().includes(groupSearch.toLowerCase()) ||
+        g.description?.toLowerCase().includes(groupSearch.toLowerCase())
+      )
+    : groups;
+
   const loadGroups = useCallback(async () => {
     try {
       const raw = await AsyncStorage.getItem(STORAGE_KEY);
@@ -223,21 +231,44 @@ export default function GroupScreen({ navigation }) {
         </TouchableOpacity>
       </View>
 
+      {/* Group search bar */}
+      <View style={[s.searchBar, { backgroundColor: inputBg, borderColor: border }]}>
+        <Text style={s.searchIcon}>🔍</Text>
+        <TextInput
+          style={[s.searchInput, { color: tx }]}
+          placeholder="Search groups..."
+          placeholderTextColor={sub}
+          value={groupSearch}
+          onChangeText={setGroupSearch}
+          autoCapitalize="none"
+          returnKeyType="search"
+        />
+        {groupSearch.length > 0 && (
+          <TouchableOpacity onPress={() => setGroupSearch('')}>
+            <Text style={{ color: sub, fontSize: 16, paddingHorizontal: 8 }}>✕</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
       <FlatList
-        data={groups}
+        data={filteredGroups}
         keyExtractor={item => item.id}
         renderItem={renderGroup}
         ListEmptyComponent={
           <View style={s.empty}>
-            <Text style={s.emptyEmoji}>👥</Text>
-            <Text style={[s.emptyTitle, { color: tx }]}>No groups yet</Text>
-            <Text style={[s.emptySub, { color: sub }]}>Create a group to start encrypted conversations.</Text>
-            <TouchableOpacity style={[s.emptyBtn, { backgroundColor: accent }]} onPress={() => setCreateModal(true)}>
-              <Text style={s.emptyBtnText}>+ Create Group</Text>
-            </TouchableOpacity>
+            <Text style={s.emptyEmoji}>{groupSearch ? '🔍' : '👥'}</Text>
+            <Text style={[s.emptyTitle, { color: tx }]}>{groupSearch ? 'No groups found' : 'No groups yet'}</Text>
+            <Text style={[s.emptySub, { color: sub }]}>
+              {groupSearch ? `No groups match "${groupSearch}"` : 'Create a group to start encrypted conversations.'}
+            </Text>
+            {!groupSearch && (
+              <TouchableOpacity style={[s.emptyBtn, { backgroundColor: accent }]} onPress={() => setCreateModal(true)}>
+                <Text style={s.emptyBtnText}>+ Create Group</Text>
+              </TouchableOpacity>
+            )}
           </View>
         }
-        contentContainerStyle={groups.length === 0 ? { flex: 1 } : { paddingBottom: 20 }}
+        contentContainerStyle={filteredGroups.length === 0 ? { flex: 1 } : { paddingBottom: 20 }}
         style={{ flex: 1 }}
       />
 
@@ -319,6 +350,9 @@ export default function GroupScreen({ navigation }) {
 const s = StyleSheet.create({
   safe:          { flex: 1 },
   header:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 10, paddingBottom: 14, borderBottomWidth: StyleSheet.hairlineWidth },
+  searchBar:     { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginVertical: 6, borderRadius: 12, borderWidth: 1, paddingHorizontal: 10 },
+  searchIcon:    { fontSize: 14, marginRight: 6, opacity: 0.6 },
+  searchInput:   { flex: 1, paddingVertical: 8, paddingHorizontal: 6, fontSize: 14 },
   headerTitle:   { fontSize: 28, fontWeight: '800' },
   newBtn:        { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
   newBtnText:    { color: '#000', fontWeight: '700', fontSize: 14 },
