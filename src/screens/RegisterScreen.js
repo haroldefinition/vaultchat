@@ -2,13 +2,14 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ActivityIndicator, Alert, Animated, KeyboardAvoidingView,
-  Platform, Dimensions,
+  Platform, Dimensions, Image,
 } from 'react-native';
 import { supabase } from '../services/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../services/theme';
 import { saveHandle } from '../services/vaultHandle';
 
+const LOGO    = require('../../assets/vaultchat-logo.png');
 const BACKEND  = 'https://vaultchat-production-3a96.up.railway.app';
 const { width } = Dimensions.get('window');
 
@@ -146,13 +147,8 @@ export default function RegisterScreen({ route, onLoginCallback }) {
 
       <Animated.View style={[s.content, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
 
-        {/* Logo mark */}
-        <View style={[s.logoWrap, { backgroundColor: accent + '18', borderColor: accent + '30' }]}>
-          <Text style={s.logoEmoji}>🔒</Text>
-        </View>
-
-        {/* App name */}
-        <Text style={[s.appName, { color: accent }]}>VaultChat</Text>
+        {/* VaultChat logo — PNG includes shield icon + text */}
+        <Image source={LOGO} style={s.logo} resizeMode="contain" />
 
         {/* Title */}
         <Text style={[s.title, { color: tx }]}>{cfg.title}</Text>
@@ -274,9 +270,7 @@ const s = StyleSheet.create({
   circle2:       { position: 'absolute', width: width * 1.0, height: width * 1.0, borderRadius: width * 0.5, borderWidth: 1, bottom: -width * 0.3, right: -width * 0.2, opacity: 0.4 },
   content:       { width: '100%', paddingHorizontal: 28, alignItems: 'center' },
   // Logo
-  logoWrap:      { width: 80, height: 80, borderRadius: 24, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
-  logoEmoji:     { fontSize: 36 },
-  appName:       { fontSize: 28, fontWeight: '800', letterSpacing: 1, marginBottom: 24 },
+  logo:          { width: 200, height: 200, marginBottom: 8 },
   // Text
   title:         { fontSize: 22, fontWeight: '700', textAlign: 'center', marginBottom: 8 },
   sub:           { fontSize: 14, textAlign: 'center', lineHeight: 20, marginBottom: 20 },

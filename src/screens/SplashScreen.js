@@ -1,19 +1,48 @@
-import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-import { useTheme } from '../services/theme';
+import React, { useEffect, useRef } from 'react';
+import { View, Image, Text, StyleSheet, Animated } from 'react-native';
+
+const LOGO = require('../../assets/vaultchat-logo.png');
 
 export default function SplashScreen() {
-  const { bg, accent } = useTheme();
+  const fade  = useRef(new Animated.Value(0)).current;
+  const scale = useRef(new Animated.Value(0.88)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fade,  { toValue: 1, duration: 900, useNativeDriver: true }),
+      Animated.spring(scale, { toValue: 1, friction: 6, tension: 60, useNativeDriver: true }),
+    ]).start();
+  }, []);
+
   return (
-    <View style={[s.container, { backgroundColor: bg }]}>
-      <Text style={[s.title, { color: accent }]}>VaultChat</Text>
-      <Text style={s.sub}>End-to-end encrypted messaging</Text>
+    <View style={s.container}>
+      <Animated.View style={{ opacity: fade, transform: [{ scale }], alignItems: 'center' }}>
+        {/* Logo — the PNG includes the shield + "VaultChat" text */}
+        <Image source={LOGO} style={s.logo} resizeMode="contain" />
+
+        {/* Privacy badge — matches website footer tag */}
+        <Text style={s.badge}>🔒  End-to-end encrypted · No ads · No metadata</Text>
+      </Animated.View>
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  title: { fontSize: 36, fontWeight: 'bold' },
-  sub: { fontSize: 14, color: '#888', marginTop: 8 },
+  container: {
+    flex: 1,
+    backgroundColor: '#000',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logo: {
+    width: 260,
+    height: 260,
+    marginBottom: 32,
+  },
+  badge: {
+    fontSize: 12,
+    color: 'rgba(144, 213, 255, 0.55)',  // light blue tint matching accent
+    textAlign: 'center',
+    letterSpacing: 0.3,
+  },
 });
