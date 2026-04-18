@@ -327,9 +327,32 @@ export default function GroupChatScreen({ route, navigation }) {
     if (!stagedPhotos.length) return;
     setSending(true);
     const cap = inputText.trim();
-    let content = stagedPhotos.length === 1 ? `LOCALIMG:${stagedPhotos[0].key}` : `GALLERY:${stagedPhotos.map(p => p.key).join('|')}`;
-    if (cap) content += '\n' + cap;
-    await postMsg(content);
+    try {
+      const urls = await Promise.all(stagedPhotos.map(async p => {
+        const uploaded = await uploadMedia(p.uri, 'image');
+        return uploaded || null;
+      }));
+      const httpUrls = urls.filter(Boolean);
+      let content;
+      if (httpUrls.length > 0) {
+        content = httpUrls.length === 1
+          ? `IMG:${httpUrls[0]}`
+          : `GALLERY:${httpUrls.join('|')}`;
+      } else {
+        // Upload failed — fall back to local (only visible on this device)
+        content = stagedPhotos.length === 1
+          ? `LOCALIMG:${stagedPhotos[0].key}`
+          : `GALLERY:${stagedPhotos.map(p => p.key).join('|')}`;
+      }
+      if (cap) content += '\n' + cap;
+      await postMsg(content);
+    } catch {
+      let content = stagedPhotos.length === 1
+        ? `LOCALIMG:${stagedPhotos[0].key}`
+        : `GALLERY:${stagedPhotos.map(p => p.key).join('|')}`;
+      if (cap) content += '\n' + cap;
+      await postMsg(content);
+    }
     setStagedPhotos([]); setInputText(''); setSending(false);
   }
 

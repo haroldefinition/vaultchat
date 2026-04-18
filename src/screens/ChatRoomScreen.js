@@ -505,11 +505,45 @@ export default function ChatRoomScreen({ route, navigation }) {
     if (!stagedPhotos.length) return;
     setSending(true);
     const caption = text.trim();
-    let content = stagedPhotos.length === 1
-      ? `LOCALIMG:${stagedPhotos[0].key}`
-      : `GALLERY:${stagedPhotos.map(p => p.key).join('|')}`;
-    if (caption) content += '\n' + caption;
-    await postMsg(content);
+    try {
+      // Upload all photos to Supabase Storage so any device can view them
+      const urls = await Promise.all(stagedPhotos.map(async p => {
+        const uploaded = await uploadMedia(p.uri, 'image');
+        if (uploaded) return uploaded;          // https:// URL
+        // Fallback: keep local key for sender's own device
+        return `LOCALIMG:${p.key}`;
+      }));
+      // Filter out failed uploads that are still LOCALIMG keys
+      const httpUrls   = urls.filter(u => u.startsWith('http'));
+      const localFalls = urls.filter(u => u.startsWith('LOCALIMG:'));
+
+      let content;
+      if (httpUrls.length === urls.length) {
+        // All uploaded successfully — use permanent URLs
+        content = httpUrls.length === 1
+          ? `IMG:${httpUrls[0]}`
+          : `GALLERY:${httpUrls.join('|')}`;
+      } else if (httpUrls.length > 0) {
+        // Partial upload — use what we have
+        content = httpUrls.length === 1
+          ? `IMG:${httpUrls[0]}`
+          : `GALLERY:${httpUrls.join('|')}`;
+      } else {
+        // All uploads failed — fall back to local (only visible on this device)
+        content = stagedPhotos.length === 1
+          ? `LOCALIMG:${stagedPhotos[0].key}`
+          : `GALLERY:${stagedPhotos.map(p => p.key).join('|')}`;
+      }
+      if (caption) content += '\n' + caption;
+      await postMsg(content);
+    } catch {
+      // Last-resort fallback
+      let content = stagedPhotos.length === 1
+        ? `LOCALIMG:${stagedPhotos[0].key}`
+        : `GALLERY:${stagedPhotos.map(p => p.key).join('|')}`;
+      if (caption) content += '\n' + caption;
+      await postMsg(content);
+    }
     setStagedPhotos([]); setText(''); setSending(false);
   }
 

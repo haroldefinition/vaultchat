@@ -9,9 +9,12 @@ export async function uploadMedia(uri, type) {
     const response = await fetch(uri);
     const blob = await response.blob();
 
-    const contentType = type === 'video' ? 'video/mp4' :
-                        type === 'file' ? 'application/octet-stream' :
-                        'image/jpeg';
+    const ext = uri.split('.').pop()?.toLowerCase().split('?')[0] || 'jpg';
+    const contentType = type === 'video'
+      ? (ext === 'mov' ? 'video/quicktime' : 'video/mp4')
+      : type === 'file'
+        ? 'application/octet-stream'
+        : (['png','gif','webp'].includes(ext) ? `image/${ext}` : 'image/jpeg');
 
     const { data, error } = await supabase.storage
       .from('vaultchat-media')
@@ -26,7 +29,7 @@ export async function uploadMedia(uri, type) {
 
     return urlData.publicUrl;
   } catch (e) {
-    if (__DEV__) console.log('Upload error:', e.message);
+    if (__DEV__) console.warn('uploadMedia error:', e?.message || e);
     return null;
   }
 }
