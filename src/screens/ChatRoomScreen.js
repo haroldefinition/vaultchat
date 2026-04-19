@@ -371,6 +371,28 @@ export default function ChatRoomScreen({ route, navigation }) {
       });
     });
 
+    // Realtime: reactions
+    const reactionSub = supabase
+      .channel(`reactions:${roomId}`)
+      .on('postgres_changes', {
+        event: '*', schema: 'public', table: 'message_reactions',
+      }, payload => {
+        if (payload.eventType === 'INSERT') {
+          const r = payload.new;
+          setReactions(prev => ({
+            ...prev,
+            [r.message_id]: [...(prev[r.message_id] || []).filter(x => x.id !== r.id), r],
+          }));
+        } else if (payload.eventType === 'DELETE') {
+          const r = payload.old;
+          setReactions(prev => ({
+            ...prev,
+            [r.message_id]: (prev[r.message_id] || []).filter(x => x.id !== r.id),
+          }));
+        }
+      })
+      .subscribe();
+
     // Fallback poll (slower) in case Realtime not enabled
     const poll = setInterval(fetchMessages, 8000);
     return () => {
