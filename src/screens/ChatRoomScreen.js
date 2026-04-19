@@ -540,7 +540,15 @@ export default function ChatRoomScreen({ route, navigation }) {
       const raw = await AsyncStorage.getItem('vaultchat_chats');
       if (raw) {
         const up = JSON.parse(raw).map(c =>
-          c.roomId === roomId ? { ...c, lastMessage: content.substring(0, 40),
+          c.roomId === roomId ? { ...c, lastMessage: (() => {
+              // Strip REPLY:{len}:{quoted} prefix so chats list shows clean text
+              if (content.startsWith('REPLY:')) {
+                const ci = content.indexOf(':', 6);
+                const qLen = parseInt(content.substring(6, ci)) || 0;
+                return content.substring(ci + 1 + qLen, ci + 1 + qLen + 40) || '↩ Reply';
+              }
+              return content.substring(0, 40);
+            })(),
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) } : c
         );
         await AsyncStorage.setItem('vaultchat_chats', JSON.stringify(up));
