@@ -14,7 +14,8 @@ import { uploadMedia } from '../services/mediaUpload';
 import ContactEditModal from '../components/ContactEditModal';
 import ReplyPreview       from '../components/ReplyPreview';
 import StagedPhotosPicker from '../components/StagedPhotosPicker';
-import { successFeedback, longPressFeedback } from '../services/haptics';
+import { successFeedback, longPressFeedback, taptic } from '../services/haptics';
+import SwipeableRow from '../components/SwipeableRow';
 import { supabase } from '../services/supabase';
 import { subscribeToRoom, subscribeToTyping, broadcastTyping } from '../services/realtimeMessages';
 import { enqueue, flushQueue } from '../services/messageQueue';
@@ -151,7 +152,7 @@ function VideoBubble({ uri, onPlay, onReply }) {
 }
 
 // ── Message bubble ────────────────────────────────────────────
-function Bubble({ item, myId, tx, sub, card, accent, onOpenImg, onPlayVid, onReply, onLongPress }) {
+function Bubble({ item, myId, tx, sub, card, accent, onOpenImg, onPlayVid, onReply, onLongPress, tappedId, onTap }) {
   const me      = item.sender_id === myId;
   const raw     = item.content || '';
   const nlIdx   = raw.indexOf('\n');
@@ -164,6 +165,15 @@ function Bubble({ item, myId, tx, sub, card, accent, onOpenImg, onPlayVid, onRep
     try { return new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
     catch { return ''; }
   })();
+  const fullTimeStr = (() => {
+    try {
+      const d = new Date(item.created_at);
+      const date = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+      const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      return `${date} · ${time}`;
+    } catch { return timeStr; }
+  })();
+  const showFull = tappedId === item.id;
 
   const body = () => {
     if (raw.startsWith('REPLY:')) {
@@ -242,21 +252,24 @@ function Bubble({ item, myId, tx, sub, card, accent, onOpenImg, onPlayVid, onRep
   };
 
   return (
-    <View style={[s.bWrap, me ? s.myWrap : s.theirWrap]}>
-      <TouchableOpacity
-        style={[s.bubble, me ? s.myBubble : [s.theirBubble, { backgroundColor: card }], isMedia && s.mediaPad]}
-        onLongPress={() => onLongPress && onLongPress(item)} delayLongPress={450} activeOpacity={0.88}>
-        {body()}
-      </TouchableOpacity>
-      <View style={[s.timeRow, me ? { alignSelf: 'flex-end' } : { alignSelf: 'flex-start' }]}>
-        <Text style={[s.time, me ? s.tR : s.tL]}>
-          {timeStr}{item.edited ? '  ✎' : ''}
-        </Text>
-        {me && (() => { const r = receiptIcon(item.status); return (
-          <Text style={{ fontSize: 11, color: r.color, marginLeft: 3 }}>{r.icon}</Text>
-        ); })()}
+    <SwipeableRow onReply={() => { taptic(); onReply && onReply(); }}>
+      <View style={[s.bWrap, me ? s.myWrap : s.theirWrap]}>
+        <TouchableOpacity
+          style={[s.bubble, me ? s.myBubble : [s.theirBubble, { backgroundColor: card }], isMedia && s.mediaPad]}
+          onPress={() => onTap && onTap(item.id)}
+          onLongPress={() => onLongPress && onLongPress(item)} delayLongPress={450} activeOpacity={0.88}>
+          {body()}
+        </TouchableOpacity>
+        <View style={[s.timeRow, me ? { alignSelf: 'flex-end' } : { alignSelf: 'flex-start' }]}>
+          <Text style={[s.time, me ? s.tR : s.tL]}>
+            {showFull ? fullTimeStr : timeStr}{item.edited ? '  ✎' : ''}
+          </Text>
+          {me && (() => { const r = receiptIcon(item.status); return (
+            <Text style={{ fontSize: 11, color: r.color, marginLeft: 3 }}>{r.icon}</Text>
+          ); })()}
+        </View>
       </View>
-    </View>
+    </SwipeableRow>
   );
 }
 
@@ -271,6 +284,7 @@ export default function ChatRoomScreen({ route, navigation }) {
   const [myId,         setMyId]         = useState('');
   const [myHandle,     setMyHandle]     = useState('');
   const [replyTo,      setReplyTo]      = useState(null);
+  const [tappedId,     setTappedId]     = useState(null); // for timestamp reveal
   const [typingUsers,  setTypingUsers]  = useState([]);   // [{handle}] currently typing
   const [pendingCount, setPendingCount] = useState(0);    // queued messages awaiting send
   const [menuMsg,      setMenuMsg]      = useState(null);
@@ -724,6 +738,8 @@ export default function ChatRoomScreen({ route, navigation }) {
             onPlayVid={uri => setVidUri(uri)}
             onLongPress={item => { longPressFeedback(); setMenuMsg(item); setMenuVis(true); }}
             onReply={() => setReplyTo(item)}
+            tappedId={tappedId}
+            onTap={id => setTappedId(prev => prev === id ? null : id)}
           />
         )}
         ListEmptyComponent={

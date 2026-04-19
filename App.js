@@ -150,9 +150,26 @@ export default function App() {
       clearBadge(); // clear badge when app opens
       flushQueue(); // retry any queued messages from offline period
 
-      // Flush queue + clear badge when app comes back to foreground
-      const appStateSub = AppState.addEventListener('change', state => {
-        if (state === 'active') { flushQueue(); clearBadge(); }
+      // Flush queue + clear badge + enforce 5-min lock timeout on foreground
+      let backgroundedAt = null;
+      const LOCK_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
+      const appStateSub = AppState.addEventListener('change', async state => {
+        if (state === 'background' || state === 'inactive') {
+          backgroundedAt = Date.now();
+        } else if (state === 'active') {
+          flushQueue();
+          clearBadge();
+          // Lock if biometric is enabled and app was backgrounded for >5 minutes
+          if (backgroundedAt !== null) {
+            const elapsed = Date.now() - backgroundedAt;
+            backgroundedAt = null;
+            if (elapsed >= LOCK_TIMEOUT_MS) {
+              const biometricOn = await isBiometricEnabled();
+              if (biometricOn) setIsLocked(true);
+            }
+          }
+        }
       });
 
       const cleanup = addNotificationResponseListener(() => {});

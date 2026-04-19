@@ -18,7 +18,8 @@ import { uploadMedia } from '../services/mediaUpload';
 import GifPickerModal from '../components/GifPickerModal';
 import ReplyPreview       from '../components/ReplyPreview';
 import StagedPhotosPicker from '../components/StagedPhotosPicker';
-import { successFeedback, longPressFeedback } from '../services/haptics';
+import { successFeedback, longPressFeedback, taptic } from '../services/haptics';
+import SwipeableRow from '../components/SwipeableRow';
 import ContactEditModal from '../components/ContactEditModal';
 import PremiumModal from '../components/PremiumModal';
 import { ResolvedPhotoStack, ResolvedVideoCarousel } from '../components/MediaBubbles';
@@ -108,7 +109,7 @@ function VideoModal({ uri, onClose }) {
 }
 
 // ── Message bubble ────────────────────────────────────────────
-function Bubble({ item, currentUserId, colors, onFullScreen, onPlay, onLongPress }) {
+function Bubble({ item, currentUserId, colors, onFullScreen, onPlay, onLongPress, tappedId, onTap, onReply }) {
   const { tx, sub, card, accent } = colors;
   const isMe = item.sender_id === currentUserId;
   const raw  = item.text || '';
@@ -141,18 +142,35 @@ function Bubble({ item, currentUserId, colors, onFullScreen, onPlay, onLongPress
     );
     return <Text style={[g.msgTx, { color: isMe ? '#fff' : tx }]}>{raw}</Text>;
   };
+  const showFull = tappedId === item.id;
+  const fullTimeStr = (() => {
+    try {
+      const d    = new Date(item.created_at);
+      const date = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+      const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      return `${date} · ${time}`;
+    } catch { return ''; }
+  })();
+  const shortTimeStr = (() => {
+    try { return new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
+    catch { return ''; }
+  })();
 
   return (
-    <TouchableOpacity activeOpacity={0.85} onLongPress={onLongPress} delayLongPress={450}
-      style={[g.msgWrapper, isMe ? g.right : g.left]}>
-      {!isMe && <Text style={[g.senderHandle, { color: accent }]}>@{item.sender_handle || 'member'}</Text>}
-      <View style={[g.bubble, isMedia && g.mediaPad, { backgroundColor: isMe ? '#0057a8' : card }]}>
-        {body()}
-        <Text style={[g.msgTime, { color: isMe ? 'rgba(255,255,255,0.6)' : sub }]}>
-          {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}{item.edited ? '  ✎' : ''}
-        </Text>
-      </View>
-    </TouchableOpacity>
+    <SwipeableRow onReply={() => { taptic(); onReply && onReply(); }}>
+      <TouchableOpacity activeOpacity={0.85}
+        onPress={() => onTap && onTap(item.id)}
+        onLongPress={onLongPress} delayLongPress={450}
+        style={[g.msgWrapper, isMe ? g.right : g.left]}>
+        {!isMe && <Text style={[g.senderHandle, { color: accent }]}>@{item.sender_handle || 'member'}</Text>}
+        <View style={[g.bubble, isMedia && g.mediaPad, { backgroundColor: isMe ? '#0057a8' : card }]}>
+          {body()}
+          <Text style={[g.msgTime, { color: isMe ? 'rgba(255,255,255,0.6)' : sub }]}>
+            {showFull ? fullTimeStr : shortTimeStr}{item.edited ? '  ✎' : ''}
+          </Text>
+        </View>
+      </TouchableOpacity>
+    </SwipeableRow>
   );
 }
 
@@ -165,6 +183,7 @@ export default function GroupChatScreen({ route, navigation }) {
   const [messages,      setMessages]      = useState([]);
   const [inputText,     setInputText]     = useState('');
   const [replyingTo,    setReplyingTo]    = useState(null);
+  const [tappedId,      setTappedId]      = useState(null);
   const [selectedMsg,   setSelectedMsg]   = useState(null);
   const [msgMenuVis,    setMsgMenuVis]    = useState(false);
   const [gifVisible,    setGifVisible]    = useState(false);
@@ -551,7 +570,10 @@ export default function GroupChatScreen({ route, navigation }) {
             <Bubble item={item} currentUserId={currentUserId} colors={colors}
               onFullScreen={uri => setFullImgUri(uri)}
               onPlay={uri => setVidUri(uri)}
-              onLongPress={() => { longPressFeedback(); openMenu(item); }} />
+              onLongPress={() => { longPressFeedback(); openMenu(item); }}
+              tappedId={tappedId}
+              onTap={id => setTappedId(prev => prev === id ? null : id)}
+              onReply={() => setReplyingTo({ id: item.id, text: item.text, sender: item.sender_handle })} />
           );
         }}
         ListEmptyComponent={
