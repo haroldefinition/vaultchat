@@ -6,6 +6,7 @@ import { createBottomTabNavigator }  from '@react-navigation/bottom-tabs';
 import { StatusBar, Text, View, TouchableOpacity, StyleSheet, Alert, AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeProvider, useTheme } from './src/services/theme';
+import { UnreadProvider, useUnread } from './src/services/unreadBadge';
 import { setupPushNotifications, addNotificationResponseListener, clearBadge } from './src/services/pushNotifications';
 import { flushQueue } from './src/services/messageQueue';
 import { isBiometricEnabled } from './src/services/biometric';
@@ -106,7 +107,29 @@ function MainTabs() {
         tabBarInactiveTintColor: '#aaaaaa',
         tabBarLabelStyle: { fontSize:11, fontWeight:'600', marginTop:2 },
       }}>
-      <Tab.Screen name="Chats"    component={ChatsScreen}   options={{ tabBarIcon:({focused})=><Text style={{fontSize:26,opacity:focused?1:0.85}}>💬</Text> }}/>
+      <Tab.Screen name="Chats" component={ChatsScreen} options={({ navigation }) => {
+        const { count } = useUnread();
+        return {
+          tabBarIcon: ({ focused }) => (
+            <View style={{ position: 'relative' }}>
+              <Text style={{ fontSize: 26, opacity: focused ? 1 : 0.85 }}>💬</Text>
+              {count > 0 && (
+                <View style={{
+                  position: 'absolute', top: -4, right: -8,
+                  backgroundColor: '#ff3b30', borderRadius: 10,
+                  minWidth: 18, height: 18,
+                  alignItems: 'center', justifyContent: 'center',
+                  paddingHorizontal: 4,
+                }}>
+                  <Text style={{ color: '#fff', fontSize: 11, fontWeight: '800' }}>
+                    {count > 99 ? '99+' : count}
+                  </Text>
+                </View>
+              )}
+            </View>
+          ),
+        };
+      }} />
       <Tab.Screen name="Calls"    component={CallScreen}    options={{ tabBarIcon:({focused})=><Text style={{fontSize:26,opacity:focused?1:0.85}}>📞</Text> }}/>
       <Tab.Screen name="Groups"   component={GroupScreen}   options={{ tabBarIcon:({focused})=><Text style={{fontSize:26,opacity:focused?1:0.85}}>👥</Text> }}/>
       <Tab.Screen name="Discover" component={DiscoverScreen}options={{ tabBarIcon:({focused})=><Text style={{fontSize:26,opacity:focused?1:0.85}}>🔍</Text> }}/>
@@ -164,9 +187,11 @@ export default function App() {
     <ThemeProvider>
       <BiometricLockScreen onUnlock={() => setIsLocked(false)} />
     </ThemeProvider>
+  </UnreadProvider>
   );
 
   return (
+    <UnreadProvider>
     <ThemeProvider>
       <NavigationContainer>
         <StatusBar barStyle="light-content" backgroundColor="#080b12" />
@@ -208,5 +233,6 @@ export default function App() {
         </Stack.Navigator>
       </NavigationContainer>
     </ThemeProvider>
+  </UnreadProvider>
   );
 }

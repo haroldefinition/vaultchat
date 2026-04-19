@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity, TextInput, Modal, StyleSheet,
+  View, Text, FlatList, TouchableOpacity, TextInput, Modal, StyleSheet, RefreshControl,
   Alert, StatusBar, KeyboardAvoidingView, Platform, ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import ContactEditModal from '../components/ContactEditModal';
 import { useTheme } from '../services/theme';
+import { taptic, longPressFeedback } from '../services/haptics';
 
 const STORAGE_KEY = 'vaultchat_groups';
 
@@ -120,6 +121,7 @@ export default function GroupScreen({ navigation }) {
   const [groupName,   setGroupName]   = useState('');
   const [groupDesc,   setGroupDesc]   = useState('');
   const [groupSearch, setGroupSearch] = useState('');
+  const [refreshing,  setRefreshing]  = useState(false);
 
   useEffect(() => {
     loadGroups();
@@ -134,6 +136,12 @@ export default function GroupScreen({ navigation }) {
         g.description?.toLowerCase().includes(groupSearch.toLowerCase())
       )
     : groups;
+
+  async function onRefresh() {
+    setRefreshing(true);
+    await loadGroups();
+    setRefreshing(false);
+  }
 
   const loadGroups = useCallback(async () => {
     try {
@@ -255,17 +263,32 @@ export default function GroupScreen({ navigation }) {
         data={filteredGroups}
         keyExtractor={item => item.id}
         renderItem={renderGroup}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={accent} colors={[accent]} />
+        }
         ListEmptyComponent={
           <View style={s.empty}>
-            <Text style={s.emptyEmoji}>{groupSearch ? '🔍' : '👥'}</Text>
-            <Text style={[s.emptyTitle, { color: tx }]}>{groupSearch ? 'No groups found' : 'No groups yet'}</Text>
-            <Text style={[s.emptySub, { color: sub }]}>
-              {groupSearch ? `No groups match "${groupSearch}"` : 'Create a group to start encrypted conversations.'}
-            </Text>
-            {!groupSearch && (
-              <TouchableOpacity style={[s.emptyBtn, { backgroundColor: accent }]} onPress={() => setCreateModal(true)}>
-                <Text style={s.emptyBtnText}>+ Create Group</Text>
-              </TouchableOpacity>
+            {groupSearch ? (
+              <>
+                <Text style={s.emptyEmoji}>🔍</Text>
+                <Text style={[s.emptyTitle, { color: tx }]}>No groups found</Text>
+                <Text style={[s.emptySub, { color: sub }]}>No groups match "{groupSearch}"</Text>
+              </>
+            ) : (
+              <>
+                <View style={[s.emptyIconWrap, { backgroundColor: accent + '18', borderColor: accent + '30' }]}>
+                  <Text style={{ fontSize: 48 }}>👥</Text>
+                </View>
+                <Text style={[s.emptyTitle, { color: tx }]}>No groups yet</Text>
+                <Text style={[s.emptySub, { color: sub }]}>
+                  Create a group to start encrypted conversations with multiple people.
+                </Text>
+                <TouchableOpacity
+                  style={[s.emptyBtn, { backgroundColor: accent }]}
+                  onPress={() => { taptic(); setCreateModal(true); }}>
+                  <Text style={s.emptyBtnText}>👥  Create a Group</Text>
+                </TouchableOpacity>
+              </>
             )}
           </View>
         }

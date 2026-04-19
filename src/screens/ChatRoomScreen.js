@@ -14,6 +14,7 @@ import { uploadMedia } from '../services/mediaUpload';
 import ContactEditModal from '../components/ContactEditModal';
 import ReplyPreview       from '../components/ReplyPreview';
 import StagedPhotosPicker from '../components/StagedPhotosPicker';
+import { successFeedback, longPressFeedback } from '../services/haptics';
 import { supabase } from '../services/supabase';
 import { subscribeToRoom, subscribeToTyping, broadcastTyping } from '../services/realtimeMessages';
 import { enqueue, flushQueue } from '../services/messageQueue';
@@ -524,6 +525,7 @@ export default function ChatRoomScreen({ route, navigation }) {
       setReplyTo(null);
     }
     setText(''); setSending(true);
+    successFeedback(); // haptic feedback on send
     await postMsg(content);
     setSending(false);
   }
@@ -720,7 +722,7 @@ export default function ChatRoomScreen({ route, navigation }) {
             item={item} myId={myId} tx={tx} sub={sub} card={card} accent={accent}
             onOpenImg={uri => setFullImgUri(uri)}
             onPlayVid={uri => setVidUri(uri)}
-            onLongPress={item => { setMenuMsg(item); setMenuVis(true); }}
+            onLongPress={item => { longPressFeedback(); setMenuMsg(item); setMenuVis(true); }}
             onReply={() => setReplyTo(item)}
           />
         )}

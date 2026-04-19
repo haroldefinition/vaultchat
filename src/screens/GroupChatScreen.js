@@ -18,6 +18,7 @@ import { uploadMedia } from '../services/mediaUpload';
 import GifPickerModal from '../components/GifPickerModal';
 import ReplyPreview       from '../components/ReplyPreview';
 import StagedPhotosPicker from '../components/StagedPhotosPicker';
+import { successFeedback, longPressFeedback } from '../services/haptics';
 import ContactEditModal from '../components/ContactEditModal';
 import PremiumModal from '../components/PremiumModal';
 import { ResolvedPhotoStack, ResolvedVideoCarousel } from '../components/MediaBubbles';
@@ -344,6 +345,7 @@ export default function GroupChatScreen({ route, navigation }) {
   async function sendText(override) {
     const text = override ?? inputText.trim();
     if (!text) return;
+    successFeedback(); // haptic on send
     await postMsg(text);
   }
 
@@ -549,7 +551,7 @@ export default function GroupChatScreen({ route, navigation }) {
             <Bubble item={item} currentUserId={currentUserId} colors={colors}
               onFullScreen={uri => setFullImgUri(uri)}
               onPlay={uri => setVidUri(uri)}
-              onLongPress={() => openMenu(item)} />
+              onLongPress={() => { longPressFeedback(); openMenu(item); }} />
           );
         }}
         ListEmptyComponent={
