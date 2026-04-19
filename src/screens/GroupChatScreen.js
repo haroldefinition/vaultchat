@@ -19,7 +19,9 @@ import GifPickerModal from '../components/GifPickerModal';
 import ReplyPreview       from '../components/ReplyPreview';
 import StagedPhotosPicker from '../components/StagedPhotosPicker';
 import { successFeedback, longPressFeedback, taptic } from '../services/haptics';
-import SwipeableRow from '../components/SwipeableRow';
+import SwipeableRow   from '../components/SwipeableRow';
+import ReactionPicker from '../components/ReactionPicker';
+import ReactionBar    from '../components/ReactionBar';
 import ContactEditModal from '../components/ContactEditModal';
 import PremiumModal from '../components/PremiumModal';
 import { ResolvedPhotoStack, ResolvedVideoCarousel } from '../components/MediaBubbles';
@@ -109,7 +111,7 @@ function VideoModal({ uri, onClose }) {
 }
 
 // ── Message bubble ────────────────────────────────────────────
-function Bubble({ item, currentUserId, colors, onFullScreen, onPlay, onLongPress, tappedId, onTap, onReply }) {
+function Bubble({ item, currentUserId, colors, onFullScreen, onPlay, onLongPress, tappedId, onTap, onReply, reactions, onReact }) {
   const { tx, sub, card, accent } = colors;
   const isMe = item.sender_id === currentUserId;
   const raw  = item.text || '';
@@ -169,6 +171,15 @@ function Bubble({ item, currentUserId, colors, onFullScreen, onPlay, onLongPress
             {showFull ? fullTimeStr : shortTimeStr}{item.edited ? '  ✎' : ''}
           </Text>
         </View>
+        {reactions?.length > 0 && (
+          <ReactionBar
+            reactions={reactions}
+            myUserId={currentUserId}
+            onReact={onReact}
+            accent={accent}
+            card={card}
+          />
+        )}
       </TouchableOpacity>
     </SwipeableRow>
   );
@@ -184,6 +195,8 @@ export default function GroupChatScreen({ route, navigation }) {
   const [inputText,     setInputText]     = useState('');
   const [replyingTo,    setReplyingTo]    = useState(null);
   const [tappedId,      setTappedId]      = useState(null);
+  const [reactions,     setReactions]     = useState({});
+  const [pickerMsg,     setPickerMsg]     = useState(null);
   const [selectedMsg,   setSelectedMsg]   = useState(null);
   const [msgMenuVis,    setMsgMenuVis]    = useState(false);
   const [gifVisible,    setGifVisible]    = useState(false);
@@ -247,10 +260,34 @@ export default function GroupChatScreen({ route, navigation }) {
     });
 
     pollRef.current = setInterval(syncSupabase, 10000); // slower fallback
+
+    // Realtime: reactions on group messages
+    const reactionSub = supabase
+      .channel(`group_reactions:${groupId}`)
+      .on('postgres_changes', {
+        event: '*', schema: 'public', table: 'message_reactions',
+      }, payload => {
+        if (payload.eventType === 'INSERT') {
+          const r = payload.new;
+          setReactions(prev => ({
+            ...prev,
+            [r.message_id]: [...(prev[r.message_id] || []).filter(x => x.id !== r.id), r],
+          }));
+        } else if (payload.eventType === 'DELETE') {
+          const r = payload.old;
+          setReactions(prev => ({
+            ...prev,
+            [r.message_id]: (prev[r.message_id] || []).filter(x => x.id !== r.id),
+          }));
+        }
+      })
+      .subscribe();
+
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
       unsubGroup();
       unsubTyping();
+      supabase.removeChannel(reactionSub);
     };
   }, [groupId]);
 
@@ -300,6 +337,21 @@ export default function GroupChatScreen({ route, navigation }) {
         const real = data.filter(m => m.id);
         setMessages(real);
         AsyncStorage.setItem(SKEY, JSON.stringify(real)).catch(() => {});
+        // Load reactions for these messages
+        const ids = real.map(m => m.id).filter(Boolean);
+        if (ids.length) {
+          supabase.from('message_reactions').select('*').in('message_id', ids)
+            .then(({ data: rdata }) => {
+              if (rdata) {
+                const grouped = {};
+                rdata.forEach(r => {
+                  if (!grouped[r.message_id]) grouped[r.message_id] = [];
+                  grouped[r.message_id].push(r);
+                });
+                setReactions(grouped);
+              }
+            }).catch(() => {});
+        }
       }
     } catch {}
   }
@@ -359,6 +411,55 @@ export default function GroupChatScreen({ route, navigation }) {
         AsyncStorage.setItem('vaultchat_groups', JSON.stringify(gs)).catch(() => {});
       }
     } catch {}
+  }
+
+  // ── Toggle a reaction on a group message ─────────────────────
+  async function toggleGroupReaction(messageId, emoji) {
+    if (!currentUserId || !messageId) return;
+    const current  = reactions[messageId] || [];
+    const existing = current.find(r => r.user_id === currentUserId && r.emoji === emoji);
+    if (existing) {
+      // Remove own reaction
+      setReactions(prev => ({
+        ...prev,
+        [messageId]: (prev[messageId] || []).filter(r => r.id !== existing.id),
+      }));
+      try { await supabase.from('message_reactions').delete().eq('id', existing.id); } catch {}
+    } else {
+      // Remove previous reaction from this user (one per message)
+      const myOld = current.find(r => r.user_id === currentUserId);
+      if (myOld) {
+        setReactions(prev => ({
+          ...prev,
+          [messageId]: (prev[messageId] || []).filter(r => r.id !== myOld.id),
+        }));
+        try { await supabase.from('message_reactions').delete().eq('id', myOld.id); } catch {}
+      }
+      // Add new reaction optimistically
+      const optimistic = {
+        id: `temp_${Date.now()}`,
+        message_id: messageId,
+        user_id: currentUserId,
+        emoji,
+        created_at: new Date().toISOString(),
+      };
+      setReactions(prev => ({
+        ...prev,
+        [messageId]: [...(prev[messageId] || []), optimistic],
+      }));
+      try {
+        const { data } = await supabase
+          .from('message_reactions')
+          .insert({ message_id: messageId, user_id: currentUserId, emoji })
+          .select().single();
+        if (data) {
+          setReactions(prev => ({
+            ...prev,
+            [messageId]: (prev[messageId] || []).map(r => r.id === optimistic.id ? data : r),
+          }));
+        }
+      } catch {}
+    }
   }
 
   async function sendText(override) {
@@ -570,10 +671,12 @@ export default function GroupChatScreen({ route, navigation }) {
             <Bubble item={item} currentUserId={currentUserId} colors={colors}
               onFullScreen={uri => setFullImgUri(uri)}
               onPlay={uri => setVidUri(uri)}
-              onLongPress={() => { longPressFeedback(); openMenu(item); }}
+              onLongPress={() => { longPressFeedback(); setPickerMsg(item); }}
               tappedId={tappedId}
               onTap={id => setTappedId(prev => prev === id ? null : id)}
-              onReply={() => setReplyingTo({ id: item.id, text: item.text, sender: item.sender_handle })} />
+              onReply={() => setReplyingTo({ id: item.id, text: item.text, sender: item.sender_handle })}
+              reactions={reactions[item.id] || []}
+              onReact={emoji => toggleGroupReaction(item.id, emoji)} />
           );
         }}
         ListEmptyComponent={
@@ -671,6 +774,16 @@ export default function GroupChatScreen({ route, navigation }) {
       {/* Viewer modals */}
       <FullScreenImg uri={fullImgUri} onClose={() => setFullImgUri(null)} />
       <VideoModal    uri={vidUri}     onClose={() => setVidUri(null)} />
+
+      {/* Reaction picker — shown on long press */}
+      <ReactionPicker
+        visible={!!pickerMsg}
+        onClose={() => setPickerMsg(null)}
+        onReact={emoji => { if (pickerMsg) toggleGroupReaction(pickerMsg.id, emoji); }}
+        myReaction={(reactions[pickerMsg?.id] || []).find(r => r.user_id === currentUserId)?.emoji || null}
+        card={card}
+        accent={accent}
+      />
 
       {/* Long-press message menu */}
       <Modal visible={msgMenuVis} transparent animationType="fade" onRequestClose={() => setMsgMenuVis(false)}>

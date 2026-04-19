@@ -15,7 +15,9 @@ import ContactEditModal from '../components/ContactEditModal';
 import ReplyPreview       from '../components/ReplyPreview';
 import StagedPhotosPicker from '../components/StagedPhotosPicker';
 import { successFeedback, longPressFeedback, taptic } from '../services/haptics';
-import SwipeableRow from '../components/SwipeableRow';
+import SwipeableRow   from '../components/SwipeableRow';
+import ReactionPicker from '../components/ReactionPicker';
+import ReactionBar    from '../components/ReactionBar';
 import { supabase } from '../services/supabase';
 import { subscribeToRoom, subscribeToTyping, broadcastTyping } from '../services/realtimeMessages';
 import { enqueue, flushQueue } from '../services/messageQueue';
@@ -152,7 +154,7 @@ function VideoBubble({ uri, onPlay, onReply }) {
 }
 
 // ── Message bubble ────────────────────────────────────────────
-function Bubble({ item, myId, tx, sub, card, accent, onOpenImg, onPlayVid, onReply, onLongPress, tappedId, onTap }) {
+function Bubble({ item, myId, tx, sub, card, accent, onOpenImg, onPlayVid, onReply, onLongPress, tappedId, onTap, reactions, onReact }) {
   const me      = item.sender_id === myId;
   const raw     = item.content || '';
   const nlIdx   = raw.indexOf('\n');
@@ -260,6 +262,15 @@ function Bubble({ item, myId, tx, sub, card, accent, onOpenImg, onPlayVid, onRep
           onLongPress={() => onLongPress && onLongPress(item)} delayLongPress={450} activeOpacity={0.88}>
           {body()}
         </TouchableOpacity>
+        {reactions?.length > 0 && (
+          <ReactionBar
+            reactions={reactions}
+            myUserId={myId}
+            onReact={onReact}
+            accent={accent}
+            card={card}
+          />
+        )}
         <View style={[s.timeRow, me ? { alignSelf: 'flex-end' } : { alignSelf: 'flex-start' }]}>
           <Text style={[s.time, me ? s.tR : s.tL]}>
             {showFull ? fullTimeStr : timeStr}{item.edited ? '  ✎' : ''}
@@ -285,6 +296,8 @@ export default function ChatRoomScreen({ route, navigation }) {
   const [myHandle,     setMyHandle]     = useState('');
   const [replyTo,      setReplyTo]      = useState(null);
   const [tappedId,     setTappedId]     = useState(null); // for timestamp reveal
+  const [reactions,    setReactions]    = useState({});   // { messageId: [{ id, message_id, user_id, emoji }] }
+  const [pickerMsg,    setPickerMsg]    = useState(null); // message to react to
   const [typingUsers,  setTypingUsers]  = useState([]);   // [{handle}] currently typing
   const [pendingCount, setPendingCount] = useState(0);    // queued messages awaiting send
   const [menuMsg,      setMenuMsg]      = useState(null);
@@ -364,6 +377,7 @@ export default function ChatRoomScreen({ route, navigation }) {
       clearInterval(poll);
       unsubRoom();
       unsubTyping();
+      supabase.removeChannel(reactionSub);
     };
   }, [roomId, myId]);
 
@@ -432,6 +446,23 @@ export default function ChatRoomScreen({ route, navigation }) {
         const real = data.filter(m => m.id && !String(m.id).startsWith('temp_'));
         setMessages(real);
         AsyncStorage.setItem(MKEY, JSON.stringify(real)).catch(() => {});
+        // Load reactions for these messages
+        setTimeout(() => {
+          const ids = real.map(m => m.id).filter(Boolean);
+          if (ids.length) {
+            supabase.from('message_reactions').select('*').in('message_id', ids)
+              .then(({ data: rdata }) => {
+                if (rdata) {
+                  const grouped = {};
+                  rdata.forEach(r => {
+                    if (!grouped[r.message_id]) grouped[r.message_id] = [];
+                    grouped[r.message_id].push(r);
+                  });
+                  setReactions(grouped);
+                }
+              }).catch(() => {});
+          }
+        }, 100);
         return;
       }
     } catch {}
@@ -542,6 +573,68 @@ export default function ChatRoomScreen({ route, navigation }) {
     successFeedback(); // haptic feedback on send
     await postMsg(content);
     setSending(false);
+  }
+
+  // ── Load reactions for all messages in this room ────────────
+  async function loadReactions() {
+    try {
+      const msgIds = messages.map(m => m.id).filter(Boolean);
+      if (!msgIds.length) return;
+      const { data } = await supabase
+        .from('message_reactions')
+        .select('*')
+        .in('message_id', msgIds);
+      if (data) {
+        const grouped = {};
+        data.forEach(r => {
+          if (!grouped[r.message_id]) grouped[r.message_id] = [];
+          grouped[r.message_id].push(r);
+        });
+        setReactions(grouped);
+      }
+    } catch {}
+  }
+
+  // ── Toggle a reaction on a message ───────────────────────────
+  async function toggleReaction(messageId, emoji) {
+    if (!myId || !messageId) return;
+    const current = reactions[messageId] || [];
+    const existing = current.find(r => r.user_id === myId && r.emoji === emoji);
+    if (existing) {
+      // Remove reaction
+      setReactions(prev => ({
+        ...prev,
+        [messageId]: (prev[messageId] || []).filter(r => r.id !== existing.id),
+      }));
+      try { await supabase.from('message_reactions').delete().eq('id', existing.id); } catch {}
+    } else {
+      // Remove any existing reaction from this user on this message first (one reaction per message)
+      const myOld = current.find(r => r.user_id === myId);
+      if (myOld) {
+        setReactions(prev => ({
+          ...prev,
+          [messageId]: (prev[messageId] || []).filter(r => r.id !== myOld.id),
+        }));
+        try { await supabase.from('message_reactions').delete().eq('id', myOld.id); } catch {}
+      }
+      // Add new reaction
+      const optimistic = { id: `temp_${Date.now()}`, message_id: messageId, user_id: myId, emoji, created_at: new Date().toISOString() };
+      setReactions(prev => ({
+        ...prev,
+        [messageId]: [...(prev[messageId] || []), optimistic],
+      }));
+      try {
+        const { data } = await supabase.from('message_reactions')
+          .insert({ message_id: messageId, user_id: myId, emoji })
+          .select().single();
+        if (data) {
+          setReactions(prev => ({
+            ...prev,
+            [messageId]: (prev[messageId] || []).map(r => r.id === optimistic.id ? data : r),
+          }));
+        }
+      } catch {}
+    }
   }
 
   async function sendStagedPhotos() {
@@ -736,7 +829,7 @@ export default function ChatRoomScreen({ route, navigation }) {
             item={item} myId={myId} tx={tx} sub={sub} card={card} accent={accent}
             onOpenImg={uri => setFullImgUri(uri)}
             onPlayVid={uri => setVidUri(uri)}
-            onLongPress={item => { longPressFeedback(); setMenuMsg(item); setMenuVis(true); }}
+            onLongPress={item => { longPressFeedback(); setPickerMsg(item); }}
             onReply={() => setReplyTo(item)}
             tappedId={tappedId}
             onTap={id => setTappedId(prev => prev === id ? null : id)}
@@ -947,6 +1040,16 @@ export default function ChatRoomScreen({ route, navigation }) {
           </View>
         </View>
       </Modal>
+      {/* Reaction picker — shown on long press */}
+      <ReactionPicker
+        visible={!!pickerMsg}
+        onClose={() => setPickerMsg(null)}
+        onReact={emoji => { if (pickerMsg) toggleReaction(pickerMsg.id, emoji); }}
+        myReaction={(reactions[pickerMsg?.id] || []).find(r => r.user_id === myId)?.emoji || null}
+        card={card}
+        accent={accent}
+      />
+
       {/* Message long-press action menu */}
       <Modal visible={menuVis} transparent animationType="fade" onRequestClose={() => setMenuVis(false)}>
         <TouchableOpacity style={s.menuOverlay} activeOpacity={1} onPress={() => setMenuVis(false)}>
