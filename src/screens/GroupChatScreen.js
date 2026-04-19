@@ -20,6 +20,7 @@ import ReplyPreview       from '../components/ReplyPreview';
 import StagedPhotosPicker from '../components/StagedPhotosPicker';
 import { successFeedback, longPressFeedback, taptic } from '../services/haptics';
 import SwipeableRow   from '../components/SwipeableRow';
+import ZoomableImage  from '../components/ZoomableImage';
 import ReactionPicker from '../components/ReactionPicker';
 import ReactionBar    from '../components/ReactionBar';
 import ContactEditModal from '../components/ContactEditModal';
@@ -77,17 +78,7 @@ function VideoBubble({ uri, onPlay, onLongPress }) {
 }
 
 function FullScreenImg({ uri, onClose }) {
-  if (!uri) return null;
-  return (
-    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.97)', alignItems: 'center', justifyContent: 'center' }}>
-        <TouchableOpacity style={{ position: 'absolute', top: 56, right: 20, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8 }} onPress={onClose}>
-          <Text style={{ color: '#fff', fontWeight: 'bold' }}>✕  Close</Text>
-        </TouchableOpacity>
-        <Image source={{ uri }} style={{ width: '100%', height: '80%' }} resizeMode="contain" />
-      </View>
-    </Modal>
-  );
+  return <ZoomableImage uri={uri} visible={!!uri} onClose={onClose} />;
 }
 
 // VideoPlayerInner: useVideoPlayer hook must live at component top level

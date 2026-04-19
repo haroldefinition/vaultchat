@@ -15,7 +15,8 @@ import ContactEditModal from '../components/ContactEditModal';
 import ReplyPreview       from '../components/ReplyPreview';
 import StagedPhotosPicker from '../components/StagedPhotosPicker';
 import { successFeedback, longPressFeedback, taptic } from '../services/haptics';
-import SwipeableRow   from '../components/SwipeableRow';
+import SwipeableRow    from '../components/SwipeableRow';
+import ZoomableImage   from '../components/ZoomableImage';
 import ReactionPicker from '../components/ReactionPicker';
 import ReactionBar    from '../components/ReactionBar';
 import { supabase } from '../services/supabase';
@@ -59,17 +60,7 @@ const EMOJIS = [
 
 // ── Full-screen image viewer ──────────────────────────────────
 function FullScreenImg({ uri, visible, onClose }) {
-  if (!visible) return null;
-  return (
-    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-      <View style={s.fsWrap}>
-        <TouchableOpacity style={s.fsClose} onPress={onClose}>
-          <Text style={s.fsCloseTx}>✕  Close</Text>
-        </TouchableOpacity>
-        <Image source={{ uri }} style={s.fsImg} resizeMode="contain" />
-      </View>
-    </Modal>
-  );
+  return <ZoomableImage uri={uri} visible={visible} onClose={onClose} />;
 }
 
 // ── In-app video player (expo-video) ─────────────────────────
@@ -296,6 +287,9 @@ export default function ChatRoomScreen({ route, navigation }) {
   const [myHandle,     setMyHandle]     = useState('');
   const [replyTo,      setReplyTo]      = useState(null);
   const [tappedId,     setTappedId]     = useState(null); // for timestamp reveal
+  const [searchOpen,   setSearchOpen]   = useState(false);
+  const [searchQuery,  setSearchQuery]  = useState('');
+  const [pinnedMsgId,  setPinnedMsgId]  = useState(null); // id of pinned message
   const [reactions,    setReactions]    = useState({});   // { messageId: [{ id, message_id, user_id, emoji }] }
   const [pickerMsg,    setPickerMsg]    = useState(null); // message to react to
   const [typingUsers,  setTypingUsers]  = useState([]);   // [{handle}] currently typing
@@ -488,6 +482,11 @@ export default function ChatRoomScreen({ route, navigation }) {
         return;
       }
     } catch {}
+    // Load pinned message for this room
+    try {
+      const pinned = await AsyncStorage.getItem(`vaultchat_pin_${roomId}`);
+      if (pinned) setPinnedMsgId(pinned);
+    } catch {}
     // Fallback: AsyncStorage keeps messages even if Supabase is unreachable
     try {
       const raw = await AsyncStorage.getItem(MKEY);
@@ -667,6 +666,18 @@ export default function ChatRoomScreen({ route, navigation }) {
     }
   }
 
+  async function togglePin(msg) {
+    const newPinId = pinnedMsgId === msg.id ? null : msg.id;
+    setPinnedMsgId(newPinId);
+    try {
+      if (newPinId) {
+        await AsyncStorage.setItem(`vaultchat_pin_${roomId}`, newPinId);
+      } else {
+        await AsyncStorage.removeItem(`vaultchat_pin_${roomId}`);
+      }
+    } catch {}
+  }
+
   async function sendStagedPhotos() {
     if (!stagedPhotos.length) return;
     setSending(true);
@@ -839,6 +850,9 @@ export default function ChatRoomScreen({ route, navigation }) {
             <Text style={[s.hSub, { color: sub }]}>🔒 End-to-end encrypted</Text>
           </View>
         </TouchableOpacity>
+        <TouchableOpacity onPress={() => { setSearchOpen(v => !v); setSearchQuery(''); }} style={s.callBtn}>
+          <Text style={{ fontSize: 20 }}>🔍</Text>
+        </TouchableOpacity>
         <TouchableOpacity onPress={() => navigation.navigate('ActiveCall', { recipientName, recipientPhone, callType: 'voice' })} style={s.callBtn}>
           <Text style={{ fontSize: 22 }}>📞</Text>
         </TouchableOpacity>
@@ -847,10 +861,74 @@ export default function ChatRoomScreen({ route, navigation }) {
         </TouchableOpacity>
       </View>
 
+      {/* Search bar — slides in when search icon tapped */}
+      {searchOpen && (
+        <View style={[s.searchBar, { backgroundColor: inputBg, borderColor: border }]}>
+          <Text style={s.searchIcon}>🔍</Text>
+          <TextInput
+            style={[s.searchInput, { color: tx }]}
+            placeholder="Search messages..."
+            placeholderTextColor={sub}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoFocus
+            autoCapitalize="none"
+            returnKeyType="search"
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <Text style={{ color: sub, fontSize: 16, paddingHorizontal: 8 }}>✕</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+
+      {/* Pinned message banner */}
+      {pinnedMsgId && (() => {
+        const pinned = messages.find(m => m.id === pinnedMsgId);
+        if (!pinned) return null;
+        const preview = (() => {
+          const raw = pinned.content || '';
+          if (raw.startsWith('REPLY:')) {
+            const ci = raw.indexOf(':', 6);
+            const qLen = parseInt(raw.substring(6, ci)) || 0;
+            return raw.substring(ci + 1 + qLen, ci + 1 + qLen + 60) || '↩ Reply';
+          }
+          if (raw.startsWith('IMG:') || raw.startsWith('LOCALIMG:')) return '📷 Photo';
+          if (raw.startsWith('GALLERY:')) return '🖼️ Gallery';
+          if (raw.startsWith('VID:') || raw.startsWith('LOCALVID:')) return '🎥 Video';
+          return raw.substring(0, 60);
+        })();
+        return (
+          <TouchableOpacity
+            style={[s.pinBanner, { backgroundColor: card, borderBottomColor: border }]}
+            onPress={() => {
+              // Scroll to the pinned message
+              const idx = [...messages].reverse().findIndex(m => m.id === pinnedMsgId);
+              if (idx >= 0) listRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.5 });
+            }}
+            onLongPress={() => togglePin(pinned)}>
+            <Text style={{ fontSize: 14 }}>📌</Text>
+            <View style={{ flex: 1, marginLeft: 8 }}>
+              <Text style={{ fontSize: 11, color: accent, fontWeight: '700', marginBottom: 1 }}>Pinned Message</Text>
+              <Text style={{ fontSize: 13, color: tx }} numberOfLines={1}>{preview}</Text>
+            </View>
+            <TouchableOpacity onPress={() => togglePin(pinned)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={{ color: sub, fontSize: 14 }}>✕</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        );
+      })()}
+
       {/* Messages */}
       <FlatList
         ref={listRef}
-        data={[...messages].reverse()}
+        data={(() => {
+          const list = searchQuery.trim()
+            ? messages.filter(m => (m.content || '').toLowerCase().includes(searchQuery.toLowerCase()))
+            : messages;
+          return [...list].reverse();
+        })()}
         keyExtractor={(item, i) => String(item.id || i)}
         inverted
         contentContainerStyle={{ padding: 12, paddingTop: 8 }}
@@ -1099,6 +1177,12 @@ export default function ChatRoomScreen({ route, navigation }) {
               <Text style={s.menuIcon}>↩️</Text>
               <Text style={[s.menuLabel, { color: tx }]}>Reply</Text>
             </TouchableOpacity>
+            {/* Pin */}
+            <TouchableOpacity style={[s.menuOpt, { borderTopColor: border }]}
+              onPress={() => { togglePin(menuMsg); setMenuVis(false); }}>
+              <Text style={s.menuIcon}>📌</Text>
+              <Text style={[s.menuLabel, { color: tx }]}>{pinnedMsgId === menuMsg?.id ? 'Unpin' : 'Pin'}</Text>
+            </TouchableOpacity>
             {/* Edit — own messages within 1 hour */}
             {menuMsg?.sender_id === myId && (Date.now() - new Date(menuMsg?.created_at).getTime()) < 3600000 && (
               <TouchableOpacity style={[s.menuOpt, { borderTopColor: border }]}
@@ -1218,6 +1302,10 @@ const s = StyleSheet.create({
   input:       { flex: 1, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 22, fontSize: 15, maxHeight: 100, minHeight: 42 },
   sendBtn:     { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   // Viewer
+  searchBar:  { flexDirection: 'row', alignItems: 'center', marginHorizontal: 12, marginVertical: 4, borderRadius: 12, borderWidth: 1, paddingHorizontal: 10 },
+  searchIcon: { fontSize: 14, marginRight: 6, opacity: 0.6 },
+  searchInput:{ flex: 1, paddingVertical: 8, paddingHorizontal: 4, fontSize: 14 },
+  pinBanner:  { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8, borderBottomWidth: 1 },
   fsWrap:      { flex: 1, backgroundColor: 'rgba(0,0,0,0.97)', alignItems: 'center', justifyContent: 'center' },
   menuOverlay:  { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
   msgMenu:      { borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 34 },
