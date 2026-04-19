@@ -181,13 +181,14 @@ export default function App() {
     })();
   }, []);
 
-  if (!ready) return <ThemeProvider><SplashScreen /></ThemeProvider>;
+  if (!ready) return <UnreadProvider><ThemeProvider><SplashScreen /></ThemeProvider></UnreadProvider>;
 
   if (isLocked) return (
+    <UnreadProvider>
     <ThemeProvider>
       <BiometricLockScreen onUnlock={() => setIsLocked(false)} />
     </ThemeProvider>
-  </UnreadProvider>
+    </UnreadProvider>
   );
 
   return (
