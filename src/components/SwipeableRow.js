@@ -1,3 +1,5 @@
+import { supabase } from "../services/supabase";
+
 // SwipeableRow — swipe right on a message bubble to reply to it.
 // Uses PanResponder for the swipe gesture only — the gesture is
 // strictly horizontal so it never conflicts with the parent FlatList's
