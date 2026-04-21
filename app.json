@@ -47,7 +47,8 @@
           "color": "#0057a8"
         }
       ],
-      "expo-video"
+      "expo-video",
+      "expo-audio"
     ],
     "extra": {
       "serverUrl": "https://vaultchat-server-production.up.railway.app",
