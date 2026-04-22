@@ -6,6 +6,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../services/theme';
 import { getRTCConfig, profileForSignal } from '../services/callQuality';
+import CallQualityChip from '../components/CallQualityChip';
 
 // ── Enhanced quality badge with relay info ────────────────────
 function QualityBadge({ quality, routing }) {
@@ -185,6 +186,9 @@ export default function ActiveCallScreen({ route, navigation }) {
               📶 Routing through secure relay for low-signal areas
             </Text>
           )}
+          {/* Live adaptation banner — invisible on good networks, shows when
+              Opus bitrate has been adjusted for the current call path. */}
+          <CallQualityChip />
         </View>
       )}
 

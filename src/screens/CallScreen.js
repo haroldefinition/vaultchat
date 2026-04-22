@@ -140,7 +140,7 @@ function CallContactEditor({ item, onClose, onSave, accent, bg, card, tx, sub, b
   async function pickPhoto() {
     const p = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!p.granted) { Alert.alert('Permission needed'); return; }
-    const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 0.8, allowsEditing: true, aspect: [1, 1] });
+    const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 1, allowsEditing: true, aspect: [1, 1] });
     if (!r.canceled && r.assets?.[0]) setPhoto(r.assets[0].uri);
   }
 

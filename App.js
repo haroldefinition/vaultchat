@@ -36,6 +36,7 @@ import ContactPickerScreen from './src/screens/ContactPickerScreen';
 import ChannelsScreen      from './src/screens/ChannelsScreen';
 import PrivacyPolicyScreen  from './src/screens/PrivacyPolicyScreen';
 import TermsOfServiceScreen from './src/screens/TermsOfServiceScreen';
+import CommunityGuidelinesScreen from './src/screens/CommunityGuidelinesScreen';
 import OfferInboxScreen    from './src/screens/OfferInboxScreen';
 import BusinessScreen      from './src/screens/BusinessScreen';
 import BusinessChatScreen  from './src/screens/BusinessChatScreen';
@@ -58,9 +59,10 @@ function MoreScreen({ navigation }) {
     { icon:'🏪', label:'Business',        screen:'Business',      desc:'Dashboard, inbox & plans' },
     { icon:'🤖', label:'AI Assistant',    screen:'AIAssistant',   desc:'Private, on-device AI' },
     { icon:'📡', label:'Nearby',          screen:'Nearby',        desc:'Offline mesh messaging' },
-    { icon:'🔒', label:'Privacy Policy',  screen:'PrivacyPolicy', desc:'How we protect you' },
-    { icon:'📋', label:'Terms of Service',screen:'TermsOfService',desc:'Usage terms & conditions' },
-    { icon:'⚙️', label:'Settings',        screen:'Settings',      desc:'Notifications, account' },
+    { icon:'🔒', label:'Privacy Policy',     screen:'PrivacyPolicy',      desc:'How we protect you' },
+    { icon:'📋', label:'Terms of Service',   screen:'TermsOfService',     desc:'Usage terms & conditions' },
+    { icon:'🛡️', label:'Community Guidelines',screen:'CommunityGuidelines',desc:'What is and isn’t allowed' },
+    { icon:'⚙️', label:'Settings',           screen:'Settings',           desc:'Notifications, account' },
   ];
   return (
     <View style={[m.container,{backgroundColor:bg}]}>
@@ -233,8 +235,9 @@ export default function App() {
               <Stack.Screen name="ContactPicker" component={ContactPickerScreen} />
               <Stack.Screen name="Profile"       component={ProfileScreen} />
               <Stack.Screen name="Channels"      component={ChannelsScreen} />
-              <Stack.Screen name="PrivacyPolicy"  component={PrivacyPolicyScreen} />
-              <Stack.Screen name="TermsOfService" component={TermsOfServiceScreen} />
+              <Stack.Screen name="PrivacyPolicy"       component={PrivacyPolicyScreen} />
+              <Stack.Screen name="TermsOfService"      component={TermsOfServiceScreen} />
+              <Stack.Screen name="CommunityGuidelines" component={CommunityGuidelinesScreen} />
               <Stack.Screen name="Settings"      component={SettingsScreen} />
               <Stack.Screen name="OfferInbox"    component={OfferInboxScreen} />
               <Stack.Screen name="Business"      component={BusinessScreen} />

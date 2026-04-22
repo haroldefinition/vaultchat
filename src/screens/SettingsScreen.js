@@ -98,7 +98,7 @@ export default function SettingsScreen({ navigation }) {
   async function pickPhoto() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') { Alert.alert('Permission needed'); return; }
-    const result = await ImagePicker.launchImageLibraryAsync({ allowsEditing: true, aspect: [1,1], quality: 0.5 });
+    const result = await ImagePicker.launchImageLibraryAsync({ allowsEditing: true, aspect: [1,1], quality: 1 });
     if (!result.canceled) { setProfilePhoto(result.assets[0].uri); await save('vaultchat_profile_photo', result.assets[0].uri); }
   }
 

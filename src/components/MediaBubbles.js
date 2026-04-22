@@ -63,9 +63,25 @@ function FullScreenViewer({ uris, startIndex, visible, onClose }) {
           contentContainerStyle={{ alignItems: 'center' }}
         >
           {uris.map((uri, i) => (
-            <View key={i} style={{ width: SW, height: SH, justifyContent: 'center', alignItems: 'center' }}>
+            // Each photo sits inside its own nested ScrollView so the native
+            // pinch gesture (maximumZoomScale) works without fighting the outer
+            // horizontal pager. The outer ScrollView still handles left/right
+            // swipes between photos; the nested one handles zoom + pan within
+            // a single photo.
+            <ScrollView
+              key={i}
+              style={{ width: SW, height: SH }}
+              contentContainerStyle={{ width: SW, height: SH, justifyContent: 'center', alignItems: 'center' }}
+              maximumZoomScale={5}
+              minimumZoomScale={1}
+              pinchGestureEnabled
+              bouncesZoom
+              showsHorizontalScrollIndicator={false}
+              showsVerticalScrollIndicator={false}
+              centerContent
+            >
               <Image source={{ uri }} style={fs.img} resizeMode="contain" />
-            </View>
+            </ScrollView>
           ))}
         </ScrollView>
         {uris.length > 1 && (

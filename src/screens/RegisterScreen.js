@@ -23,48 +23,71 @@ const C = {
   border:      '#E2E8F0',
   inputBg:     '#F8FAFC',
   placeholder: '#94A3B8',
+  toggleBg:    '#F1F5F9',
 };
 
 export default function RegisterScreen({ route, onLoginCallback }) {
   const onLogin = onLoginCallback || route?.params?.onLogin;
 
+  const [method,  setMethod]  = useState('phone');  // 'phone' | 'email'
   const [phone,   setPhone]   = useState('');
+  const [email,   setEmail]   = useState('');
   const [otp,     setOtp]     = useState('');
   const [handle,  setHandle]  = useState('');
-  const [step,    setStep]    = useState('phone'); // phone → otp → handle
+  const [step,    setStep]    = useState('identifier'); // identifier → otp → handle
   const [loading, setLoading] = useState(false);
   const [userId,  setUserId]  = useState('');
 
+  // Which identifier is locked in for this attempt (stored so OTP/handle steps know)
+  const [sentTo, setSentTo] = useState({ method: 'phone', value: '' });
+
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+
   // ── Send OTP ──────────────────────────────────────────────────
   async function sendOTP() {
-    if (phone.length < 10) {
-      Alert.alert('Invalid Number', 'Enter a valid 10-digit phone number.');
+    if (method === 'phone') {
+      if (phone.length < 10) {
+        Alert.alert('Invalid Number', 'Enter a valid 10-digit phone number.');
+        return;
+      }
+      setLoading(true);
+      const fullPhone = `+1${phone}`;
+      setSentTo({ method: 'phone', value: fullPhone });
+      try {
+        const res = await fetch(`${BACKEND}/send-otp`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: fullPhone }),
+        });
+        const data = await res.json();
+        if (data.success) { setLoading(false); setStep('otp'); return; }
+      } catch {}
+      try {
+        const { error } = await supabase.auth.signInWithOtp({ phone: fullPhone });
+        if (!error) { setLoading(false); setStep('otp'); return; }
+      } catch {}
+      // Dev fallback — always moves forward
+      setLoading(false);
+      setStep('otp');
+      return;
+    }
+
+    // Email path
+    if (!emailValid) {
+      Alert.alert('Invalid Email', 'Enter a valid email address.');
       return;
     }
     setLoading(true);
+    const cleanEmail = email.trim().toLowerCase();
+    setSentTo({ method: 'email', value: cleanEmail });
     try {
-      const res = await fetch(`${BACKEND}/send-otp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: `+1${phone}` }),
+      const { error } = await supabase.auth.signInWithOtp({
+        email: cleanEmail,
+        options: { shouldCreateUser: true },
       });
-      const data = await res.json();
-      if (data.success) {
-        setLoading(false);
-        setStep('otp');
-        return;
-      }
+      if (!error) { setLoading(false); setStep('otp'); return; }
     } catch {}
-    // Supabase fallback
-    try {
-      const { error } = await supabase.auth.signInWithOtp({ phone: `+1${phone}` });
-      if (!error) {
-        setLoading(false);
-        setStep('otp');
-        return;
-      }
-    } catch {}
-    // Dev fallback — always moves forward
+    // Dev fallback — always moves forward so 123456 still lets you in
     setLoading(false);
     setStep('otp');
   }
@@ -76,25 +99,34 @@ export default function RegisterScreen({ route, onLoginCallback }) {
       return;
     }
     setLoading(true);
-    // Dev shortcut — check this first so it never spins
+
+    // Dev shortcut — works for both phone and email
     if (otp === '123456') {
-      const testId = '550e8400-e29b-41d4-a716-' + phone.padStart(12, '0');
+      const seed = sentTo.method === 'phone'
+        ? phone.padStart(12, '0')
+        : email.replace(/[^a-z0-9]/gi, '').padStart(12, '0').slice(0, 12);
+      const testId = '550e8400-e29b-41d4-a716-' + seed;
       setUserId(testId);
       await AsyncStorage.setItem(
         'vaultchat_user',
-        JSON.stringify({ phone: `+1${phone}`, id: testId })
+        JSON.stringify(
+          sentTo.method === 'phone'
+            ? { phone: sentTo.value, id: testId }
+            : { email: sentTo.value, id: testId }
+        )
       );
       setLoading(false);
       setStep('handle');
       return;
     }
-    // Real Supabase OTP
+
+    // Real Supabase OTP verification — branches on method
     try {
-      const { data, error } = await supabase.auth.verifyOtp({
-        phone: `+1${phone}`,
-        token: otp,
-        type: 'sms',
-      });
+      const verifyArgs = sentTo.method === 'phone'
+        ? { phone: sentTo.value, token: otp, type: 'sms' }
+        : { email: sentTo.value, token: otp, type: 'email' };
+
+      const { data, error } = await supabase.auth.verifyOtp(verifyArgs);
       if (!error && data?.user) {
         setUserId(data.user.id);
         const { data: profile } = await supabase
@@ -105,7 +137,11 @@ export default function RegisterScreen({ route, onLoginCallback }) {
         if (profile?.handle) {
           await AsyncStorage.setItem(
             'vaultchat_user',
-            JSON.stringify({ phone: `+1${phone}`, id: data.user.id })
+            JSON.stringify(
+              sentTo.method === 'phone'
+                ? { phone: sentTo.value, id: data.user.id }
+                : { email: sentTo.value, id: data.user.id }
+            )
           );
           setLoading(false);
           onLogin?.();
@@ -129,10 +165,13 @@ export default function RegisterScreen({ route, onLoginCallback }) {
     }
     setLoading(true);
     try {
+      const body = sentTo.method === 'phone'
+        ? { user_id: userId, handle: `@${clean}`, phone: sentTo.value }
+        : { user_id: userId, handle: `@${clean}`, email: sentTo.value };
       await fetch(`${BACKEND}/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: userId, handle: `@${clean}`, phone: `+1${phone}` }),
+        body: JSON.stringify(body),
       });
       await saveHandle(`@${clean}`);
       await AsyncStorage.setItem('vaultchat_display_name', clean);
@@ -142,18 +181,38 @@ export default function RegisterScreen({ route, onLoginCallback }) {
   }
 
   async function skipHandle() {
-    const auto = `@user${phone.slice(-4)}`;
+    // Derive a default handle from whichever identifier the user used
+    const tail = sentTo.method === 'phone'
+      ? phone.slice(-4)
+      : (email.split('@')[0] || 'user').replace(/[^a-z0-9]/gi, '').slice(-6) || 'user';
+    const auto = `@user${tail}`;
     await saveHandle(auto);
-    await AsyncStorage.setItem('vaultchat_display_name', `user${phone.slice(-4)}`);
+    await AsyncStorage.setItem('vaultchat_display_name', `user${tail}`);
     onLogin?.();
   }
 
   // ── Shared logo block ─────────────────────────────────────────
-  // The PNG has a black background — contained in a dark rounded box
-  // so the black blends in and looks intentional (like an iOS app icon).
   const LogoBlock = (
     <View style={s.logoContainer}>
       <Image source={LOGO} style={s.logo} resizeMode="contain" />
+    </View>
+  );
+
+  // ── Method toggle (Phone | Email) ─────────────────────────────
+  const MethodToggle = (
+    <View style={s.toggleRow}>
+      <TouchableOpacity
+        style={[s.toggleBtn, method === 'phone' && s.toggleBtnActive]}
+        onPress={() => setMethod('phone')}
+        activeOpacity={0.8}>
+        <Text style={[s.toggleTx, method === 'phone' && s.toggleTxActive]}>📱  Phone</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[s.toggleBtn, method === 'email' && s.toggleBtnActive]}
+        onPress={() => setMethod('email')}
+        activeOpacity={0.8}>
+        <Text style={[s.toggleTx, method === 'email' && s.toggleTxActive]}>✉️  Email</Text>
+      </TouchableOpacity>
     </View>
   );
 
@@ -167,13 +226,17 @@ export default function RegisterScreen({ route, onLoginCallback }) {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}>
 
-        {/* ── PHONE STEP ────────────────────────────────────── */}
-        {step === 'phone' && (
+        {/* ── IDENTIFIER STEP (phone or email) ──────────────── */}
+        {step === 'identifier' && (
           <View style={s.content}>
             {LogoBlock}
 
             <Text style={s.heading}>Welcome to VaultChat</Text>
-            <Text style={s.subheading}>Enter your number to get started</Text>
+            <Text style={s.subheading}>
+              {method === 'phone'
+                ? 'Enter your number to get started'
+                : 'Enter your email to get started'}
+            </Text>
 
             {/* Slogan */}
             <View style={s.sloganBox}>
@@ -182,37 +245,72 @@ export default function RegisterScreen({ route, onLoginCallback }) {
               </Text>
             </View>
 
-            {/* Phone input */}
-            <View style={s.inputBox}>
-              <Text style={s.flagCode}>🇺🇸  +1</Text>
-              <View style={s.divider} />
-              <TextInput
-                style={s.textInput}
-                placeholder="(000) 000-0000"
-                placeholderTextColor={C.placeholder}
-                keyboardType="phone-pad"
-                value={phone}
-                onChangeText={v => setPhone(v.replace(/\D/g, '').slice(0, 10))}
-                maxLength={10}
-                autoFocus={false}
-              />
-            </View>
+            {MethodToggle}
 
-            {/* Legal */}
+            {/* Input — phone or email */}
+            {method === 'phone' ? (
+              <View key="phone-input-row" style={s.inputBox}>
+                <Text style={s.flagCode}>🇺🇸  +1</Text>
+                <View style={s.divider} />
+                <TextInput
+                  key="phone-input"
+                  style={s.textInput}
+                  placeholder="(000) 000-0000"
+                  placeholderTextColor={C.placeholder}
+                  keyboardType="phone-pad"
+                  value={phone}
+                  onChangeText={v => setPhone(v.replace(/\D/g, '').slice(0, 10))}
+                  maxLength={10}
+                  autoFocus={false}
+                />
+              </View>
+            ) : (
+              <View key="email-input-row" style={s.inputBox}>
+                <Text style={s.flagCode}>✉️</Text>
+                <View style={s.divider} />
+                <TextInput
+                  key="email-input"
+                  style={s.textInput}
+                  placeholder="you@example.com"
+                  placeholderTextColor={C.placeholder}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoComplete="off"
+                  textContentType="none"
+                  importantForAutofill="no"
+                  spellCheck={false}
+                  value={email}
+                  onChangeText={setEmail}
+                  autoFocus={false}
+                />
+              </View>
+            )}
+
+            {/* Legal — scoped to actual SMS use (account verification + security alerts) */}
             <Text style={s.legal}>
-              By providing your phone number, you agree to receive automated
-              promotional and personalized marketing text messages from VaultChat.co.
-              Consent is not a condition of purchase. Msg & data rates may apply.
-              Msg frequency varies. Reply HELP for help or STOP to cancel. View our{' '}
+              {method === 'phone' ? (
+                <>
+                  By providing your phone number, you consent to receive SMS messages
+                  from VaultChat (operated by AUXXILUS MEDIA LLC) for account
+                  verification and account security alerts. Consent is not required
+                  to create or use your account — you may use Email instead. Msg & data
+                  rates may apply. Msg frequency varies. Reply HELP for help or STOP
+                  to cancel. View our{' '}
+                </>
+              ) : (
+                <>
+                  By continuing, you agree to our{' '}
+                </>
+              )}
               <Text
                 style={s.legalLink}
-                onPress={() => Linking.openURL('https://encrypted-hug-chat.lovable.app/privacy')}>
+                onPress={() => Linking.openURL('https://vaultchat.co/privacy')}>
                 Privacy Policy
               </Text>
               {' '}and{' '}
               <Text
                 style={s.legalLink}
-                onPress={() => Linking.openURL('https://encrypted-hug-chat.lovable.app/terms')}>
+                onPress={() => Linking.openURL('https://vaultchat.co/terms')}>
                 Terms of Service
               </Text>
               .
@@ -220,9 +318,17 @@ export default function RegisterScreen({ route, onLoginCallback }) {
 
             {/* Button */}
             <TouchableOpacity
-              style={[s.btn, phone.length < 10 && s.btnOff]}
+              style={[
+                s.btn,
+                ((method === 'phone' && phone.length < 10) ||
+                 (method === 'email' && !emailValid)) && s.btnOff,
+              ]}
               onPress={sendOTP}
-              disabled={loading || phone.length < 10}>
+              disabled={
+                loading ||
+                (method === 'phone' && phone.length < 10) ||
+                (method === 'email' && !emailValid)
+              }>
               {loading
                 ? <ActivityIndicator color="#fff" />
                 : <Text style={s.btnTx}>Send Code →</Text>}
@@ -239,8 +345,12 @@ export default function RegisterScreen({ route, onLoginCallback }) {
           <View style={s.content}>
             {LogoBlock}
 
-            <Text style={s.heading}>Verify Your Number</Text>
-            <Text style={s.subheading}>Code sent to +1 {phone}</Text>
+            <Text style={s.heading}>
+              {sentTo.method === 'phone' ? 'Verify Your Number' : 'Verify Your Email'}
+            </Text>
+            <Text style={s.subheading}>
+              Code sent to {sentTo.value}
+            </Text>
 
             <TextInput
               style={s.otpInput}
@@ -265,8 +375,10 @@ export default function RegisterScreen({ route, onLoginCallback }) {
 
             <TouchableOpacity
               style={s.backBtn}
-              onPress={() => { setStep('phone'); setOtp(''); }}>
-              <Text style={s.backTx}>← Change number</Text>
+              onPress={() => { setStep('identifier'); setOtp(''); }}>
+              <Text style={s.backTx}>
+                ← {sentTo.method === 'phone' ? 'Change number' : 'Change email'}
+              </Text>
             </TouchableOpacity>
 
             <Text style={s.badge}>
@@ -281,7 +393,11 @@ export default function RegisterScreen({ route, onLoginCallback }) {
             {LogoBlock}
 
             <Text style={s.heading}>Create Your Identity</Text>
-            <Text style={s.subheading}>Your handle keeps your number private</Text>
+            <Text style={s.subheading}>
+              {sentTo.method === 'phone'
+                ? 'Your handle keeps your number private'
+                : 'Your handle keeps your email private'}
+            </Text>
 
             <View style={s.inputBox}>
               <Text style={s.flagCode}>@</Text>
@@ -305,7 +421,7 @@ export default function RegisterScreen({ route, onLoginCallback }) {
 
             <Text style={s.hint}>
               3–20 characters · Letters, numbers & underscores{'\n'}
-              Your phone number stays private
+              Your {sentTo.method === 'phone' ? 'phone number' : 'email address'} stays private
             </Text>
 
             <TouchableOpacity
@@ -352,8 +468,15 @@ const s = StyleSheet.create({
   subheading:     { fontSize: 15, color: C.sub, textAlign: 'center', marginBottom: 22 },
 
   // Slogan box
-  sloganBox:      { width: '100%', backgroundColor: C.blueSoft, borderColor: C.blueBorder, borderWidth: 1, borderRadius: 18, paddingVertical: 18, paddingHorizontal: 22, marginBottom: 22 },
+  sloganBox:      { width: '100%', backgroundColor: C.blueSoft, borderColor: C.blueBorder, borderWidth: 1, borderRadius: 18, paddingVertical: 18, paddingHorizontal: 22, marginBottom: 18 },
   sloganText:     { fontSize: 15, color: C.blue, textAlign: 'center', lineHeight: 24, fontStyle: 'italic', fontWeight: '600' },
+
+  // Phone/Email toggle
+  toggleRow:      { flexDirection: 'row', backgroundColor: C.toggleBg, borderRadius: 14, padding: 4, width: '100%', marginBottom: 14 },
+  toggleBtn:      { flex: 1, paddingVertical: 11, alignItems: 'center', borderRadius: 10 },
+  toggleBtnActive:{ backgroundColor: '#FFFFFF', shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 2 },
+  toggleTx:       { fontSize: 14, fontWeight: '700', color: C.sub },
+  toggleTxActive: { color: C.blue },
 
   // Input row
   inputBox:       { width: '100%', flexDirection: 'row', alignItems: 'center', backgroundColor: C.inputBg, borderColor: C.border, borderWidth: 1.5, borderRadius: 16, height: 58, marginBottom: 14, overflow: 'hidden' },

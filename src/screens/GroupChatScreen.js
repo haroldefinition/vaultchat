@@ -18,13 +18,14 @@ import { uploadMedia } from '../services/mediaUpload';
 import GifPickerModal from '../components/GifPickerModal';
 import ReplyPreview       from '../components/ReplyPreview';
 import StagedPhotosPicker from '../components/StagedPhotosPicker';
-import { successFeedback, longPressFeedback, taptic } from '../services/haptics';
+import { successFeedback, longPressFeedback, taptic, impactMedium } from '../services/haptics';
 import SwipeableRow   from '../components/SwipeableRow';
 import ZoomableImage  from '../components/ZoomableImage';
 import ReactionPicker from '../components/ReactionPicker';
 import ReactionBar    from '../components/ReactionBar';
 import ContactEditModal from '../components/ContactEditModal';
 import PremiumModal from '../components/PremiumModal';
+import ReportMessageModal from '../components/ReportMessageModal';
 import { ResolvedPhotoStack, ResolvedVideoCarousel } from '../components/MediaBubbles';
 
 // ── Media helpers ─────────────────────────────────────────────
@@ -205,6 +206,8 @@ export default function GroupChatScreen({ route, navigation }) {
   const [typingUsers,  setTypingUsers]  = useState([]);
   const [editingMsg,    setEditingMsg]    = useState(null);
   const [editText,      setEditText]      = useState('');
+  const [reportVisible, setReportVisible] = useState(false);
+  const [reportTarget,  setReportTarget]  = useState(null);
 
   const flatRef      = useRef(null);
   const pollRef      = useRef(null);
@@ -519,7 +522,7 @@ export default function GroupChatScreen({ route, navigation }) {
     if (type === 'photo') {
       const p = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!p.granted) { Alert.alert('Permission needed'); return; }
-      const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 0.85, allowsMultipleSelection: true, selectionLimit: 20 });
+      const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 1, allowsMultipleSelection: true, selectionLimit: 20 });
       if (!r.canceled && r.assets?.length) {
         const newPhotos = await Promise.all(r.assets.map(async a => {
           const key = `img_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
@@ -536,7 +539,7 @@ export default function GroupChatScreen({ route, navigation }) {
     } else if (type === 'camera') {
       const p = await ImagePicker.requestCameraPermissionsAsync();
       if (!p.granted) { Alert.alert('Permission needed'); return; }
-      const r = await ImagePicker.launchCameraAsync({ quality: 0.85 });
+      const r = await ImagePicker.launchCameraAsync({ quality: 1 });
       if (!r.canceled && r.assets?.[0]) {
         const key = `img_${Date.now()}`;
         await AsyncStorage.setItem(key, r.assets[0].uri);
@@ -591,6 +594,42 @@ export default function GroupChatScreen({ route, navigation }) {
     try { await supabase.from('group_messages').delete().eq('id', selectedMsg.id); } catch {}
   }
 
+  // togglePin — writes is_pinned to `group_messages` so the pin syncs across
+  // devices and to every member of the group. One pin per group: pinning a new
+  // message clears any previously pinned one. The realtime UPDATE subscription
+  // already propagates is_pinned flips to every other member.
+  async function togglePin(msg) {
+    if (!msg?.id) return;
+    const newState = !msg.is_pinned;
+
+    // Optimistic local update — flip the pin before the round-trip finishes.
+    // The realtime UPDATE event will reconcile if anything races.
+    setMessages(prev => prev.map(m => {
+      if (newState && m.is_pinned && m.id !== msg.id) return { ...m, is_pinned: false };
+      if (m.id === msg.id) return { ...m, is_pinned: newState };
+      return m;
+    }));
+
+    try { impactMedium(); } catch {}
+
+    try {
+      if (newState) {
+        await supabase
+          .from('group_messages')
+          .update({ is_pinned: false })
+          .eq('group_id', groupId)
+          .eq('is_pinned', true)
+          .neq('id', msg.id);
+      }
+      await supabase
+        .from('group_messages')
+        .update({ is_pinned: newState })
+        .eq('id', msg.id);
+    } catch (err) {
+      console.warn('togglePin (group) failed:', err);
+    }
+  }
+
   async function doEditGroupMessage() {
     if (!editingMsg || !editText.trim()) return;
     const newText = editText.trim();
@@ -632,6 +671,11 @@ export default function GroupChatScreen({ route, navigation }) {
     '☕','🚀','✈️','🏠','🌍','🌈','⭐','🌙','☀️','⚡','🔥','💥','❄️','💎','💯','✨',
   ];
 
+  // Pinned message is derived from messages.is_pinned — Supabase-synced, so
+  // any member pinning/unpinning propagates via the UPDATE realtime subscription.
+  const pinnedMsg   = messages.find(m => m.is_pinned);
+  const pinnedMsgId = pinnedMsg?.id || null;
+
   return (
     <KeyboardAvoidingView style={[g.container, { backgroundColor: bg }]} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       {/* Header */}
@@ -648,6 +692,37 @@ export default function GroupChatScreen({ route, navigation }) {
           <Text style={[g.hSub, { color: accent }]}>🔒 Encrypted</Text>
         </View>
       </View>
+
+      {/* Pinned message banner — tap to scroll to it, long-press or ✕ to unpin */}
+      {pinnedMsgId && (() => {
+        const pinned = messages.find(m => m.id === pinnedMsgId);
+        if (!pinned) return null;
+        const preview = (() => {
+          const raw = pinned.text || '';
+          if (pinned.type === 'image' || raw.startsWith('IMG:') || raw.startsWith('LOCALIMG:')) return '📷 Photo';
+          if (pinned.type === 'gallery' || raw.startsWith('GALLERY:')) return '🖼️ Gallery';
+          if (pinned.type === 'video' || raw.startsWith('VID:') || raw.startsWith('LOCALVID:')) return '🎥 Video';
+          return raw.substring(0, 60);
+        })();
+        return (
+          <TouchableOpacity
+            style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8, backgroundColor: card, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: border }}
+            onPress={() => {
+              const idx = [...messages].reverse().findIndex(m => m.id === pinnedMsgId);
+              if (idx >= 0) flatRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.5 });
+            }}
+            onLongPress={() => togglePin(pinned)}>
+            <Text style={{ fontSize: 14 }}>📌</Text>
+            <View style={{ flex: 1, marginLeft: 8 }}>
+              <Text style={{ fontSize: 11, color: accent, fontWeight: '700', marginBottom: 1 }}>Pinned Message</Text>
+              <Text style={{ fontSize: 13, color: tx }} numberOfLines={1}>{preview}</Text>
+            </View>
+            <TouchableOpacity onPress={() => togglePin(pinned)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={{ color: sub, fontSize: 14 }}>✕</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        );
+      })()}
 
       {/* Messages */}
       <FlatList
@@ -766,11 +841,13 @@ export default function GroupChatScreen({ route, navigation }) {
       <FullScreenImg uri={fullImgUri} onClose={() => setFullImgUri(null)} />
       <VideoModal    uri={vidUri}     onClose={() => setVidUri(null)} />
 
-      {/* Reaction picker — shown on long press */}
+      {/* Reaction picker — long-press entry point. The "⋯" (More) button
+          forwards to the full action menu (Pin/Reply/Edit/Delete). */}
       <ReactionPicker
         visible={!!pickerMsg}
         onClose={() => setPickerMsg(null)}
         onReact={emoji => { if (pickerMsg) toggleGroupReaction(pickerMsg.id, emoji); }}
+        onMore={() => { if (pickerMsg) { setSelectedMsg(pickerMsg); setMsgMenuVis(true); } }}
         myReaction={(reactions[pickerMsg?.id] || []).find(r => r.user_id === currentUserId)?.emoji || null}
         card={card}
         accent={accent}
@@ -786,6 +863,24 @@ export default function GroupChatScreen({ route, navigation }) {
               <Text style={g.menuOptIcon}>↩️</Text>
               <Text style={[g.menuOptLabel, { color: tx }]}>Reply</Text>
             </TouchableOpacity>
+            {/* Pin / Unpin — persists via group_messages.is_pinned */}
+            <TouchableOpacity style={[g.menuOpt, { borderTopColor: border }]}
+              onPress={() => { togglePin(selectedMsg); setMsgMenuVis(false); }}>
+              <Text style={g.menuOptIcon}>📌</Text>
+              <Text style={[g.menuOptLabel, { color: tx }]}>{pinnedMsgId === selectedMsg?.id ? 'Unpin' : 'Pin'}</Text>
+            </TouchableOpacity>
+            {/* Report — only other users' messages */}
+            {selectedMsg?.sender_id && selectedMsg?.sender_id !== currentUserId && (
+              <TouchableOpacity style={[g.menuOpt, { borderTopColor: border }]}
+                onPress={() => {
+                  setReportTarget(selectedMsg);
+                  setMsgMenuVis(false);
+                  setTimeout(() => setReportVisible(true), 250);
+                }}>
+                <Text style={g.menuOptIcon}>🚩</Text>
+                <Text style={[g.menuOptLabel, { color: '#FF9500' }]}>Report</Text>
+              </TouchableOpacity>
+            )}
             {selectedMsg?.sender_id === currentUserId && (Date.now() - new Date(selectedMsg?.created_at).getTime()) < 3600000 && (
               <TouchableOpacity style={[g.menuOpt, { borderTopColor: border }]}
                 onPress={() => { setEditText(selectedMsg.text || ''); setEditingMsg(selectedMsg); setMsgMenuVis(false); }}>
@@ -805,6 +900,16 @@ export default function GroupChatScreen({ route, navigation }) {
           </View>
         </TouchableOpacity>
       </Modal>
+
+      {/* Report message modal — map group message.text → content */}
+      <ReportMessageModal
+        visible={reportVisible}
+        onClose={() => { setReportVisible(false); setReportTarget(null); }}
+        message={reportTarget ? { ...reportTarget, content: reportTarget.text } : null}
+        roomId={groupId}
+        reporterId={currentUserId}
+        reporterHandle={currentHandle}
+      />
 
       {/* Attach sheet */}
       <Modal visible={attachModal} transparent animationType="slide">

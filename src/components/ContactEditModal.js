@@ -51,7 +51,7 @@ export default function ContactEditModal({ visible, contact, onClose, onSave, co
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) { Alert.alert('Permission needed', 'Allow photo access in Settings.'); return; }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: 'images', quality: 0.85, allowsEditing: true, aspect: [1, 1],
+      mediaTypes: 'images', quality: 1, allowsEditing: true, aspect: [1, 1],
     });
     if (!result.canceled && result.assets?.[0]) setPhoto(result.assets[0].uri);
   }

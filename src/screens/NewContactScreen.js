@@ -31,7 +31,7 @@ export default function NewContactScreen({ route, navigation }) {
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: 'images', allowsEditing: true, aspect: [1, 1], quality: 0.85,
+      mediaTypes: 'images', allowsEditing: true, aspect: [1, 1], quality: 1,
     });
     if (!result.canceled && result.assets?.[0]) setPhoto(result.assets[0].uri);
   }

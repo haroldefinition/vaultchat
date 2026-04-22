@@ -14,11 +14,12 @@ import { uploadMedia } from '../services/mediaUpload';
 import ContactEditModal from '../components/ContactEditModal';
 import ReplyPreview       from '../components/ReplyPreview';
 import StagedPhotosPicker from '../components/StagedPhotosPicker';
-import { successFeedback, longPressFeedback, taptic } from '../services/haptics';
+import { successFeedback, longPressFeedback, taptic, impactMedium } from '../services/haptics';
 import SwipeableRow    from '../components/SwipeableRow';
 import ZoomableImage   from '../components/ZoomableImage';
 import ReactionPicker from '../components/ReactionPicker';
 import ReactionBar    from '../components/ReactionBar';
+import ReportMessageModal from '../components/ReportMessageModal';
 import { supabase } from '../services/supabase';
 import { subscribeToRoom, subscribeToTyping, broadcastTyping } from '../services/realtimeMessages';
 import { enqueue, flushQueue } from '../services/messageQueue';
@@ -289,13 +290,17 @@ export default function ChatRoomScreen({ route, navigation }) {
   const [tappedId,     setTappedId]     = useState(null); // for timestamp reveal
   const [searchOpen,   setSearchOpen]   = useState(false);
   const [searchQuery,  setSearchQuery]  = useState('');
-  const [pinnedMsgId,  setPinnedMsgId]  = useState(null); // id of pinned message
+  // Pinned message is derived from messages.is_pinned (Supabase-synced).
+  // No separate state — the realtime UPDATE subscription already keeps `messages`
+  // in sync across devices/users, so any is_pinned change propagates automatically.
   const [reactions,    setReactions]    = useState({});   // { messageId: [{ id, message_id, user_id, emoji }] }
   const [pickerMsg,    setPickerMsg]    = useState(null); // message to react to
   const [typingUsers,  setTypingUsers]  = useState([]);   // [{handle}] currently typing
   const [pendingCount, setPendingCount] = useState(0);    // queued messages awaiting send
   const [menuMsg,      setMenuMsg]      = useState(null);
   const [menuVis,      setMenuVis]      = useState(false);
+  const [reportVisible, setReportVisible] = useState(false);
+  const [reportTarget,  setReportTarget]  = useState(null);
   const [editingMsg,   setEditingMsg]   = useState(null);   // message being edited
   const [editText,     setEditText]     = useState('');
   const [contactEditVis, setContactEditVis] = useState(false);
@@ -482,11 +487,7 @@ export default function ChatRoomScreen({ route, navigation }) {
         return;
       }
     } catch {}
-    // Load pinned message for this room
-    try {
-      const pinned = await AsyncStorage.getItem(`vaultchat_pin_${roomId}`);
-      if (pinned) setPinnedMsgId(pinned);
-    } catch {}
+    // Pinned message state is derived from messages.is_pinned — no local storage needed.
     // Fallback: AsyncStorage keeps messages even if Supabase is unreachable
     try {
       const raw = await AsyncStorage.getItem(MKEY);
@@ -666,16 +667,44 @@ export default function ChatRoomScreen({ route, navigation }) {
     }
   }
 
+  // togglePin — writes is_pinned to the `messages` table so the pin syncs
+  // across devices and to the other participant. Enforces a single-pin-per-
+  // room model: pinning a new message unpins any previously pinned one.
   async function togglePin(msg) {
-    const newPinId = pinnedMsgId === msg.id ? null : msg.id;
-    setPinnedMsgId(newPinId);
+    if (!msg?.id) return;
+    const newState = !msg.is_pinned;
+
+    // Optimistic local update — the pin visibly toggles before the network
+    // round-trip completes. Realtime UPDATE event will reconcile if anything
+    // races.
+    setMessages(prev => prev.map(m => {
+      if (newState && m.is_pinned && m.id !== msg.id) return { ...m, is_pinned: false };
+      if (m.id === msg.id) return { ...m, is_pinned: newState };
+      return m;
+    }));
+
+    try { impactMedium(); } catch {}
+
     try {
-      if (newPinId) {
-        await AsyncStorage.setItem(`vaultchat_pin_${roomId}`, newPinId);
-      } else {
-        await AsyncStorage.removeItem(`vaultchat_pin_${roomId}`);
+      // When pinning a new message, clear any other pinned message in this
+      // room first so only one pin exists at a time.
+      if (newState) {
+        await supabase
+          .from('messages')
+          .update({ is_pinned: false })
+          .eq('room_id', roomId)
+          .eq('is_pinned', true)
+          .neq('id', msg.id);
       }
-    } catch {}
+      await supabase
+        .from('messages')
+        .update({ is_pinned: newState })
+        .eq('id', msg.id);
+    } catch (err) {
+      console.warn('togglePin failed:', err);
+      // Realtime subscription will resync on next message update;
+      // worst case the banner briefly shows stale state until it does.
+    }
   }
 
   async function sendStagedPhotos() {
@@ -752,7 +781,7 @@ export default function ChatRoomScreen({ route, navigation }) {
       const p = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!p.granted) { Alert.alert('Permission needed'); return; }
       const r = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: 'images', quality: 0.85, allowsMultipleSelection: true, selectionLimit: 20,
+        mediaTypes: 'images', quality: 1, allowsMultipleSelection: true, selectionLimit: 20,
       });
       if (!r.canceled && r.assets?.length) {
         const newPhotos = await Promise.all(r.assets.map(async asset => {
@@ -774,7 +803,7 @@ export default function ChatRoomScreen({ route, navigation }) {
     } else if (type === 'camera') {
       const p = await ImagePicker.requestCameraPermissionsAsync();
       if (!p.granted) { Alert.alert('Permission needed'); return; }
-      const r = await ImagePicker.launchCameraAsync({ quality: 0.85 });
+      const r = await ImagePicker.launchCameraAsync({ quality: 1 });
       if (!r.canceled && r.assets?.[0]) {
         const key = `img_${Date.now()}`;
         await AsyncStorage.setItem(key, r.assets[0].uri);
@@ -827,6 +856,12 @@ export default function ChatRoomScreen({ route, navigation }) {
     { icon: '🔵', label: 'AirDrop',  type: 'airdrop'  },
     { icon: '📍', label: 'Location', type: 'location' },
   ];
+
+  // Derive the currently-pinned message from the messages array.
+  // Recomputed every render — cheap (O(n)) and always stays in sync with
+  // realtime UPDATE events from Supabase.
+  const pinnedMsg   = messages.find(m => m.is_pinned);
+  const pinnedMsgId = pinnedMsg?.id || null;
 
   return (
     <KeyboardAvoidingView style={[s.container, { backgroundColor: bg }]} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
@@ -1148,11 +1183,14 @@ export default function ChatRoomScreen({ route, navigation }) {
           </View>
         </View>
       </Modal>
-      {/* Reaction picker — shown on long press */}
+      {/* Reaction picker — shown on long press. The "⋯" (More) button opens the
+          full action menu (Pin/Reply/Edit/Delete), so both gestures live behind
+          the same long-press. */}
       <ReactionPicker
         visible={!!pickerMsg}
         onClose={() => setPickerMsg(null)}
         onReact={emoji => { if (pickerMsg) toggleReaction(pickerMsg.id, emoji); }}
+        onMore={() => { if (pickerMsg) { setMenuMsg(pickerMsg); setMenuVis(true); } }}
         myReaction={(reactions[pickerMsg?.id] || []).find(r => r.user_id === myId)?.emoji || null}
         card={card}
         accent={accent}
@@ -1183,6 +1221,18 @@ export default function ChatRoomScreen({ route, navigation }) {
               <Text style={s.menuIcon}>📌</Text>
               <Text style={[s.menuLabel, { color: tx }]}>{pinnedMsgId === menuMsg?.id ? 'Unpin' : 'Pin'}</Text>
             </TouchableOpacity>
+            {/* Report — only other users' messages */}
+            {menuMsg?.sender_id && menuMsg?.sender_id !== myId && (
+              <TouchableOpacity style={[s.menuOpt, { borderTopColor: border }]}
+                onPress={() => {
+                  setReportTarget(menuMsg);
+                  setMenuVis(false);
+                  setTimeout(() => setReportVisible(true), 250);
+                }}>
+                <Text style={s.menuIcon}>🚩</Text>
+                <Text style={[s.menuLabel, { color: '#FF9500' }]}>Report</Text>
+              </TouchableOpacity>
+            )}
             {/* Edit — own messages within 1 hour */}
             {menuMsg?.sender_id === myId && (Date.now() - new Date(menuMsg?.created_at).getTime()) < 3600000 && (
               <TouchableOpacity style={[s.menuOpt, { borderTopColor: border }]}
@@ -1209,6 +1259,16 @@ export default function ChatRoomScreen({ route, navigation }) {
           </View>
         </TouchableOpacity>
       </Modal>
+
+      {/* Report message modal */}
+      <ReportMessageModal
+        visible={reportVisible}
+        onClose={() => { setReportVisible(false); setReportTarget(null); }}
+        message={reportTarget}
+        roomId={roomId}
+        reporterId={myId}
+        reporterHandle={myHandle}
+      />
 
       {/* Edit message modal */}
       <Modal visible={!!editingMsg} transparent animationType="slide" onRequestClose={() => setEditingMsg(null)}>

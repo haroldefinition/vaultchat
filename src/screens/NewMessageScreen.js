@@ -113,7 +113,7 @@ export default function NewMessageScreen({ navigation, route }) {
       const p = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!p.granted) { Alert.alert('Permission needed'); return; }
       const r = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: 'images', quality: 0.85, allowsMultipleSelection: true, selectionLimit: 20,
+        mediaTypes: 'images', quality: 1, allowsMultipleSelection: true, selectionLimit: 20,
       });
       if (!r.canceled && r.assets?.length) {
         const newPhotos = await Promise.all(r.assets.map(async asset => {
@@ -132,7 +132,7 @@ export default function NewMessageScreen({ navigation, route }) {
     } else if (type === 'camera') {
       const p = await ImagePicker.requestCameraPermissionsAsync();
       if (!p.granted) { Alert.alert('Permission needed'); return; }
-      const r = await ImagePicker.launchCameraAsync({ quality: 0.85 });
+      const r = await ImagePicker.launchCameraAsync({ quality: 1 });
       if (!r.canceled && r.assets?.[0]) {
         const key = `img_${Date.now()}`;
         await AsyncStorage.setItem(key, r.assets[0].uri);

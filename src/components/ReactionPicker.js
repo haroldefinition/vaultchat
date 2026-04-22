@@ -14,6 +14,7 @@ export default function ReactionPicker({
   visible,
   onClose,
   onReact,       // (emoji) => void
+  onMore,        // optional () => void — opens full action menu (Pin/Reply/Edit/Delete)
   myReaction,    // the emoji this user already reacted with, or null
   card,
   accent,
@@ -38,6 +39,14 @@ export default function ReactionPicker({
                   </TouchableOpacity>
                 );
               })}
+              {onMore && (
+                <TouchableOpacity
+                  style={[s.emojiBtn, s.moreBtn, { borderColor: accent }]}
+                  onPress={() => { onClose(); onMore(); }}
+                  activeOpacity={0.7}>
+                  <Text style={[s.more, { color: accent }]}>⋯</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </TouchableWithoutFeedback>
         </View>
@@ -51,4 +60,6 @@ const s = StyleSheet.create({
   picker:   { flexDirection: 'row', borderRadius: 40, paddingVertical: 10, paddingHorizontal: 8, gap: 4, shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 8 },
   emojiBtn: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
   emoji:    { fontSize: 28 },
+  moreBtn:  { borderWidth: 1.5, marginLeft: 4 },
+  more:     { fontSize: 22, fontWeight: '800', lineHeight: 22, marginTop: -4 },
 });

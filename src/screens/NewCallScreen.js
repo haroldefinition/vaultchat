@@ -28,7 +28,7 @@ function CreateContactModal({ visible, onClose, onSave, accent, bg, card, tx, su
   async function pickPhoto() {
     const p = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!p.granted) { Alert.alert('Permission needed'); return; }
-    const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 0.8, allowsEditing: true, aspect: [1, 1] });
+    const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 1, allowsEditing: true, aspect: [1, 1] });
     if (!r.canceled && r.assets?.[0]) setPhoto(r.assets[0].uri);
   }
 
@@ -148,7 +148,7 @@ function EditContactModal({ visible, contact, onClose, onSave, accent, bg, card,
   async function pickPhoto() {
     const p = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!p.granted) { Alert.alert('Permission needed'); return; }
-    const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 0.8, allowsEditing: true, aspect: [1, 1] });
+    const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 1, allowsEditing: true, aspect: [1, 1] });
     if (!r.canceled && r.assets?.[0]) setPhoto(r.assets[0].uri);
   }
 
