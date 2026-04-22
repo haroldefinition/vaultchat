@@ -31,6 +31,7 @@ app.use(express.json());
 const users    = new Map(); // userId  → { publicKey, socketId, username, online }
 const rooms    = new Map(); // roomId  → { members[], messages[], channels[], type }
 const sessions = new Map(); // socketId → userId
+const reports  = [];        // fallback store for /report when Supabase is unavailable
 
 // ============================================================
 //  HEALTH CHECK — visit your Railway URL to confirm it works
@@ -68,44 +69,6 @@ app.get('/key/:userId', (req, res) => {
   // Only return public key — private key never touches the server
   res.json({ userId: user.userId, username: user.username, publicKey: user.publicKey });
 });
-
-// ── Push token registration ────────────────────────────────────
-// Stores device push tokens so we can notify users of new messages.
-// Tokens are stored in memory (extend to DB for production).
-const pushTokens = new Map(); // userId → { token, platform }
-
-app.post('/register-push-token', (req, res) => {
-  const { userId, token, platform } = req.body || {};
-  if (!userId || !token) return res.status(400).json({ error: 'userId and token required' });
-  pushTokens.set(userId, { token, platform, registeredAt: new Date().toISOString() });
-  console.log(`📱 Push token registered for ${userId} (${platform})`);
-  res.json({ success: true });
-});
-
-// Helper: send Expo push notification to a specific user
-async function sendPushToUser(userId, title, body, data = {}) {
-  const entry = pushTokens.get(userId);
-  if (!entry?.token) return;
-  try {
-    await fetch('https://exp.host/--/api/v2/push/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify({
-        to: entry.token,
-        title,
-        body,
-        data,
-        sound: 'default',
-        badge: 1,
-        channelId: 'messages',
-      }),
-    });
-  } catch (e) {
-    console.warn('Push send failed:', e.message);
-  }
-}
-
-
 
 // Create a room or group
 app.post('/room/create', (req, res) => {
@@ -158,6 +121,82 @@ app.delete('/room/:roomId/channel/:channelId', (req, res) => {
   room.channels = room.channels.filter(c => c.id !== req.params.channelId);
   io.to(req.params.roomId).emit('channel:deleted', { channelId: req.params.channelId });
   res.json({ success: true });
+});
+
+// ============================================================
+//  SAFETY — USER REPORTS
+//  Clients POST /report when a user uses the in-app
+//  "Report message" flow. Primary path is Supabase directly;
+//  this endpoint is a fallback so reports are never lost if
+//  Supabase is unreachable from the device. CSAM reports are
+//  logged to stderr so they surface in Railway logs and can
+//  be wired to an email/pager alert.
+// ============================================================
+const ALLOWED_REASONS = new Set([
+  'csam','harassment','violence_self_harm','hate',
+  'spam','impersonation','other',
+]);
+
+app.post('/report', (req, res) => {
+  const body = req.body || {};
+  if (!ALLOWED_REASONS.has(body.reason_category)) {
+    return res.status(400).json({ error: 'Invalid reason_category' });
+  }
+  const report = {
+    id: crypto.randomUUID(),
+    reporter_id:          body.reporter_id          || null,
+    reporter_handle:      body.reporter_handle      || null,
+    reported_user_id:     body.reported_user_id     || null,
+    reported_user_name:   body.reported_user_name   || null,
+    reported_message_id:  body.reported_message_id  || null,
+    room_id:              body.room_id              || null,
+    room_type:            body.room_type            || null,
+    reason_category:      body.reason_category,
+    reason_detail:        body.reason_detail        || null,
+    priority:             body.priority             || 'normal',
+    consent_to_forward:   !!body.consent_to_forward,
+    forwarded_content:    body.consent_to_forward ? (body.forwarded_content || null) : null,
+    forwarded_media_url:  body.consent_to_forward ? (body.forwarded_media_url || null) : null,
+    status:               'pending',
+    created_at:           new Date().toISOString(),
+  };
+  reports.push(report);
+
+  if (report.reason_category === 'csam') {
+    // Stderr so Railway surfaces it loudly. Wire an alert here.
+    console.error(`🚨 CSAM REPORT RECEIVED — id=${report.id} reporter=${report.reporter_id} target=${report.reported_user_id} room=${report.room_id}`);
+  } else {
+    console.log(`🛡️  Report received: ${report.reason_category} (priority=${report.priority}) id=${report.id}`);
+  }
+
+  res.json({ success: true, id: report.id });
+});
+
+// Internal triage endpoint — gated by a shared admin token.
+// Set ADMIN_TOKEN in Railway env. Call: GET /admin/reports?token=...
+app.get('/admin/reports', (req, res) => {
+  const token = req.query.token || req.headers['x-admin-token'];
+  if (!process.env.ADMIN_TOKEN || token !== process.env.ADMIN_TOKEN) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const { status, reason } = req.query;
+  let out = reports.slice().reverse();
+  if (status) out = out.filter(r => r.status === status);
+  if (reason) out = out.filter(r => r.reason_category === reason);
+  res.json({ count: out.length, reports: out.slice(0, 200) });
+});
+
+app.post('/admin/reports/:id/status', (req, res) => {
+  const token = req.body?.token || req.headers['x-admin-token'];
+  if (!process.env.ADMIN_TOKEN || token !== process.env.ADMIN_TOKEN) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const r = reports.find(x => x.id === req.params.id);
+  if (!r) return res.status(404).json({ error: 'Report not found' });
+  r.status = req.body.status || r.status;
+  r.action_taken = req.body.action_taken || r.action_taken;
+  r.reviewed_at = new Date().toISOString();
+  res.json({ success: true, report: r });
 });
 
 // ============================================================
