@@ -322,6 +322,15 @@ export default function ChatRoomScreen({ route, navigation }) {
   // If either is missing, we fall back to plaintext so the app never breaks.
   const [recipientId,     setRecipientId]     = useState(null);
   const [recipientPubKey, setRecipientPubKey] = useState(null);
+  // encryptionStatus gates the send button until we know whether we can
+  // encrypt to the peer. States:
+  //   'resolving' — useEffect still running (publish + lookup). Send blocked.
+  //   'ready'     — peer pubkey known, messages will be encrypted.
+  //   'plaintext' — peer has no pubkey (legacy or not yet published). Allow send,
+  //                 but warn the user.
+  //   'error'     — timeout / network failure. Allow send as last-resort plaintext.
+  // We hard-cap resolution at 3s so a slow Supabase never permanently blocks sends.
+  const [encryptionStatus, setEncryptionStatus] = useState('resolving');
   // Plaintext cache keyed by message id — lets the sender's own device render
   // history without re-hitting the crypto path for already-decrypted rows,
   // and lets optimistic (tempId) messages carry plaintext through to the
@@ -386,6 +395,15 @@ export default function ChatRoomScreen({ route, navigation }) {
   useEffect(() => {
     if (!myId) return;
     let cancelled = false;
+
+    // Hard timeout: if resolution hasn't finished in 3s, unblock sends as
+    // plaintext so a slow/unavailable Supabase never strands the user.
+    const timeoutId = setTimeout(() => {
+      if (!cancelled) {
+        setEncryptionStatus(prev => (prev === 'resolving' ? 'error' : prev));
+      }
+    }, 3000);
+
     (async () => {
       try {
         // Publish our pubkey (best-effort) so the other side can encrypt to us.
@@ -397,11 +415,21 @@ export default function ChatRoomScreen({ route, navigation }) {
         setRecipientId(otherId);
         if (otherId) {
           const pk = await getPublicKey(otherId);
-          if (!cancelled) setRecipientPubKey(pk);
+          if (cancelled) return;
+          setRecipientPubKey(pk);
+          setEncryptionStatus(pk ? 'ready' : 'plaintext');
+        } else {
+          setEncryptionStatus('plaintext');
         }
-      } catch {}
+      } catch {
+        if (!cancelled) setEncryptionStatus('error');
+      }
     })();
-    return () => { cancelled = true; };
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+    };
   }, [roomId, myId]);
 
   useEffect(() => {
@@ -1157,6 +1185,43 @@ export default function ChatRoomScreen({ route, navigation }) {
         </View>
       )}
 
+      {/* Encryption status banner — visible during resolve + for unencrypted fallbacks */}
+      {encryptionStatus === 'resolving' && (
+        <View style={{
+          backgroundColor: '#1A7AE8' + '1A',
+          borderTopWidth: 1, borderTopColor: border,
+          paddingHorizontal: 14, paddingVertical: 8,
+          flexDirection: 'row', alignItems: 'center',
+        }}>
+          <ActivityIndicator size="small" color="#1A7AE8" style={{ marginRight: 8 }} />
+          <Text style={{ color: '#1A7AE8', fontSize: 12, fontWeight: '600' }}>
+            🔒 Establishing secure channel…
+          </Text>
+        </View>
+      )}
+      {encryptionStatus === 'plaintext' && (
+        <View style={{
+          backgroundColor: '#F59E0B' + '1A',
+          borderTopWidth: 1, borderTopColor: border,
+          paddingHorizontal: 14, paddingVertical: 8,
+        }}>
+          <Text style={{ color: '#B45309', fontSize: 12, fontWeight: '600' }}>
+            ⚠️ Peer hasn't set up encryption — messages will be sent in plaintext.
+          </Text>
+        </View>
+      )}
+      {encryptionStatus === 'error' && (
+        <View style={{
+          backgroundColor: '#EF4444' + '1A',
+          borderTopWidth: 1, borderTopColor: border,
+          paddingHorizontal: 14, paddingVertical: 8,
+        }}>
+          <Text style={{ color: '#B91C1C', fontSize: 12, fontWeight: '600' }}>
+            ⚠️ Couldn't verify encryption. Messages may be plaintext.
+          </Text>
+        </View>
+      )}
+
       {/* Staged media compose area */}
       {hasStaged && (
         <View style={[s.stagedWrap, { borderTopColor: border }]}>
@@ -1192,7 +1257,7 @@ export default function ChatRoomScreen({ route, navigation }) {
             <TouchableOpacity
               style={[s.sendBtn, { backgroundColor: accent }]}
               onPress={() => { if (stagedVideos.length > 0) sendStagedVideos(); else sendStagedPhotos(); }}
-              disabled={sending}>
+              disabled={sending || encryptionStatus === 'resolving'}>
               {sending
                 ? <ActivityIndicator color="#000" size="small" />
                 : <Text style={{ color: '#000', fontWeight: '900', fontSize: 20 }}>➤</Text>}
@@ -1221,7 +1286,7 @@ export default function ChatRoomScreen({ route, navigation }) {
           />
           <TouchableOpacity
             style={[s.sendBtn, { backgroundColor: text.trim() ? accent : inputBg }]}
-            onPress={() => sendText()} disabled={!text.trim() || sending}>
+            onPress={() => sendText()} disabled={!text.trim() || sending || encryptionStatus === 'resolving'}>
             {sending
               ? <ActivityIndicator color="#fff" size="small" />
               : <Text style={{ color: text.trim() ? '#000' : sub, fontSize: 18 }}>➤</Text>}
