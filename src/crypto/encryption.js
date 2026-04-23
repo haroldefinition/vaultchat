@@ -21,6 +21,19 @@
 import nacl from 'tweetnacl';
 import naclUtil from 'tweetnacl-util';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Crypto from 'expo-crypto';
+
+// ── TweetNaCl PRNG wiring ───────────────────────────────────
+// React Native has no built-in crypto.getRandomValues, so tweetnacl defaults
+// to throwing "no PRNG" on any call that needs randomness (keypair gen,
+// nonces). Wire expo-crypto's secure RNG once at module load.
+//
+// expo-crypto is already a project dep and doesn't need a separate native
+// rebuild beyond what we already have in the dev client.
+nacl.setPRNG((out, n) => {
+  const bytes = Crypto.getRandomBytes(n);
+  for (let i = 0; i < n; i++) out[i] = bytes[i];
+});
 
 const KEY_STORE   = 'vaultchat_identity_keys_v2';
 const ENVELOPE_V  = 2;
