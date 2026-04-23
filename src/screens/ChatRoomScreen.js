@@ -390,8 +390,9 @@ export default function ChatRoomScreen({ route, navigation }) {
       try {
         // Publish our pubkey (best-effort) so the other side can encrypt to us.
         publishMyPublicKey(myId).catch(() => {});
-        // Find the other member of this room.
-        const otherId = await resolveDirectRecipient(roomId, myId);
+        // Find the other member of this room. Pass recipientPhone so legacy
+        // chats (no rooms row yet) can fall back to a profile lookup.
+        const otherId = await resolveDirectRecipient(roomId, myId, { recipientPhone });
         if (cancelled) return;
         setRecipientId(otherId);
         if (otherId) {
