@@ -102,25 +102,34 @@ export async function publishMyPublicKey(myUserId) {
       .eq('id', myUserId)
       .maybeSingle();
 
-    if (existing?.public_key === publicKey) return { publicKey };
-
-    // Path 1: direct UPDATE (works when auth.uid() == myUserId).
-    // We use `.select('id')` so PostgREST returns affected rows, letting us
-    // distinguish "RLS silently blocked it" (length 0) from "actually wrote".
-    const { data: updated, error } = await supabase
-      .from('profiles')
-      .update({ public_key: publicKey, updated_at: new Date().toISOString() })
-      .eq('id', myUserId)
-      .select('id');
-
-    if (!error && Array.isArray(updated) && updated.length > 0) {
+    if (existing?.public_key === publicKey) {
+      if (__DEV__) console.log('[keyExchange] public key already current on server');
       return { publicKey };
     }
-    if (__DEV__ && error) {
-      console.warn('publishMyPublicKey direct update warning:', error.message);
+
+    // Path 1: UPSERT — works when we have a real Supabase auth session
+    // (auth.uid() == myUserId). Covers both "no profile row yet" and
+    // "profile row exists, pubkey stale" in one call. The insert branch
+    // is gated by profiles_insert_own; the update branch by profiles_update_own.
+    const { data: upserted, error: upsertError } = await supabase
+      .from('profiles')
+      .upsert(
+        { id: myUserId, public_key: publicKey, updated_at: new Date().toISOString() },
+        { onConflict: 'id' }
+      )
+      .select('id');
+
+    if (!upsertError && Array.isArray(upserted) && upserted.length > 0) {
+      if (__DEV__) console.log('[keyExchange] upsert succeeded');
+      return { publicKey };
+    }
+    if (__DEV__ && upsertError) {
+      console.warn('publishMyPublicKey upsert warning:', upsertError.message);
     }
 
-    // Path 2: RPC fallback — phone acts as weak-auth / structural guard.
+    // Path 2: RPC fallback — used only when upsert didn't take (no auth
+    // session / RLS blocked). Phone-match acts as a structural guard for
+    // legacy rows that predate the Supabase auth flow.
     const phone = await resolveMyPhone(myUserId);
     if (!phone) {
       if (__DEV__) console.warn('publishMyPublicKey: no phone for user, cannot use RPC path');
