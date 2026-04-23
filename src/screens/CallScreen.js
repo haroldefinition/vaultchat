@@ -8,6 +8,7 @@ import { setupCallKit } from '../services/callkit';
 import * as ImagePicker from 'expo-image-picker';
 import ContactEditModal from '../components/ContactEditModal';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { placeCall } from '../services/placeCall';
 
 // ── Sample data ───────────────────────────────────────────────
 const SAMPLE_CALLS = [
@@ -115,7 +116,7 @@ function VoicemailTab({ accent, card, tx, sub, border, inputBg, navigation }) {
               </TouchableOpacity>
               <TouchableOpacity
                 style={{ paddingHorizontal: 14, paddingVertical: 10, backgroundColor: accent, borderRadius: 12 }}
-                onPress={() => navigation.navigate('ActiveCall', { recipientName: item.from, recipientPhone: item.phone, callType: 'voice' })}>
+                onPress={() => placeCall({ navigation, recipientName: item.from, recipientPhone: item.phone, type: 'voice' })}>
                 <Text style={{ color: '#000', fontWeight: '700', fontSize: 13 }}>Call Back</Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -199,7 +200,7 @@ export default function CallScreen({ navigation }) {
 
   function makeCall(name, number, type = 'voice') {
     if (!number) { Alert.alert('Enter a number'); return; }
-    navigation.navigate('ActiveCall', { recipientName: name || '', recipientPhone: number, callType: type });
+    placeCall({ navigation, recipientName: name || '', recipientPhone: number, type });
   }
 
   function addDigit(d) { Vibration.vibrate(15); setDialInput(p => p.length < 10 ? p + d : p); }

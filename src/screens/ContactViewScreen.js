@@ -8,6 +8,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../services/theme';
 import ContactEditModal from '../components/ContactEditModal';
+import { placeCall } from '../services/placeCall';
 
 export default function ContactViewScreen({ route, navigation }) {
   const { contact: initialContact } = route.params || {};
@@ -41,9 +42,7 @@ export default function ContactViewScreen({ route, navigation }) {
   function callContact() {
     const num = contact.phone || contact.mobile;
     if (!num) { Alert.alert('No phone number'); return; }
-    navigation.navigate('ActiveCall', {
-      recipientName: name, recipientPhone: num, callType: 'voice',
-    });
+    placeCall({ navigation, recipientName: name, recipientPhone: num, type: 'voice' });
   }
 
   function messageContact() {
@@ -100,7 +99,11 @@ export default function ContactViewScreen({ route, navigation }) {
             <Text style={[s.actionLabel, { color: tx }]}>Call</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[s.actionBtn, { backgroundColor: card }]}
-            onPress={() => navigation.navigate('ActiveCall', { recipientName: name, recipientPhone: contact.phone, callType: 'video' })}>
+            onPress={() => {
+              const num = contact.phone || contact.mobile;
+              if (!num) { Alert.alert('No phone number'); return; }
+              placeCall({ navigation, recipientName: name, recipientPhone: num, type: 'video' });
+            }}>
             <Text style={{ fontSize: 24 }}>📹</Text>
             <Text style={[s.actionLabel, { color: tx }]}>Video</Text>
           </TouchableOpacity>

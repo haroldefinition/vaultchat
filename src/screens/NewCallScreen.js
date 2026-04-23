@@ -7,6 +7,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../services/theme';
 import { requestContactsPermission, syncContacts, getCachedContacts } from '../services/contacts';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { placeCall } from '../services/placeCall';
 
 // ── Create Contact Modal ───────────────────────────────────────
 function CreateContactModal({ visible, onClose, onSave, accent, bg, card, tx, sub, border, inputBg }) {
@@ -265,7 +266,7 @@ export default function NewCallScreen({ navigation }) {
   }
 
   function makeCall(name, phone, type = 'voice') {
-    navigation.navigate('ActiveCall', { recipientName: name, recipientPhone: phone, callType: type });
+    placeCall({ navigation, recipientName: name, recipientPhone: phone, type });
   }
 
   function tapAvatar(contact) {

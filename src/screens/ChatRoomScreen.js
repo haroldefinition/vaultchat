@@ -21,6 +21,7 @@ import ReactionPicker from '../components/ReactionPicker';
 import ReactionBar    from '../components/ReactionBar';
 import ReportMessageModal from '../components/ReportMessageModal';
 import { supabase } from '../services/supabase';
+import { placeCall } from '../services/placeCall';
 import { subscribeToRoom, subscribeToTyping, broadcastTyping } from '../services/realtimeMessages';
 import { enqueue, flushQueue } from '../services/messageQueue';
 import { markRoomAsRead, markDelivered, receiptIcon } from '../services/readReceipts';
@@ -1055,10 +1056,10 @@ export default function ChatRoomScreen({ route, navigation }) {
         <TouchableOpacity onPress={() => { setSearchOpen(v => !v); setSearchQuery(''); }} style={s.callBtn}>
           <Text style={{ fontSize: 20 }}>🔍</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => navigation.navigate('ActiveCall', { recipientName, recipientPhone, callType: 'voice' })} style={s.callBtn}>
+        <TouchableOpacity onPress={() => placeCall({ navigation, recipientName, recipientPhone, type: 'voice' })} style={s.callBtn}>
           <Text style={{ fontSize: 22 }}>📞</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => navigation.navigate('ActiveCall', { recipientName, recipientPhone, callType: 'video' })} style={s.callBtn}>
+        <TouchableOpacity onPress={() => placeCall({ navigation, recipientName, recipientPhone, type: 'video' })} style={s.callBtn}>
           <Text style={{ fontSize: 22 }}>📹</Text>
         </TouchableOpacity>
       </View>
