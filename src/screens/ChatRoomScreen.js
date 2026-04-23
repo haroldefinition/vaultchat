@@ -1056,10 +1056,10 @@ export default function ChatRoomScreen({ route, navigation }) {
         <TouchableOpacity onPress={() => { setSearchOpen(v => !v); setSearchQuery(''); }} style={s.callBtn}>
           <Text style={{ fontSize: 20 }}>🔍</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => placeCall({ navigation, recipientName, recipientPhone, type: 'voice' })} style={s.callBtn}>
+        <TouchableOpacity onPress={() => placeCall({ navigation, peerUserId: recipientId, chatRoomId: roomId, recipientName, recipientPhone, type: 'voice' })} style={s.callBtn}>
           <Text style={{ fontSize: 22 }}>📞</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => placeCall({ navigation, recipientName, recipientPhone, type: 'video' })} style={s.callBtn}>
+        <TouchableOpacity onPress={() => placeCall({ navigation, peerUserId: recipientId, chatRoomId: roomId, recipientName, recipientPhone, type: 'video' })} style={s.callBtn}>
           <Text style={{ fontSize: 22 }}>📹</Text>
         </TouchableOpacity>
       </View>

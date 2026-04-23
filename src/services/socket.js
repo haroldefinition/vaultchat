@@ -11,7 +11,7 @@ import AsyncStorage  from '@react-native-async-storage/async-storage';
 
 // ── YOUR RAILWAY SERVER URL ───────────────────────────────────
 // This points to the server you just deployed!
-const SERVER_URL = 'https://vaultchat-server-production.up.railway.app';
+const SERVER_URL = 'https://vaultchat-production-3a96.up.railway.app';
 
 let socket = null;
 
@@ -113,16 +113,19 @@ export function inviteToCall({ roomId, callId, callerId, callerName, type, parti
   socket?.emit('call:invite', { roomId, callId, callerId, callerName, type, participants });
 }
 
-export function acceptCall({ callId, roomId, userId }) {
-  socket?.emit('call:accept', { callId, roomId, userId });
+// `toUserId` = the peer we need the server to forward the event to.
+// Without this the server can only broadcast to the shared chat `roomId`,
+// which is empty if neither side joined it (e.g. dev panel, cold call).
+export function acceptCall({ callId, roomId, userId, toUserId }) {
+  socket?.emit('call:accept', { callId, roomId, userId, toUserId });
 }
 
-export function declineCall({ callId, roomId, userId }) {
-  socket?.emit('call:decline', { callId, roomId, userId });
+export function declineCall({ callId, roomId, userId, toUserId }) {
+  socket?.emit('call:decline', { callId, roomId, userId, toUserId });
 }
 
-export function endCall({ callId, roomId, userId }) {
-  socket?.emit('call:end', { callId, roomId, userId });
+export function endCall({ callId, roomId, userId, toUserId }) {
+  socket?.emit('call:end', { callId, roomId, userId, toUserId });
 }
 
 export function sendWebRTCOffer(targetId, offer, callId) {

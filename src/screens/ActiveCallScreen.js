@@ -5,8 +5,11 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../services/theme';
-import { getRTCConfig, profileForSignal } from '../services/callQuality';
+import { profileForSignal } from '../services/callQuality';
 import CallQualityChip from '../components/CallQualityChip';
+import * as callPeer from '../services/callPeer';
+import { setEarpieceMode, setSpeakerMode } from '../services/audioSession';
+import netQ from '../services/networkQuality';
 
 // ── Enhanced quality badge with relay info ────────────────────
 function QualityBadge({ quality, routing }) {
@@ -110,11 +113,30 @@ function DialpadPage({ onClose, onDial, tx, sub, card, accent, inputBg, border }
 }
 
 // ── Main ActiveCallScreen ─────────────────────────────────────
+//
+// Route params:
+//   mode:           'outgoing' | 'answer'   — how this screen was entered
+//   callId:         uuid                    — generated caller-side
+//   roomId:         string                  — 1:1 chat roomId
+//   myUserId:       string                  — my profiles.id
+//   peerUserId:     string                  — the other side's profiles.id
+//   recipientName:  string                  — displayed in the title
+//   recipientPhone: string                  — displayed beneath the name
+//   callType:       'voice' | 'video'       — voice for Phase 1; video stubbed
+//
+// Legacy calls (from the sample "Recent" list in CallScreen) still pass
+// just recipientName/recipientPhone/callType — we treat those as "mock
+// only" and show the UI without actually placing a call.
 export default function ActiveCallScreen({ route, navigation }) {
   const { bg, card, tx, sub, border, inputBg, accent } = useTheme();
-  const { recipientName, recipientPhone, callType } = route.params || {};
+  const {
+    mode, callId, roomId, myUserId, peerUserId,
+    recipientName, recipientPhone, callType,
+  } = route.params || {};
 
-  const [status,    setStatus]    = useState('Connecting...');
+  const isRealCall = !!(mode && callId && peerUserId && myUserId);
+
+  const [status,    setStatus]    = useState(mode === 'answer' ? 'Connecting...' : 'Ringing...');
   const [duration,  setDuration]  = useState(0);
   const [muted,     setMuted]     = useState(false);
   const [speaker,   setSpeaker]   = useState(false);
@@ -127,29 +149,117 @@ export default function ActiveCallScreen({ route, navigation }) {
 
   const pulse = useRef(new Animated.Value(1)).current;
   const timer = useRef(null);
+  const hungUpRef = useRef(false); // guard against double-hangup in unmount
+  const sawActiveStateRef = useRef(false); // true once we've seen any non-idle state (prevents initial-snapshot teardown)
 
+  // ── Start the call (real lifecycle) + subscribe to callPeer events ──
   useEffect(() => {
-    // Animate avatar pulse while connecting
+    // Avatar pulse while pre-connected
     const anim = Animated.loop(Animated.sequence([
       Animated.timing(pulse, { toValue: 1.15, duration: 800, useNativeDriver: true }),
       Animated.timing(pulse, { toValue: 1,    duration: 800, useNativeDriver: true }),
     ]));
     anim.start();
-    const connect = setTimeout(() => { setStatus('Connected'); anim.stop(); }, 2000);
 
-    // Simulate quality changes (rural-aware — varies based on signal)
-    const qualTimer = setInterval(() => {
-      const bars = Math.floor(Math.random() * 5); // 0–4 bars
-      const p    = profileForSignal(bars);
-      if      (p.maxBitrate >= 1000000) setQuality('HD');
-      else if (p.maxBitrate >= 500000)  setQuality('SD');
-      else if (p.maxBitrate >= 200000)  setQuality('Low');
-      else                              setQuality('Min');
-    }, 7000);
+    // Mock-only path (no real peerUserId) — keep old UX for sample call
+    // history entries until NewCall/Contacts route through the real path.
+    if (!isRealCall) {
+      const connect = setTimeout(() => { setStatus('Connected'); anim.stop(); }, 2000);
+      const qualTimer = setInterval(() => {
+        const p = profileForSignal(Math.floor(Math.random() * 5));
+        if      (p.maxBitrate >= 1000000) setQuality('HD');
+        else if (p.maxBitrate >= 500000)  setQuality('SD');
+        else if (p.maxBitrate >= 200000)  setQuality('Low');
+        else                              setQuality('Min');
+      }, 7000);
+      return () => { clearTimeout(connect); clearInterval(qualTimer); anim.stop(); };
+    }
 
-    return () => { clearTimeout(connect); clearInterval(qualTimer); clearInterval(timer.current); };
+    // Real call path — subscribe FIRST so we catch the state flip.
+    // NB: callPeer.subscribe emits the current state synchronously on attach.
+    // Before startOutgoing/accept has run, that snapshot is `idle`. We must
+    // not treat that initial idle as "call ended" — only transitions to idle
+    // that happen AFTER we've seen an active state count as a real teardown.
+    const unsub = callPeer.subscribe((event, payload) => {
+      if (event === 'state') {
+        const st = payload?.state;
+        if (st === 'ringing')        { sawActiveStateRef.current = true; setStatus('Ringing...'); }
+        else if (st === 'placing')   { sawActiveStateRef.current = true; setStatus('Ringing...'); }
+        else if (st === 'incoming')  { sawActiveStateRef.current = true; }
+        else if (st === 'accepted')  { sawActiveStateRef.current = true; setStatus('Connecting...'); }
+        else if (st === 'connected') { sawActiveStateRef.current = true; setStatus('Connected'); anim.stop(); }
+        else if (st === 'idle')      {
+          // Ignore the initial snapshot emission before startOutgoing fires.
+          if (!sawActiveStateRef.current) return;
+          // callPeer finished — either we hung up or peer ended.
+          if (!hungUpRef.current) {
+            hungUpRef.current = true;
+            navigation.goBack();
+          }
+        }
+      } else if (event === 'declined') {
+        Alert.alert('Call declined', 'The recipient declined the call.');
+        hungUpRef.current = true;
+        navigation.goBack();
+      } else if (event === 'ended') {
+        hungUpRef.current = true;
+        navigation.goBack();
+      } else if (event === 'connectionLost') {
+        Alert.alert('Call ended', 'The connection was lost.');
+        hungUpRef.current = true;
+        navigation.goBack();
+      }
+    });
+
+    // Live quality from getStats()
+    const unsubQuality = netQ.subscribe(({ quality: q }) => {
+      // networkQuality.js emits 'good' | 'poor' | 'critical' — map onto the badge states.
+      if (q === 'good')     setQuality('HD');
+      else if (q === 'poor') setQuality('Low');
+      else                   setQuality('Min');
+    });
+
+    // Kick off the call — outgoing path creates the PC + fires invite;
+    // answer path was already set up in the incoming handler, we just
+    // call accept() from here after the screen has mounted.
+    (async () => {
+      try {
+        if (mode === 'outgoing') {
+          // Pull my own display name for the invite — don't reuse recipientName,
+          // that's who I'm calling, not who I am.
+          let myName = 'VaultChat User';
+          try {
+            const stored = await AsyncStorage.getItem('vaultchat_display_name');
+            if (stored) myName = stored;
+          } catch {}
+          await callPeer.startOutgoing({
+            callId, roomId, callerId: myUserId, callerName: myName,
+            peerUserId, type: callType || 'voice',
+          });
+        } else if (mode === 'answer') {
+          await callPeer.accept(myUserId);
+        }
+      } catch (e) {
+        Alert.alert('Call failed', e?.message || 'Unable to start the call');
+        hungUpRef.current = true;
+        navigation.goBack();
+      }
+    })();
+
+    return () => {
+      unsub();
+      unsubQuality();
+      anim.stop();
+      clearInterval(timer.current);
+      // If the screen unmounts while we're still in a call, tear it down.
+      if (!hungUpRef.current) {
+        hungUpRef.current = true;
+        callPeer.hangup();
+      }
+    };
   }, []);
 
+  // Call timer starts once we actually connect
   useEffect(() => {
     if (status === 'Connected') {
       timer.current = setInterval(() => setDuration(d => d + 1), 1000);
@@ -222,12 +332,23 @@ export default function ActiveCallScreen({ route, navigation }) {
       <View style={s.controls}>
         <View style={s.controlRow}>
           <TouchableOpacity style={[s.btn, muted && { backgroundColor: '#ff4444' }]}
-            onPress={() => { haptic(); setMuted(m => !m); }}>
+            onPress={() => {
+              haptic();
+              const next = !muted;
+              setMuted(next);
+              if (isRealCall) callPeer.setMute(next, myUserId, 'audio');
+            }}>
             <Text style={s.btnIcon}>{muted ? '🔇' : '🎤'}</Text>
             <Text style={s.btnLabel}>{muted ? 'Unmute' : 'Mute'}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[s.btn, speaker && { backgroundColor: accent }]}
-            onPress={() => { haptic(); setSpeaker(v => !v); }}>
+            onPress={() => {
+              haptic();
+              const next = !speaker;
+              setSpeaker(next);
+              // Switch the audio route at the OS level — earpiece vs speakerphone.
+              (next ? setSpeakerMode() : setEarpieceMode()).catch(() => {});
+            }}>
             <Text style={s.btnIcon}>🔊</Text>
             <Text style={s.btnLabel}>Speaker</Text>
           </TouchableOpacity>
@@ -254,7 +375,16 @@ export default function ActiveCallScreen({ route, navigation }) {
 
       {/* End call */}
       <View style={s.endRow}>
-        <TouchableOpacity style={s.endBtn} onPress={() => { clearInterval(timer.current); navigation.goBack(); }}>
+        <TouchableOpacity
+          style={s.endBtn}
+          onPress={() => {
+            clearInterval(timer.current);
+            if (isRealCall && !hungUpRef.current) {
+              hungUpRef.current = true;
+              callPeer.hangup();
+            }
+            navigation.goBack();
+          }}>
           <Text style={s.endIcon}>📵</Text>
         </TouchableOpacity>
       </View>

@@ -8,6 +8,18 @@ import { requestContactsPermission, syncContacts } from '../services/contacts';
 import { checkBiometricSupport } from '../services/biometric';
 import { generateHandle, getMyHandle, saveHandle } from '../services/vaultHandle';
 import { createBackup, restoreBackup } from '../services/backup';
+import { placeCall } from '../services/placeCall';
+import { hangup as callPeerHangup, getState as callPeerGetState, _internal as callPeerInternal, subscribe as callPeerSubscribe } from '../services/callPeer';
+import { getSocket, connectSocket } from '../services/socket';
+
+// ── TEMPORARY (task #50 verification) ───────────────────────────
+// Two known synthetic test accounts used for the two-simulator signaling
+// verification. Remove once call flow is proven and we wire a proper
+// contact/peer picker that uses userIds.
+const DEV_TEST_PEERS = {
+  'c654d407-a4fe-4344-8d41-fa21e89dc1b5': { name: 'Test Peer (hjero7)',       id: 'd7d2aad4-01ce-4092-8f8a-438c7e459f3b' },
+  'd7d2aad4-01ce-4092-8f8a-438c7e459f3b': { name: 'Test Peer (jvibes)',       id: 'c654d407-a4fe-4344-8d41-fa21e89dc1b5' },
+};
 
 export default function SettingsScreen({ navigation }) {
   const theme = useTheme();
@@ -45,6 +57,23 @@ export default function SettingsScreen({ navigation }) {
   const [pinModal, setPinModal] = useState(false);
   const [pinType, setPinType] = useState('real');
   const [pinInput, setPinInput] = useState('');
+  const [devCallState, setDevCallState] = useState('idle');
+  const [devSocketConnected, setDevSocketConnected] = useState(false);
+
+  useEffect(() => {
+    try {
+      const snap = callPeerGetState?.();
+      if (snap?.state) setDevCallState(snap.state);
+      const unsub = callPeerSubscribe?.((evt, payload) => {
+        if (evt === 'state' && payload?.state) setDevCallState(payload.state);
+      });
+      const tick = setInterval(() => {
+        const s = getSocket?.();
+        setDevSocketConnected(!!s?.connected);
+      }, 500);
+      return () => { try { unsub?.(); } catch {} clearInterval(tick); };
+    } catch {}
+  }, []);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => { if (session) setUser(session.user); });
@@ -320,6 +349,60 @@ export default function SettingsScreen({ navigation }) {
           </TouchableOpacity>
           <Text style={[st.header, { color: accent, paddingHorizontal: 0, paddingTop: 0 }]}>Settings</Text>
         </View>
+
+        {/* TEMPORARY — task #50 verification. Places a real 1:1 call to the
+            other hardcoded test peer, bypassing phone/profile resolution. */}
+        {user && DEV_TEST_PEERS[user.id] && (
+          <View style={{ marginHorizontal: 16, marginBottom: 12, padding: 14, borderRadius: 12, backgroundColor: '#ff9500', borderWidth: 1, borderColor: '#cc7700' }}>
+            <Text style={{ color: '#fff', fontWeight: '700', marginBottom: 4 }}>🔧 Dev: Test Signaling</Text>
+            <Text style={{ color: '#fff', fontSize: 11, marginBottom: 2, opacity: 0.9 }}>callPeer state: <Text style={{ fontWeight: '700' }}>{devCallState}</Text></Text>
+            <Text style={{ color: '#fff', fontSize: 11, marginBottom: 2, opacity: 0.9 }}>socket: <Text style={{ fontWeight: '700' }}>{devSocketConnected ? '🟢 connected' : '🔴 disconnected'}</Text></Text>
+            <Text style={{ color: '#fff', fontSize: 12, marginBottom: 10 }}>Calls the other test simulator directly (skips phone lookup).</Text>
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <TouchableOpacity
+                style={{ flex: 1, padding: 10, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center' }}
+                onPress={() => {
+                  const peer = DEV_TEST_PEERS[user.id];
+                  placeCall({ navigation, peerUserId: peer.id, recipientName: peer.name, type: 'voice' });
+                }}>
+                <Text style={{ color: '#fff', fontWeight: '600' }}>📞 Voice</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ flex: 1, padding: 10, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center' }}
+                onPress={() => {
+                  const peer = DEV_TEST_PEERS[user.id];
+                  placeCall({ navigation, peerUserId: peer.id, recipientName: peer.name, type: 'video' });
+                }}>
+                <Text style={{ color: '#fff', fontWeight: '600' }}>📹 Video</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+              <TouchableOpacity
+                style={{ flex: 1, padding: 8, borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.25)', alignItems: 'center' }}
+                onPress={() => {
+                  const before = callPeerGetState?.()?.state || 'unknown';
+                  try { callPeerHangup(); } catch {}
+                  try { callPeerInternal?.cleanup?.(); } catch {}
+                  const after = callPeerGetState?.()?.state || 'unknown';
+                  Alert.alert('Reset', `Before: ${before}\nAfter: ${after}`);
+                }}>
+                <Text style={{ color: '#fff', fontWeight: '600', fontSize: 12 }}>🔄 Reset Call State</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ flex: 1, padding: 8, borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.25)', alignItems: 'center' }}
+                onPress={() => {
+                  const before = !!getSocket?.()?.connected;
+                  try { connectSocket?.(user.id); } catch (e) {}
+                  setTimeout(() => {
+                    const after = !!getSocket?.()?.connected;
+                    Alert.alert('Socket', `Before: ${before ? 'connected' : 'disconnected'}\nAfter: ${after ? 'connected' : 'disconnected'}\n\nuserId: ${user.id}`);
+                  }, 800);
+                }}>
+                <Text style={{ color: '#fff', fontWeight: '600', fontSize: 12 }}>🔌 Force Reconnect</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
 
         <TouchableOpacity style={[st.profileCard, { backgroundColor: card, borderColor: border }]} onPress={() => setPage('profile')}>
           <View style={{ position: 'relative' }}>

@@ -2,7 +2,7 @@ import "react-native-gesture-handler";
 
 // VaultChat — App.js
 import React, { useEffect, useState } from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator }  from '@react-navigation/bottom-tabs';
 import { StatusBar, Text, View, TouchableOpacity, StyleSheet, Alert, AppState } from 'react-native';
@@ -12,6 +12,12 @@ import { UnreadProvider, useUnread } from './src/services/unreadBadge';
 import { setupPushNotifications, addNotificationResponseListener, clearBadge } from './src/services/pushNotifications';
 import { flushQueue } from './src/services/messageQueue';
 import { isBiometricEnabled } from './src/services/biometric';
+import { connectSocket, disconnectSocket } from './src/services/socket';
+import { startCallListener, stopCallListener } from './src/services/callListener';
+
+// Single navigation ref shared with callListener so it can navigate
+// from outside the React tree when a `call:incoming` arrives.
+const navigationRef = createNavigationContainerRef();
 
 // ── Core screens ──────────────────────────────────────────────
 import SplashScreen        from './src/screens/SplashScreen';
@@ -45,6 +51,7 @@ import AIAssistantScreen   from './src/screens/AIAssistantScreen';
 import NearbyScreen        from './src/screens/NearbyScreen';
 import ContactViewScreen   from './src/screens/ContactViewScreen';
 import ContactsScreen      from './src/screens/ContactsScreen';
+import IncomingCallScreen  from './src/screens/IncomingCallScreen';
 
 // ── Premium Modal (accessed everywhere) ──────────────────────
 import PremiumModal from './src/components/PremiumModal';
@@ -178,6 +185,15 @@ export default function App() {
 
       const cleanup = addNotificationResponseListener(() => {});
 
+      // Bootstrap socket + global call listener for an authenticated user.
+      // Safe to call multiple times — both services no-op if already set up.
+      const bootstrapRealtime = (userId) => {
+        if (!userId) return;
+        connectSocket(userId);
+        // Give the socket a tick to connect before wiring the listener.
+        setTimeout(() => startCallListener({ myUserId: userId, navigationRef }), 200);
+      };
+
       // Check auth
       try {
         const { supabase } = require('./src/services/supabase');
@@ -186,20 +202,32 @@ export default function App() {
         if (session) {
           setIsLoggedIn(true);
           // Publish our NaCl public key so peers can encrypt to us.
-          if (session.user?.id) publishMyPublicKey(session.user.id).catch(() => {});
+          if (session.user?.id) {
+            publishMyPublicKey(session.user.id).catch(() => {});
+            bootstrapRealtime(session.user.id);
+          }
         } else {
           const stored = await AsyncStorage.getItem('vaultchat_user');
           setIsLoggedIn(!!stored);
           if (stored) {
             try {
               const u = JSON.parse(stored);
-              if (u?.id) publishMyPublicKey(u.id).catch(() => {});
+              if (u?.id) {
+                publishMyPublicKey(u.id).catch(() => {});
+                bootstrapRealtime(u.id);
+              }
             } catch {}
           }
         }
         supabase.auth.onAuthStateChange((_event, session) => {
           setIsLoggedIn(!!session);
-          if (session?.user?.id) publishMyPublicKey(session.user.id).catch(() => {});
+          if (session?.user?.id) {
+            publishMyPublicKey(session.user.id).catch(() => {});
+            bootstrapRealtime(session.user.id);
+          } else {
+            stopCallListener();
+            disconnectSocket();
+          }
         });
       } catch {
         const stored = await AsyncStorage.getItem('vaultchat_user');
@@ -226,7 +254,7 @@ export default function App() {
   return (
     <UnreadProvider>
     <ThemeProvider>
-      <NavigationContainer>
+      <NavigationContainer ref={navigationRef}>
         <StatusBar barStyle="light-content" backgroundColor="#080b12" />
         <Stack.Navigator screenOptions={{ headerShown:false, animation:'slide_from_right' }}>
           {!isLoggedIn ? (
@@ -239,6 +267,7 @@ export default function App() {
               <Stack.Screen name="ChatRoom"      component={ChatRoomScreen} />
               <Stack.Screen name="GroupChat"     component={GroupChatScreen} />
               <Stack.Screen name="ActiveCall"    component={ActiveCallScreen}   options={{ animation:'slide_from_bottom' }} />
+              <Stack.Screen name="IncomingCall"  component={IncomingCallScreen} options={{ animation:'slide_from_bottom', gestureEnabled: false }} />
               <Stack.Screen name="GroupCall"     component={GroupCallScreen}    options={{ animation:'slide_from_bottom' }} />
               <Stack.Screen name="NewCall"       component={NewCallScreen} />
               <Stack.Screen name="NewMessage"    component={NewMessageScreen} />
