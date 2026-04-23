@@ -33,6 +33,44 @@ async function getStoredPhone() {
 }
 
 /**
+ * If AsyncStorage doesn't have our phone, look it up on profiles (publicly
+ * readable) keyed by user_id, and backfill AsyncStorage so future boots
+ * have it locally. This is a self-healing migration for devices that
+ * pre-date the current RegisterScreen phone-storage flow.
+ *
+ * Note on security: profiles.phone is already publicly readable via RLS
+ * policy profiles_select_public, so no additional disclosure. The RPC's
+ * phone-check is a structural guard only — the real identity proof will
+ * come when we migrate to real Supabase auth sessions.
+ */
+async function resolveMyPhone(myUserId) {
+  const fromStore = await getStoredPhone();
+  if (fromStore) return fromStore;
+
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('phone')
+      .eq('id', myUserId)
+      .maybeSingle();
+    if (error || !data?.phone) return null;
+
+    // Backfill AsyncStorage so subsequent boots skip the network round-trip.
+    try {
+      const raw = await AsyncStorage.getItem('vaultchat_user');
+      const prev = raw ? JSON.parse(raw) : {};
+      await AsyncStorage.setItem(
+        'vaultchat_user',
+        JSON.stringify({ ...prev, id: myUserId, phone: data.phone })
+      );
+    } catch {}
+    return data.phone;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Generate (if needed) and publish this device's public key to Supabase.
  *
  * Two paths:
@@ -75,10 +113,10 @@ export async function publishMyPublicKey(myUserId) {
       console.warn('publishMyPublicKey direct update warning:', error.message);
     }
 
-    // Path 2: RPC fallback — phone acts as weak-auth.
-    const phone = await getStoredPhone();
+    // Path 2: RPC fallback — phone acts as weak-auth / structural guard.
+    const phone = await resolveMyPhone(myUserId);
     if (!phone) {
-      if (__DEV__) console.warn('publishMyPublicKey: no phone stored, cannot use RPC path');
+      if (__DEV__) console.warn('publishMyPublicKey: no phone for user, cannot use RPC path');
       return null;
     }
     const { data: rpcResult, error: rpcError } = await supabase.rpc('publish_public_key', {
