@@ -45,19 +45,14 @@ async function getStoredPhone() {
  */
 async function resolveMyPhone(myUserId) {
   const fromStore = await getStoredPhone();
-  if (fromStore) {
-    if (__DEV__) console.log('[keyExchange] phone from AsyncStorage:', fromStore);
-    return fromStore;
-  }
+  if (fromStore) return fromStore;
 
   try {
-    if (__DEV__) console.log('[keyExchange] looking up phone for user_id:', myUserId);
     const { data, error } = await supabase
       .from('profiles')
-      .select('phone, display_name')
+      .select('phone')
       .eq('id', myUserId)
       .maybeSingle();
-    if (__DEV__) console.log('[keyExchange] profile lookup result:', { data, error: error?.message });
     if (error || !data?.phone) return null;
 
     // Backfill AsyncStorage so subsequent boots skip the network round-trip.
@@ -91,9 +86,7 @@ async function resolveMyPhone(myUserId) {
 export async function publishMyPublicKey(myUserId) {
   if (!myUserId) return null;
   try {
-    if (__DEV__) console.log('[keyExchange] publishMyPublicKey called with user_id:', myUserId);
     const { publicKey } = await ensureIdentityKeys();
-    if (__DEV__) console.log('[keyExchange] local publicKey first 12:', publicKey?.slice(0, 12));
 
     // Check current value — avoid a write if unchanged.
     const { data: existing } = await supabase
@@ -102,10 +95,7 @@ export async function publishMyPublicKey(myUserId) {
       .eq('id', myUserId)
       .maybeSingle();
 
-    if (existing?.public_key === publicKey) {
-      if (__DEV__) console.log('[keyExchange] public key already current on server');
-      return { publicKey };
-    }
+    if (existing?.public_key === publicKey) return { publicKey };
 
     // Path 1: UPSERT — works when we have a real Supabase auth session
     // (auth.uid() == myUserId). Covers both "no profile row yet" and
@@ -120,7 +110,6 @@ export async function publishMyPublicKey(myUserId) {
       .select('id');
 
     if (!upsertError && Array.isArray(upserted) && upserted.length > 0) {
-      if (__DEV__) console.log('[keyExchange] upsert succeeded');
       return { publicKey };
     }
     if (__DEV__ && upsertError) {
