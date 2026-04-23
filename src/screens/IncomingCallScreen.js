@@ -18,10 +18,16 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Animated, Vibration } from 'react-native';
 import * as callPeer from '../services/callPeer';
+import * as roomCall from '../services/roomCall';
 
 export default function IncomingCallScreen({ route, navigation }) {
-  const { callId, roomId, myUserId, callerId, callerName, type = 'voice' } = route.params || {};
+  const {
+    callId, roomId, myUserId, callerId, callerName,
+    type = 'voice',
+    isConference,
+  } = route.params || {};
   const pulse = useRef(new Animated.Value(1)).current;
+  const sawActiveStateRef = useRef(false); // ignore the initial idle snapshot
 
   useEffect(() => {
     const anim = Animated.loop(Animated.sequence([
@@ -29,16 +35,24 @@ export default function IncomingCallScreen({ route, navigation }) {
       Animated.timing(pulse, { toValue: 1,    duration: 650, useNativeDriver: true }),
     ]));
     anim.start();
-    // Vibrate pattern — matches an incoming-call ring feel without audio.
     const vibrateTimer = setInterval(() => Vibration.vibrate([0, 400, 300, 400]), 2200);
     Vibration.vibrate([0, 400, 300, 400]);
 
-    // If callPeer leaves the 'incoming' state (caller cancelled, etc.),
-    // bail out of this screen.
-    const unsub = callPeer.subscribe((event, payload) => {
-      if (event === 'state' && payload?.state === 'idle') {
-        navigation.goBack();
-      } else if (event === 'ended') {
+    // Subscribe to the right engine. Both engines emit `state` + `ended`.
+    // IMPORTANT: both emit a snapshot synchronously on attach — if we don't
+    // guard with sawActiveStateRef, that initial 'idle' would fire goBack()
+    // and this screen would never render.
+    const engine = isConference ? roomCall : callPeer;
+    const unsub = engine.subscribe((event, payload) => {
+      if (event === 'state') {
+        const st = payload?.state;
+        if (st === 'incoming' || st === 'ringing' || st === 'accepted' ||
+            st === 'connected' || st === 'joining' || st === 'in-room') {
+          sawActiveStateRef.current = true;
+        } else if (st === 'idle' && sawActiveStateRef.current) {
+          navigation.goBack();
+        }
+      } else if (event === 'ended' || event === 'room-ended') {
         navigation.goBack();
       }
     });
@@ -48,19 +62,25 @@ export default function IncomingCallScreen({ route, navigation }) {
 
   function onAccept() {
     Vibration.cancel();
-    // ActiveCallScreen (mode=answer) calls callPeer.accept() on mount.
+    // For conference, ActiveCallScreen(mode='answer-conference') calls
+    // roomCall.accept() on mount. For 1:1, mode='answer' calls callPeer.accept().
     navigation.replace('ActiveCall', {
-      mode:         'answer',
+      mode:          isConference ? 'answer-conference' : 'answer',
       callId, roomId, myUserId,
-      peerUserId:   callerId,
+      peerUserId:    callerId,
       recipientName: callerName,
-      callType:     type,
+      callType:      type,
+      isConference:  !!isConference,
     });
   }
 
   function onDecline() {
     Vibration.cancel();
-    callPeer.declineIncoming(myUserId);
+    if (isConference) {
+      try { roomCall.declineIncoming(myUserId); } catch {}
+    } else {
+      try { callPeer.declineIncoming(myUserId); } catch {}
+    }
     navigation.goBack();
   }
 
