@@ -410,3 +410,48 @@ function _cleanup() {
 // Exposed for the incoming-call entry point so the app-level listener
 // can hand us the invite without the UI being mounted yet.
 export const _internal = { cleanup: _cleanup };
+
+/**
+ * Transfer ownership of the live 1:1 peer connection + streams to roomCall
+ * for a 1:1 → conference upgrade. After this call, callPeer returns to
+ * idle state WITHOUT closing the pc or stopping tracks — the caller (roomCall)
+ * takes over media lifecycle.
+ *
+ * Returns the handoff payload shaped exactly for roomCall.bootstrapFromExistingPeer:
+ *   { pc, localStream, remoteStream, peerUserId, callId, roomId }
+ * or null if there's nothing live to hand off.
+ */
+export function handoffToRoomCall() {
+  if (!_pc || !_localStream || _state === 'idle') return null;
+
+  const handoff = {
+    pc:           _pc,
+    localStream:  _localStream,
+    remoteStream: _remoteStream,
+    peerUserId:   _peerUserId,
+    callId:       _callId,
+    roomId:       _roomId,
+  };
+
+  // Stop autoAdapt / netQ but DO NOT stop tracks or close pc — roomCall owns
+  // them now and will tear them down as part of its own lifecycle.
+  try { _stopAutoAdapt?.(); } catch {}
+  _stopAutoAdapt = null;
+  try { netQ.stop(); } catch {}
+  _unbindSocket();
+
+  // Null out our references — roomCall now owns the pc/streams.
+  _pc = null;
+  _localStream = null;
+  _remoteStream = null;
+  _pendingCandidates = [];
+  _callId = null;
+  _roomId = null;
+  _peerUserId = null;
+
+  const wasState = _state;
+  _state = 'idle';
+  emit('state', { state: _state, wasState, handedOff: true });
+
+  return handoff;
+}

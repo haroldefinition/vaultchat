@@ -20,6 +20,7 @@
 import { Platform } from 'react-native';
 import { getSocket } from './socket';
 import * as callPeer from './callPeer';
+import * as roomCall from './roomCall';
 import {
   setupCallKit,
   displayIncomingCall,
@@ -61,7 +62,9 @@ export function startCallListener({ myUserId, navigationRef }) {
 
   if (_useCallKit()) setupCallKit();
 
-  socket.on('call:incoming', _onIncoming);
+  socket.on('call:incoming',      _onIncoming);
+  socket.on('callroom:incoming',  _onRoomIncoming);
+  socket.on('callroom:upgrade',   _onRoomUpgrade);
   _bound = true;
 
   // CallKit event wiring — iOS uses the native system UI for the ring.
@@ -91,7 +94,11 @@ export function startCallListener({ myUserId, navigationRef }) {
 export function stopCallListener() {
   if (!_bound) return;
   const socket = getSocket();
-  if (socket) socket.off('call:incoming', _onIncoming);
+  if (socket) {
+    socket.off('call:incoming',     _onIncoming);
+    socket.off('callroom:incoming', _onRoomIncoming);
+    socket.off('callroom:upgrade',  _onRoomUpgrade);
+  }
   if (_unCallKit) { try { _unCallKit(); } catch {} _unCallKit = null; }
   _bound = false;
   _pendingInvite = null;
@@ -123,14 +130,103 @@ function _onIncoming(payload) {
   }
 }
 
-function _navigateToActiveCall({ callId, roomId, callerId, callerName, type }) {
+function _navigateToActiveCall({ callId, roomId, callerId, callerName, type, isConference }) {
   _navigationRef?.navigate?.('ActiveCall', {
-    mode:          'answer',
+    mode:          isConference ? 'answer-conference' : 'answer',
     callId, roomId, myUserId: _myUserId,
     peerUserId:    callerId,
     recipientName: callerName,
     callType:      type || 'voice',
+    isConference:  !!isConference,
   });
+}
+
+// ── Conference incoming ─────────────────────────────────────
+//
+// Someone invited us into a multi-peer callroom. Payload shape mirrors
+// server.on('callroom:invite') → emit('callroom:incoming', ...):
+//   { callId, roomId, inviterId, inviterName, type, existingParticipants }
+//
+// We ring through the same JS IncomingCall screen as 1:1, but pass
+// `isConference: true` so ActiveCallScreen knows to route through roomCall.
+
+function _onRoomIncoming(payload) {
+  const {
+    callId, roomId, inviterId, inviterName,
+    type, existingParticipants,
+  } = payload || {};
+  if (!callId || !inviterId) return;
+
+  // Stage in roomCall so accept() knows the IDs.
+  roomCall.handleIncomingInvite({
+    callId, roomId, inviterId, inviterName, type,
+    existingParticipants: existingParticipants || [],
+  });
+
+  _pendingInvite = {
+    callId, roomId,
+    callerId:      inviterId,
+    callerName:    inviterName || 'VaultChat User',
+    type:          type || 'voice',
+    isConference:  true,
+  };
+
+  if (_useCallKit()) {
+    displayIncomingCall(callId, inviterId, inviterName || 'VaultChat');
+  } else {
+    _navigationRef?.navigate?.('IncomingCall', {
+      callId, roomId, myUserId: _myUserId,
+      callerId:      inviterId,
+      callerName:    inviterName || 'VaultChat User',
+      type:          type || 'voice',
+      isConference:  true,
+    });
+  }
+}
+
+// ── 1:1 → conference upgrade (receiver side) ────────────────
+//
+// The other 1:1 peer tapped "+ Add" and triggered the upgrade. We now:
+//   1. Handoff our live callPeer pc/streams to roomCall
+//   2. Bootstrap roomCall from that handoff
+//   3. Join the server-side callroom so the new participant can find us
+//
+// No UI change — ActiveCallScreen subscribes to roomCall events, so the
+// tile grid will render once roomCall takes over.
+
+async function _onRoomUpgrade(payload) {
+  const { callId, roomId, fromUserId } = payload || {};
+  if (!callId || !roomId) return;
+
+  const handoff = callPeer.handoffToRoomCall();
+  if (!handoff) {
+    if (__DEV__) console.warn('callroom:upgrade received but no live 1:1 call to hand off');
+    return;
+  }
+
+  try {
+    // Stash my display name for the bootstrap.
+    let myName = 'VaultChat User';
+    try {
+      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+      const stored = await AsyncStorage.getItem('vaultchat_display_name');
+      if (stored) myName = stored;
+    } catch {}
+
+    await roomCall.bootstrapFromExistingPeer({
+      pc:            handoff.pc,
+      localStream:   handoff.localStream,
+      remoteStream:  handoff.remoteStream,
+      peerUserId:    handoff.peerUserId,
+      peerUserName:  '',                 // unknown on this side; tile will pick up from roomCall.participants
+      callId,
+      roomId,
+      myUserId:      _myUserId,
+      myName,
+    });
+  } catch (e) {
+    if (__DEV__) console.warn('callroom:upgrade bootstrap error:', e?.message || e);
+  }
 }
 
 // Convenience for external callers (e.g. ChatRoomScreen if it ever needs to
