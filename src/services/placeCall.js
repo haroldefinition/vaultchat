@@ -28,7 +28,9 @@ import { supabase } from './supabase';
 
 // Deterministic 32-char-ish hash of the two IDs, sorted.
 // Format mimics a uuid so downstream code that assumes "uuid-ish" doesn't choke.
-function hashPair(a, b) {
+// Exported so other screens (NewMessageScreen) can derive the same roomId
+// from the same two userIds and both sides of a chat converge on one room.
+export function hashPair(a, b) {
   const sorted = [String(a || ''), String(b || '')].sort();
   const combined = sorted[0] + '|' + sorted[1];
   let h1 = 0, h2 = 0;

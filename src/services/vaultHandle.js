@@ -1,20 +1,144 @@
+// ============================================================
+//  VaultChat — Vault Handle Service
+//  src/services/vaultHandle.js
+//
+//  User-chosen @handles (e.g. "@love6362") used for discovery.
+//  Stored in profiles.vault_handle (unique, case-insensitive)
+//  plus a device-local copy in AsyncStorage for fast reads.
+//
+//  Normalization: the '@' is cosmetic — it's stripped before
+//  persisting and lookups so callers can pass either form.
+// ============================================================
+
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase }  from './supabase';
+
+const LOCAL_KEY = 'vaultchat_handle';
+
+// Strip the leading '@' and lowercase. Returns null for unusable input.
+function normalize(h) {
+  if (typeof h !== 'string') return null;
+  const t = h.trim().replace(/^@+/, '').toLowerCase();
+  // Keep only a-z, 0-9, underscore. Reject empty/overlong.
+  const cleaned = t.replace(/[^a-z0-9_]/g, '');
+  if (!cleaned || cleaned.length < 3 || cleaned.length > 32) return null;
+  return cleaned;
+}
 
 export async function generateHandle(name) {
-  const base = name ? name.toLowerCase().replace(/[^a-z0-9]/g, '') : 'user';
+  const base   = (name || 'user').toLowerCase().replace(/[^a-z0-9]/g, '') || 'user';
   const suffix = Math.floor(Math.random() * 9000) + 1000;
   return `@${base}${suffix}`;
 }
 
+/**
+ * Read the current user's handle from AsyncStorage (fast, no network).
+ * Returns the value with leading '@' if stored that way, otherwise raw.
+ */
 export async function getMyHandle() {
-  return await AsyncStorage.getItem('vaultchat_handle');
+  try { return await AsyncStorage.getItem(LOCAL_KEY); } catch { return null; }
 }
 
+/**
+ * Persist the handle both locally AND to Supabase profiles.vault_handle
+ * so other users can look us up by it. Normalizes (strips '@') before
+ * writing to the DB; the local copy keeps whatever form the caller passed.
+ *
+ * Returns { ok, reason } — reason = 'taken' | 'invalid' | 'network' | null.
+ */
 export async function saveHandle(handle) {
-  await AsyncStorage.setItem('vaultchat_handle', handle);
+  const norm = normalize(handle);
+  if (!norm) return { ok: false, reason: 'invalid' };
+
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    const myUserId = session?.user?.id;
+    if (!myUserId) {
+      // Not logged in — still cache locally, but flag failure.
+      try { await AsyncStorage.setItem(LOCAL_KEY, `@${norm}`); } catch {}
+      return { ok: false, reason: 'network' };
+    }
+
+    // Attempt to claim. Case-insensitive unique index will reject collisions.
+    const { error } = await supabase
+      .from('profiles')
+      .update({ vault_handle: norm })
+      .eq('id', myUserId);
+
+    if (error) {
+      // 23505 = unique_violation → already taken by someone else.
+      const code = error.code || '';
+      if (code === '23505' || /duplicate key|unique/i.test(error.message || '')) {
+        return { ok: false, reason: 'taken' };
+      }
+      return { ok: false, reason: 'network' };
+    }
+
+    try { await AsyncStorage.setItem(LOCAL_KEY, `@${norm}`); } catch {}
+    return { ok: true, reason: null };
+  } catch {
+    return { ok: false, reason: 'network' };
+  }
 }
 
+/**
+ * Resolve a handle to a profile row. Accepts either '@love6362' or 'love6362'.
+ * Returns { id, vault_handle, display_name, phone } or null if no match.
+ */
 export async function findByHandle(handle) {
-  // In production this would query Supabase
-  return null;
+  const norm = normalize(handle);
+  if (!norm) return null;
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, vault_handle, display_name, phone')
+      .ilike('vault_handle', norm)       // case-insensitive exact match
+      .maybeSingle();
+    if (error) return null;
+    return data || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve a phone number to a profile row. Accepts any common format;
+ * normalizes to '+1…' (US-only for now, matches placeCall.normalizePhone).
+ * Returns { id, vault_handle, display_name, phone } or null.
+ */
+export async function findByPhone(phoneRaw) {
+  if (typeof phoneRaw !== 'string') return null;
+  const trimmed = phoneRaw.trim();
+  if (!trimmed) return null;
+  const e164 = trimmed.startsWith('+')
+    ? trimmed
+    : `+1${trimmed.replace(/\D/g, '')}`;
+  if (e164.length < 8) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, vault_handle, display_name, phone')
+      .eq('phone', e164)
+      .maybeSingle();
+    if (error) return null;
+    return data || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One-call helper: given user input (phone OR @handle), returns the matching
+ * profile row, or null. Decides based on whether the string starts with '@'
+ * or contains only digits/separators.
+ */
+export async function findByHandleOrPhone(input) {
+  if (typeof input !== 'string') return null;
+  const t = input.trim();
+  if (!t) return null;
+  if (t.startsWith('@') || /^[a-z_][a-z0-9_]*$/i.test(t)) {
+    return await findByHandle(t);
+  }
+  return await findByPhone(t);
 }

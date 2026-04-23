@@ -6,7 +6,8 @@ import {
 import { useTheme } from '../services/theme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../services/supabase';
-import { getMyHandle } from '../services/vaultHandle';
+import { getMyHandle, findByHandleOrPhone } from '../services/vaultHandle';
+import { hashPair } from '../services/placeCall';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Location from 'expo-location';
@@ -178,20 +179,71 @@ export default function NewMessageScreen({ navigation, route }) {
   async function startChat() {
     const cleaned = toInput.trim();
     if (!cleaned) { Alert.alert('To:', 'Enter a phone number or @handle.'); return; }
-    const phone   = cleaned.startsWith('@') ? cleaned : cleaned.replace(/\D/g, '');
-    const myPhone = user?.phone?.replace('+1','') || '0000000000';
-    const roomId  = generateRoomId(myPhone, phone);
 
-    // Save chat entry
+    // Must be logged in — we need our own userId to build the rooms row.
+    const myUserId = user?.id;
+    if (!myUserId) {
+      Alert.alert('Not signed in', 'Please sign in again before starting a chat.');
+      return;
+    }
+
+    // Resolve the input (phone OR @handle) against Supabase profiles.
+    const peer = await findByHandleOrPhone(cleaned);
+    if (!peer?.id) {
+      Alert.alert(
+        'User not found',
+        `No VaultChat user matches "${cleaned}". Double-check the @handle or phone number.`,
+      );
+      return;
+    }
+    if (peer.id === myUserId) {
+      Alert.alert('Nice try', 'You can\'t start a chat with yourself.');
+      return;
+    }
+
+    // Deterministic roomId from sorted userIds. placeCall uses the same hash,
+    // so calls and chats in this room agree on the id on both sides.
+    const roomId        = hashPair(myUserId, peer.id);
+    const peerUserId    = peer.id;
+    const peerHandle    = peer.vault_handle ? `@${peer.vault_handle}` : '';
+    const peerDisplay   = selectedName || peer.display_name || peerHandle || peer.phone || 'VaultChat User';
+    const peerPhone     = peer.phone || null;
+
+    // Canonical server-side record: rooms.member_ids drives resolveDirectRecipient.
+    // Upsert so re-opening the same chat doesn't error out.
+    try {
+      await supabase.from('rooms').upsert(
+        {
+          id:         roomId,
+          type:       'direct',
+          member_ids: [myUserId, peerUserId],
+          created_by: myUserId,
+        },
+        { onConflict: 'id' },
+      );
+    } catch (e) {
+      if (__DEV__) console.warn('rooms upsert failed:', e?.message || e);
+      // Non-fatal — chat still opens, but calls may fall back to mock UX until
+      // the row appears. Worth surfacing in dev but don't block the user.
+    }
+
+    // Local AsyncStorage cache for fast chat-list rendering.
     try {
       const raw  = await AsyncStorage.getItem('vaultchat_chats');
       const list = raw ? JSON.parse(raw) : [];
-      if (!list.find(ch => ch.phone === phone)) {
-        list.unshift({ roomId, phone, name: selectedName || phone,
-          handle: cleaned.startsWith('@') ? cleaned : '', photo: null,
+      if (!list.find(ch => ch.roomId === roomId)) {
+        list.unshift({
+          roomId,
+          userId:      peerUserId,        // canonical id going forward
+          phone:       peerPhone,
+          name:        peerDisplay,
+          handle:      peerHandle,
+          photo:       null,
           lastMessage: msg || 'New chat',
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          pinned: false, hideAlerts: false });
+          time:        new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          pinned:      false,
+          hideAlerts:  false,
+        });
         await AsyncStorage.setItem('vaultchat_chats', JSON.stringify(list));
       }
     } catch {}
@@ -234,10 +286,12 @@ export default function NewMessageScreen({ navigation, route }) {
 
     navigation.replace('ChatRoom', {
       roomId,
-      recipientPhone:  phone,
-      recipientName:   selectedName || '',
+      recipientId:     peerUserId,           // canonical — drives call routing
+      recipientPhone:  peerPhone,
+      recipientName:   peerDisplay,
+      recipientHandle: peerHandle,
       recipientPhoto:  null,
-      pendingMessage,  // ChatRoom auto-sends this on mount
+      pendingMessage,                        // ChatRoom auto-sends this on mount
     });
   }
 

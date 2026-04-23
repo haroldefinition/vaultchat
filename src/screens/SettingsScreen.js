@@ -268,7 +268,14 @@ export default function SettingsScreen({ navigation }) {
               />
               <TouchableOpacity style={[st.copyBtn, { backgroundColor: '#5856d6', margin: 8 }]} onPress={async () => {
                 if (!vaultHandle || vaultHandle.length < 2) { Alert.alert('Error', 'Enter a valid handle'); return; }
-                await saveHandle(vaultHandle);
+                const result = await saveHandle(vaultHandle);
+                if (!result?.ok) {
+                  const msg = result?.reason === 'taken'   ? `${vaultHandle} is already taken. Pick another handle.`
+                            : result?.reason === 'invalid' ? 'Handle must be 3–32 characters, letters/numbers/underscore only.'
+                            :                                'Couldn\'t save handle. Check your connection and try again.';
+                  Alert.alert('Handle not saved', msg);
+                  return;
+                }
                 await AsyncStorage.setItem('vaultchat_vault_id', vaultHandle);
                 Alert.alert('Handle Updated! ✓', `Your handle is now ${vaultHandle}`);
               }}>
@@ -351,8 +358,9 @@ export default function SettingsScreen({ navigation }) {
         </View>
 
         {/* TEMPORARY — task #50 verification. Places a real 1:1 call to the
-            other hardcoded test peer, bypassing phone/profile resolution. */}
-        {user && DEV_TEST_PEERS[user.id] && (
+            other hardcoded test peer, bypassing phone/profile resolution.
+            Gated behind __DEV__ so it's stripped from production bundles. */}
+        {__DEV__ && user && DEV_TEST_PEERS[user.id] && (
           <View style={{ marginHorizontal: 16, marginBottom: 12, padding: 14, borderRadius: 12, backgroundColor: '#ff9500', borderWidth: 1, borderColor: '#cc7700' }}>
             <Text style={{ color: '#fff', fontWeight: '700', marginBottom: 4 }}>🔧 Dev: Test Signaling</Text>
             <Text style={{ color: '#fff', fontSize: 11, marginBottom: 2, opacity: 0.9 }}>callPeer state: <Text style={{ fontWeight: '700' }}>{devCallState}</Text></Text>
@@ -399,6 +407,29 @@ export default function SettingsScreen({ navigation }) {
                   }, 800);
                 }}>
                 <Text style={{ color: '#fff', fontWeight: '600', fontSize: 12 }}>🔌 Force Reconnect</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+              <TouchableOpacity
+                style={{ flex: 1, padding: 8, borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.25)', alignItems: 'center' }}
+                onPress={async () => {
+                  Alert.alert(
+                    'Clear local chat cache?',
+                    'Removes cached chat list from this device. Server rooms are unaffected — chats will rehydrate as you re-open them.',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Clear', style: 'destructive', onPress: async () => {
+                          try {
+                            await AsyncStorage.removeItem('vaultchat_chats');
+                            Alert.alert('Cleared', 'Local chat cache wiped. Pull-to-refresh on Chats to reload.');
+                          } catch (e) {
+                            Alert.alert('Failed', String(e?.message || e));
+                          }
+                        } },
+                    ],
+                  );
+                }}>
+                <Text style={{ color: '#fff', fontWeight: '600', fontSize: 12 }}>🗑️ Clear Local Chats</Text>
               </TouchableOpacity>
             </View>
           </View>
