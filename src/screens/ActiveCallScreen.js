@@ -55,15 +55,18 @@ function ParticipantTile({ name, state, accent, isMe }) {
     state === 'disconnected' ? 'Reconnecting…' :
     state === 'failed'       ? 'Lost'  : '';
   const dim = state === 'disconnected' || state === 'failed';
+  // Self tile always shows "You" (name='You' upstream, but guard here too).
+  // Remote tile shows the peer's name, or "Unknown" only if we genuinely
+  // haven't received any name for them yet.
+  const displayName = isMe ? 'You' : (name || 'Unknown');
+  const avatarLetter = isMe ? 'Y' : (name || '?')[0]?.toUpperCase();
 
   return (
     <View style={[tile.wrap, { opacity: dim ? 0.55 : 1 }]}>
       <View style={[tile.avatar, { backgroundColor: accent }]}>
-        <Text style={tile.letter}>{(name || '?')[0]?.toUpperCase()}</Text>
+        <Text style={tile.letter}>{avatarLetter}</Text>
       </View>
-      <Text style={tile.name} numberOfLines={1}>
-        {name || 'Unknown'}{isMe ? ' (you)' : ''}
-      </Text>
+      <Text style={tile.name} numberOfLines={1}>{displayName}</Text>
       {stateLabel ? <Text style={tile.sub}>{stateLabel}</Text> : null}
     </View>
   );
@@ -353,9 +356,17 @@ export default function ActiveCallScreen({ route, navigation }) {
 
       // 1. Tell the existing 1:1 peer to prepare for upgrade (they'll do the
       //    same handoff + bootstrap on their side when callroom:upgrade arrives).
+      //    Include our display name so their tile shows us by name, not "Unknown".
+      let myNameEarly = 'VaultChat User';
+      try {
+        const stored = await AsyncStorage.getItem('vaultchat_display_name');
+        if (stored) myNameEarly = stored;
+      } catch {}
+
       callroomUpgradeNotice({
         callId, roomId,
         fromUserId:   myUserId,
+        fromUserName: myNameEarly,
         targetUserId: peerUserId,
       });
 
@@ -367,12 +378,6 @@ export default function ActiveCallScreen({ route, navigation }) {
       }
 
       // 3. Bootstrap roomCall from the handoff so we stay connected to the existing peer.
-      let myName = 'VaultChat User';
-      try {
-        const stored = await AsyncStorage.getItem('vaultchat_display_name');
-        if (stored) myName = stored;
-      } catch {}
-
       await roomCall.bootstrapFromExistingPeer({
         pc:            handoff.pc,
         localStream:   handoff.localStream,
@@ -382,7 +387,8 @@ export default function ActiveCallScreen({ route, navigation }) {
         callId,
         roomId,
         myUserId,
-        myName,
+        myName:        myNameEarly,
+        creatorId:     myUserId,          // I tapped + Add, so I'm the creator
       });
 
       // 4. Now invite the new person.

@@ -176,6 +176,6 @@ export function callroomEndForEveryone({ callId, roomId, userId }) {
 // Sent by the upgrader (who first tapped "Add Participant") to the
 // existing 1:1 peer — tells them to transfer their callPeer pc into
 // roomCall so the mesh can grow. Routed via targetId → userId-as-room.
-export function callroomUpgradeNotice({ callId, roomId, fromUserId, targetUserId }) {
-  socket?.emit('callroom:upgrade', { callId, roomId, fromUserId, targetUserId });
+export function callroomUpgradeNotice({ callId, roomId, fromUserId, fromUserName, targetUserId }) {
+  socket?.emit('callroom:upgrade', { callId, roomId, fromUserId, fromUserName, targetUserId });
 }

@@ -195,7 +195,7 @@ function _onRoomIncoming(payload) {
 // tile grid will render once roomCall takes over.
 
 async function _onRoomUpgrade(payload) {
-  const { callId, roomId, fromUserId } = payload || {};
+  const { callId, roomId, fromUserId, fromUserName } = payload || {};
   if (!callId || !roomId) return;
 
   const handoff = callPeer.handoffToRoomCall();
@@ -218,11 +218,12 @@ async function _onRoomUpgrade(payload) {
       localStream:   handoff.localStream,
       remoteStream:  handoff.remoteStream,
       peerUserId:    handoff.peerUserId,
-      peerUserName:  '',                 // unknown on this side; tile will pick up from roomCall.participants
+      peerUserName:  fromUserName || '', // the upgrader's display name — unblocks tile label
       callId,
       roomId,
       myUserId:      _myUserId,
       myName,
+      creatorId:     fromUserId,         // the upgrader is the creator (they tapped + Add)
     });
   } catch (e) {
     if (__DEV__) console.warn('callroom:upgrade bootstrap error:', e?.message || e);

@@ -85,6 +85,11 @@ let _creatorId = null;          // who started the conference (for end-for-every
 let _callType = 'voice';        // 'voice' | 'video' (video reserved for later)
 let _localStream = null;        // opened once, reused across all peer connections
 let _peers = new Map();         // userId → peer object (see shape above)
+// Name cache populated from `callroom:participants` (the snapshot the server
+// sends to a newcomer on join). Lets _ensurePeer fall back to a known name
+// when `webrtc:offer` arrives from a peer whose userName we otherwise never
+// carried. Kept separate from _peers so we don't have to pre-create pcs.
+let _participantNames = new Map();
 let _socketBound = false;
 let _listeners = new Set();
 // Staging for an incoming invite before accept() is called — the
@@ -315,10 +320,16 @@ export function inviteParticipant({ userId, userName }) {
  * @param {string}             args.roomId
  * @param {string}             args.myUserId
  * @param {string}             args.myName
+ * @param {string}             [args.creatorId] — explicit creator userId.
+ *   The UPGRADER (the one who tapped + Add) passes their own userId here.
+ *   The RECEIVER of a callroom:upgrade event passes the upgrader's userId
+ *   (the `fromUserId` on the upgrade payload), so they don't mistakenly
+ *   think they're the creator. Defaults to myUserId for back-compat if
+ *   callers omit it.
  */
 export function bootstrapFromExistingPeer({
   pc, localStream, remoteStream, peerUserId, peerUserName,
-  callId, roomId, myUserId, myName,
+  callId, roomId, myUserId, myName, creatorId,
 }) {
   if (_state !== 'idle') throw new Error(`bootstrap from state=${_state}`);
   if (!pc || !localStream) throw new Error('bootstrap: need pc + localStream');
@@ -328,7 +339,7 @@ export function bootstrapFromExistingPeer({
   _roomId = roomId;
   _myUserId = myUserId;
   _myName = myName || '';
-  _creatorId = myUserId; // upgrader becomes creator
+  _creatorId = creatorId || myUserId;
   _callType = 'voice';
   _localStream = localStream;
   _peers = new Map();
@@ -416,6 +427,24 @@ function _onParticipantJoined({ callId, roomId, userId, userName }) {
   _createOfferFor({ userId, userName: userName || '' }).catch(e => {
     if (__DEV__) console.warn('[roomCall] createOfferFor failed:', e?.message || e);
   });
+}
+
+// Server sends this to a newcomer right after they join — it's the snapshot
+// of everyone ALREADY in the room. We cache the names so when the offers
+// eventually roll in from those peers, _ensurePeer picks up the right label
+// instead of falling back to "Unknown".
+function _onParticipantsSnapshot({ callId, roomId, participants }) {
+  if (callId !== _callId || roomId !== _roomId) return;
+  if (!Array.isArray(participants)) return;
+  for (const p of participants) {
+    if (!p?.userId) continue;
+    _participantNames.set(p.userId, p.userName || '');
+    // If we already have a peer entry (e.g. created by an early-arriving
+    // offer), backfill the name.
+    const existing = _peers.get(p.userId);
+    if (existing && !existing.userName && p.userName) existing.userName = p.userName;
+  }
+  emit('state', _snapshot());
 }
 
 function _onParticipantLeft({ callId, roomId, userId }) {
@@ -519,12 +548,17 @@ async function _flushPendingCandidates(peer) {
 
 function _ensurePeer(userId, userName, isInitiator) {
   let peer = _peers.get(userId);
-  if (peer) return peer;
+  if (peer) {
+    // Upgrade the name lazily if we didn't have one before but do now.
+    if (!peer.userName && userName) peer.userName = userName;
+    return peer;
+  }
 
+  const resolvedName = userName || _participantNames.get(userId) || '';
   const pc = new RTCPeerConnection(getRTCConfig());
   peer = {
     userId,
-    userName: userName || '',
+    userName: resolvedName,
     pc,
     remoteStream: null,
     state: 'connecting',
@@ -618,6 +652,7 @@ function _bindSocket() {
   socket.on('webrtc:offer',                _onOffer);
   socket.on('webrtc:answer',               _onAnswer);
   socket.on('webrtc:ice',                  _onIce);
+  socket.on('callroom:participants',       _onParticipantsSnapshot);
   socket.on('callroom:participant-joined', _onParticipantJoined);
   socket.on('callroom:participant-left',   _onParticipantLeft);
   socket.on('callroom:ended',              _onRoomEnded);
@@ -631,6 +666,7 @@ function _unbindSocket() {
     socket.off('webrtc:offer',                _onOffer);
     socket.off('webrtc:answer',               _onAnswer);
     socket.off('webrtc:ice',                  _onIce);
+    socket.off('callroom:participants',       _onParticipantsSnapshot);
     socket.off('callroom:participant-joined', _onParticipantJoined);
     socket.off('callroom:participant-left',   _onParticipantLeft);
     socket.off('callroom:ended',              _onRoomEnded);
@@ -646,6 +682,7 @@ function _cleanup() {
     try { peer.pc?.close(); } catch {}
   }
   _peers = new Map();
+  _participantNames = new Map();
 
   try {
     if (_localStream) for (const t of _localStream.getTracks()) t.stop();
