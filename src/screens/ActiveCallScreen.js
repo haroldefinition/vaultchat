@@ -11,6 +11,7 @@ import AddParticipantModal from '../components/AddParticipantModal';
 import * as callPeer from '../services/callPeer';
 import * as roomCall from '../services/roomCall';
 import { callroomUpgradeNotice } from '../services/socket';
+import { getMyDisplayName } from '../services/vaultHandle';
 import { setEarpieceMode, setSpeakerMode } from '../services/audioSession';
 import netQ from '../services/networkQuality';
 
@@ -254,11 +255,7 @@ export default function ActiveCallScreen({ route, navigation }) {
     //   'answer-conference'   — conference invitee (roomCall.accept, invite staged in callListener)
     (async () => {
       try {
-        let myName = 'VaultChat User';
-        try {
-          const stored = await AsyncStorage.getItem('vaultchat_display_name');
-          if (stored) myName = stored;
-        } catch {}
+        const myName = await getMyDisplayName();
 
         if (mode === 'outgoing') {
           await callPeer.startOutgoing({
@@ -357,11 +354,7 @@ export default function ActiveCallScreen({ route, navigation }) {
       // 1. Tell the existing 1:1 peer to prepare for upgrade (they'll do the
       //    same handoff + bootstrap on their side when callroom:upgrade arrives).
       //    Include our display name so their tile shows us by name, not "Unknown".
-      let myNameEarly = 'VaultChat User';
-      try {
-        const stored = await AsyncStorage.getItem('vaultchat_display_name');
-        if (stored) myNameEarly = stored;
-      } catch {}
+      const myNameEarly = await getMyDisplayName();
 
       callroomUpgradeNotice({
         callId, roomId,

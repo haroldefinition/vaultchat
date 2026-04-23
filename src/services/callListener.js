@@ -21,6 +21,7 @@ import { Platform } from 'react-native';
 import { getSocket } from './socket';
 import * as callPeer from './callPeer';
 import * as roomCall from './roomCall';
+import { getMyDisplayName } from './vaultHandle';
 import {
   setupCallKit,
   displayIncomingCall,
@@ -33,6 +34,24 @@ let _navigationRef = null;
 let _myUserId = null;
 let _unCallKit = null;
 let _pendingInvite = null; // keeps { callId, roomId, callerId, callerName, type } for CallKit answer events
+
+// React Navigation's container ref throws "The 'navigation' object hasn't
+// been initialized yet" if you call navigate() before NavigationContainer
+// has attached + the root navigator has registered. In practice that's
+// only a tiny window at app boot, but socket events can race it. This
+// helper retries up to ~1 second then gives up quietly.
+function _safeNavigate(screen, params, _attempt = 0) {
+  if (!_navigationRef) return;
+  try {
+    if (typeof _navigationRef.isReady === 'function' && !_navigationRef.isReady()) {
+      if (_attempt < 10) setTimeout(() => _safeNavigate(screen, params, _attempt + 1), 100);
+      return;
+    }
+    _navigationRef.navigate(screen, params);
+  } catch (e) {
+    if (__DEV__) console.warn('[callListener] navigate failed:', e?.message || e);
+  }
+}
 
 // Only iOS currently has a working CallKit wrapper in callkit.js.
 // In dev mode we always fall back to the JS IncomingCall screen because
@@ -123,7 +142,7 @@ function _onIncoming(payload) {
     // iOS will hit onAnswer/onEnd via the event listeners wired above.
   } else {
     // Push the in-app ringing screen.
-    _navigationRef?.navigate?.('IncomingCall', {
+    _safeNavigate('IncomingCall', {
       callId, roomId, myUserId: _myUserId,
       callerId, callerName, type,
     });
@@ -131,7 +150,7 @@ function _onIncoming(payload) {
 }
 
 function _navigateToActiveCall({ callId, roomId, callerId, callerName, type, isConference }) {
-  _navigationRef?.navigate?.('ActiveCall', {
+  _safeNavigate('ActiveCall', {
     mode:          isConference ? 'answer-conference' : 'answer',
     callId, roomId, myUserId: _myUserId,
     peerUserId:    callerId,
@@ -174,7 +193,7 @@ function _onRoomIncoming(payload) {
   if (_useCallKit()) {
     displayIncomingCall(callId, inviterId, inviterName || 'VaultChat');
   } else {
-    _navigationRef?.navigate?.('IncomingCall', {
+    _safeNavigate('IncomingCall', {
       callId, roomId, myUserId: _myUserId,
       callerId:      inviterId,
       callerName:    inviterName || 'VaultChat User',
@@ -205,13 +224,9 @@ async function _onRoomUpgrade(payload) {
   }
 
   try {
-    // Stash my display name for the bootstrap.
-    let myName = 'VaultChat User';
-    try {
-      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
-      const stored = await AsyncStorage.getItem('vaultchat_display_name');
-      if (stored) myName = stored;
-    } catch {}
+    // Stash my display name for the bootstrap (falls back to @handle, then
+    // 'VaultChat User' — centralized in vaultHandle.getMyDisplayName).
+    const myName = await getMyDisplayName();
 
     await roomCall.bootstrapFromExistingPeer({
       pc:            handoff.pc,

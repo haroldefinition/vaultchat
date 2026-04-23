@@ -40,6 +40,28 @@ export async function getMyHandle() {
 }
 
 /**
+ * Resolve the best display label for THIS device's user with a graceful
+ * fallback chain, used anywhere we broadcast our identity to peers
+ * (e.g. the `userName` field on callroom:join or callroom:upgrade):
+ *   1. vaultchat_display_name — what the user set on their profile
+ *   2. vaultchat_handle       — their @handle (so peers see "@hjero7" rather
+ *                                than "VaultChat User" when display_name isn't set)
+ *   3. 'VaultChat User'       — last-resort default
+ * Never throws.
+ */
+export async function getMyDisplayName() {
+  try {
+    const name = await AsyncStorage.getItem('vaultchat_display_name');
+    if (name && name.trim()) return name;
+  } catch {}
+  try {
+    const h = await AsyncStorage.getItem(LOCAL_KEY);
+    if (h && h.trim()) return h; // typically stored with leading '@'
+  } catch {}
+  return 'VaultChat User';
+}
+
+/**
  * Persist the handle both locally AND to Supabase profiles.vault_handle
  * so other users can look us up by it. Normalizes (strips '@') before
  * writing to the DB; the local copy keeps whatever form the caller passed.
