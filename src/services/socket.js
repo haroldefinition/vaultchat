@@ -144,3 +144,35 @@ export function broadcastMute(callId, roomId, userId, track) {
 export function broadcastUnmute(callId, roomId, userId, track) {
   socket?.emit('call:unmute', { callId, roomId, userId, track });
 }
+
+// ════════════════════════════════════════════════════════════
+//  CONFERENCE ROOM SIGNALING (multi-party calls, up to 4 peers)
+//
+//  Separate `callroom:*` namespace so these don't collide with
+//  the chat-level `room:join` used for message delivery.
+//  Server (Railway) maintains per-callroom participant sets and
+//  fans out joined/left/ended notifications to members.
+// ════════════════════════════════════════════════════════════
+
+export function callroomJoin({ callId, roomId, userId, userName }) {
+  socket?.emit('callroom:join', { callId, roomId, userId, userName });
+}
+
+export function callroomLeave({ callId, roomId, userId }) {
+  socket?.emit('callroom:leave', { callId, roomId, userId });
+}
+
+export function callroomInvite({ callId, roomId, inviterId, inviterName, targetUserId, type, existingParticipants }) {
+  socket?.emit('callroom:invite', { callId, roomId, inviterId, inviterName, targetUserId, type, existingParticipants });
+}
+
+export function callroomEndForEveryone({ callId, roomId, userId }) {
+  socket?.emit('callroom:end', { callId, roomId, userId });
+}
+
+// Sent by the upgrader (who first tapped "Add Participant") to the
+// existing 1:1 peer — tells them to transfer their callPeer pc into
+// roomCall so the mesh can grow. Routed via targetId → userId-as-room.
+export function callroomUpgradeNotice({ callId, roomId, fromUserId, targetUserId }) {
+  socket?.emit('callroom:upgrade', { callId, roomId, fromUserId, targetUserId });
+}
