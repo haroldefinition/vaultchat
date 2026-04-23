@@ -65,9 +65,15 @@ import {
 import { setupAudioSession, releaseAudioSession } from './audioSession';
 
 // ── Hard cap ─────────────────────────────────────────────────
-// Mesh stays comfortable up to 4 total participants (incl. self).
-// If a 5th tries to join, we decline on their behalf.
-const MAX_PARTICIPANTS = 4;
+// Mesh stays comfortable up to 6 total participants (incl. self) for
+// voice-only calls. At 6 people each client maintains 5 peer connections:
+//   - Upstream: 5x Opus @ ~12 kbps each = ~60 kbps total upstream
+//   - Downstream: 5x Opus @ ~12 kbps each = ~60 kbps total downstream
+//   - CPU: 5 encode + 5 decode tracks — fine on modern mobile
+// Beyond 6 (voice) or at any point for video, mesh starts to strain
+// mobile bandwidth; we'd need an SFU (media server) to go higher.
+// If an (N+1)th tries to join, we decline on their behalf.
+const MAX_PARTICIPANTS = 6;
 
 // ── Internal state ───────────────────────────────────────────
 let _state = 'idle';           // idle | joining | incoming | in-room
