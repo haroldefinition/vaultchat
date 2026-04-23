@@ -181,14 +181,25 @@ export default function App() {
       // Check auth
       try {
         const { supabase } = require('./src/services/supabase');
+        const { publishMyPublicKey } = require('./src/services/keyExchange');
         const { data: { session } } = await supabase.auth.getSession();
-        if (session) { setIsLoggedIn(true); }
-        else {
+        if (session) {
+          setIsLoggedIn(true);
+          // Publish our NaCl public key so peers can encrypt to us.
+          if (session.user?.id) publishMyPublicKey(session.user.id).catch(() => {});
+        } else {
           const stored = await AsyncStorage.getItem('vaultchat_user');
           setIsLoggedIn(!!stored);
+          if (stored) {
+            try {
+              const u = JSON.parse(stored);
+              if (u?.id) publishMyPublicKey(u.id).catch(() => {});
+            } catch {}
+          }
         }
         supabase.auth.onAuthStateChange((_event, session) => {
           setIsLoggedIn(!!session);
+          if (session?.user?.id) publishMyPublicKey(session.user.id).catch(() => {});
         });
       } catch {
         const stored = await AsyncStorage.getItem('vaultchat_user');

@@ -1,128 +1,234 @@
 // ============================================================
-//  VaultChat — Encryption Engine
+//  VaultChat — Encryption Engine (real crypto)
 //  src/crypto/encryption.js
 //
-//  Implements Signal Protocol concepts:
-//  - X25519 key exchange
-//  - AES-256-GCM message encryption
-//  - Double Ratchet key rotation
-//  - Zero knowledge — private keys NEVER leave the device
+//  What this is:
+//    - X25519 key agreement (Curve25519 ECDH) via tweetnacl
+//    - XSalsa20-Poly1305 authenticated encryption (nacl.box)
+//    - Identity keypair generated ONCE per install, private key
+//      never leaves the device (AsyncStorage only)
+//    - Versioned ciphertext envelope: { v: 2, ct, n, spk }
+//
+//  Scope (Phase 1):
+//    - 1:1 DMs only
+//    - Groups and media remain plaintext for now (Phase 2)
+//
+//  Migration note:
+//    - Any legacy "ENC1:"/XOR content is treated as plaintext
+//      on read (best-effort display). New writes use v=2.
 // ============================================================
 
-import * as Crypto  from 'expo-crypto';
+import nacl from 'tweetnacl';
+import naclUtil from 'tweetnacl-util';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const KEY_STORE = 'vaultchat_keys';
+const KEY_STORE   = 'vaultchat_identity_keys_v2';
+const ENVELOPE_V  = 2;
+const ENVELOPE_TAG = 'ENC2:';
 
-// ── Generate a new identity key pair for a new user ──────────
-// Called ONCE when user registers — keys saved on device only
+// ── Identity key management ─────────────────────────────────
+
+/**
+ * Generate a new X25519 identity keypair and persist the private key
+ * to device-local AsyncStorage. Safe to call multiple times — will
+ * overwrite existing keys, so normally call via `ensureIdentityKeys`.
+ */
 export async function generateIdentityKeys() {
-  // In production: use @signalapp/libsignal-client for true X25519
-  // This uses expo-crypto for the prototype — swap for libsignal in production
-  const privateKeyBytes = await Crypto.getRandomBytesAsync(32);
-  const publicKeyBytes  = await Crypto.getRandomBytesAsync(32);
-
-  const privateKey = bufferToHex(privateKeyBytes);
-  const publicKey  = bufferToHex(publicKeyBytes);
-
-  // Store private key ONLY on this device — never sent to server
-  await AsyncStorage.setItem(KEY_STORE, JSON.stringify({ privateKey, publicKey }));
-
-  return { privateKey, publicKey };
+  const kp = nacl.box.keyPair();
+  const publicKey  = naclUtil.encodeBase64(kp.publicKey);
+  const privateKey = naclUtil.encodeBase64(kp.secretKey);
+  await AsyncStorage.setItem(KEY_STORE, JSON.stringify({ publicKey, privateKey }));
+  return { publicKey, privateKey };
 }
 
-// ── Load this device's keys ───────────────────────────────────
+/** Load this device's persisted identity keys (null if never generated). */
 export async function loadIdentityKeys() {
   const stored = await AsyncStorage.getItem(KEY_STORE);
   if (!stored) return null;
-  return JSON.parse(stored);
-}
-
-// ── Encrypt a message before sending ─────────────────────────
-// content = plaintext string the user typed
-// Returns: encrypted hex string — this is all the server ever sees
-export async function encryptMessage(content, recipientPublicKey) {
   try {
-    // Generate a fresh random key for THIS message (Double Ratchet concept)
-    const messageKeyBytes = await Crypto.getRandomBytesAsync(32);
-    const ivBytes         = await Crypto.getRandomBytesAsync(16);
-    const messageKey      = bufferToHex(messageKeyBytes);
-    const iv              = bufferToHex(ivBytes);
+    const parsed = JSON.parse(stored);
+    if (!parsed?.publicKey || !parsed?.privateKey) return null;
+    return parsed;
+  } catch { return null; }
+}
 
-    // XOR-based encryption for prototype (swap for AES-256-GCM with libsignal in production)
-    const encrypted = xorEncrypt(content, messageKey);
+/** Generate keys only if none exist. Call on app boot and at /register. */
+export async function ensureIdentityKeys() {
+  const existing = await loadIdentityKeys();
+  if (existing) return existing;
+  return generateIdentityKeys();
+}
 
-    return {
-      ciphertext: encrypted,
-      iv,
-      // In production: messageKey is encrypted WITH recipient's public key using X25519
-      // For now storing key reference only
-      keyRef: messageKey.slice(0, 8) + '...',
-    };
-  } catch (e) {
-    console.error('Encryption error:', e);
-    return null;
+// ── Message encryption / decryption ─────────────────────────
+
+/**
+ * Encrypt a plaintext UTF-8 string for a specific recipient.
+ *
+ * @param {string} plaintext
+ * @param {string} recipientPublicKeyB64  — recipient's public key (base64)
+ * @returns {string} envelope string: `ENC2:<json>` — store this as message.content
+ */
+export async function encryptMessage(plaintext, recipientPublicKeyB64) {
+  if (plaintext == null) return plaintext;
+  if (!recipientPublicKeyB64 || typeof recipientPublicKeyB64 !== 'string') {
+    throw new Error('encryptMessage: recipient public key required');
   }
+  const me = await ensureIdentityKeys();
+  const nonce     = nacl.randomBytes(nacl.box.nonceLength);
+  const msgBytes  = naclUtil.decodeUTF8(String(plaintext));
+  const recipPk   = naclUtil.decodeBase64(recipientPublicKeyB64);
+  const myPriv    = naclUtil.decodeBase64(me.privateKey);
+  const sealed    = nacl.box(msgBytes, nonce, recipPk, myPriv);
+  const envelope  = {
+    v:   ENVELOPE_V,
+    ct:  naclUtil.encodeBase64(sealed),
+    n:   naclUtil.encodeBase64(nonce),
+    spk: me.publicKey, // sender public key — lets recipient verify + derive shared key
+  };
+  return ENVELOPE_TAG + JSON.stringify(envelope);
 }
 
-// ── Decrypt a received message ────────────────────────────────
-export async function decryptMessage(encryptedPayload, senderPublicKey) {
-  try {
-    const { ciphertext, iv, keyRef } = encryptedPayload;
-    // In production: derive message key using X25519 + Double Ratchet
-    // Prototype: reverse the XOR
-    const keys = await loadIdentityKeys();
-    if (!keys) throw new Error('No local keys found');
-    return xorDecrypt(ciphertext, keys.privateKey);
-  } catch (e) {
-    console.error('Decryption error:', e);
-    return '[Unable to decrypt]';
+/**
+ * Decrypt a message envelope produced by `encryptMessage`.
+ *
+ * @param {string} envelopeString
+ * @returns {string} plaintext
+ * @throws if the envelope is malformed or auth fails
+ */
+export async function decryptMessage(envelopeString) {
+  if (!isEncryptedEnvelope(envelopeString)) {
+    // Not one of ours — treat as plaintext passthrough.
+    return envelopeString;
   }
-}
+  const me = await loadIdentityKeys();
+  if (!me) throw new Error('No local identity keys');
 
-// ── Generate a vanishing photo key ───────────────────────────
-// This key is used ONCE then destroyed — photo becomes unreadable forever
-export async function generateVanishKey() {
-  const keyBytes = await Crypto.getRandomBytesAsync(32);
-  return bufferToHex(keyBytes);
-}
+  const json = envelopeString.slice(ENVELOPE_TAG.length);
+  let env;
+  try { env = JSON.parse(json); }
+  catch { throw new Error('Malformed envelope JSON'); }
 
-// ── Verify a session fingerprint ──────────────────────────────
-// Users can compare this out-of-band to confirm no interception
-export async function generateFingerprint(myPublicKey, theirPublicKey) {
-  const combined = myPublicKey + theirPublicKey;
-  const hash     = await Crypto.digestStringAsync(
-    Crypto.CryptoDigestAlgorithm.SHA256,
-    combined
+  if (env.v !== ENVELOPE_V) throw new Error(`Unsupported envelope version ${env.v}`);
+  if (!env.ct || !env.n || !env.spk) throw new Error('Envelope missing fields');
+
+  const opened = nacl.box.open(
+    naclUtil.decodeBase64(env.ct),
+    naclUtil.decodeBase64(env.n),
+    naclUtil.decodeBase64(env.spk),
+    naclUtil.decodeBase64(me.privateKey),
   );
-  // Format as readable fingerprint blocks
-  return hash.match(/.{1,8}/g).slice(0, 8).join(' ').toUpperCase();
+  if (!opened) throw new Error('Decryption failed (auth / wrong recipient)');
+  return naclUtil.encodeUTF8(opened);
 }
 
-// ── Helpers ───────────────────────────────────────────────────
-function bufferToHex(buffer) {
-  return Array.from(new Uint8Array(buffer))
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('');
+/** Cheap prefix check — no parsing. */
+export function isEncryptedEnvelope(s) {
+  return typeof s === 'string' && s.startsWith(ENVELOPE_TAG);
 }
 
-function xorEncrypt(text, key) {
-  // Simple XOR for prototype — replace with AES-256-GCM in production
-  return Array.from(text)
-    .map((char, i) => (char.charCodeAt(0) ^ key.charCodeAt(i % key.length)).toString(16).padStart(2, '0'))
-    .join('');
+/**
+ * Encrypt a plaintext for BOTH the recipient AND yourself in one go.
+ * Returns two independent ciphertexts so the sender can still read their
+ * own message history back from the server.
+ *
+ *   { content:        ENC2 envelope for recipient — store in messages.content
+ *     metadataSelf: { ct, n, spk } — store in messages.metadata.ct_self
+ *   }
+ *
+ * The "for self" seal is a nacl.box with (myPub, myPriv) — a self-DH that
+ * the opening side inverts with (myPub, myPriv). No new primitive.
+ */
+export async function encryptMessageForPair(plaintext, recipientPublicKeyB64) {
+  const content = await encryptMessage(plaintext, recipientPublicKeyB64);
+  const me = await ensureIdentityKeys();
+  const nonce = nacl.randomBytes(nacl.box.nonceLength);
+  const myPubBytes  = naclUtil.decodeBase64(me.publicKey);
+  const myPrivBytes = naclUtil.decodeBase64(me.privateKey);
+  const sealed = nacl.box(naclUtil.decodeUTF8(String(plaintext)), nonce, myPubBytes, myPrivBytes);
+  const metadataSelf = {
+    v:   ENVELOPE_V,
+    ct:  naclUtil.encodeBase64(sealed),
+    n:   naclUtil.encodeBase64(nonce),
+    spk: me.publicKey,
+  };
+  return { content, metadataSelf };
 }
 
-function xorDecrypt(hex, key) {
-  const bytes = hex.match(/.{2}/g) || [];
-  return bytes
-    .map((byte, i) => String.fromCharCode(parseInt(byte, 16) ^ key.charCodeAt(i % key.length)))
-    .join('');
+/**
+ * Decrypt the "for self" copy produced by `encryptMessageForPair`.
+ * Used when the current device is the sender and is rendering its own history.
+ */
+export async function decryptSelfEnvelope(env) {
+  if (!env || env.v !== ENVELOPE_V || !env.ct || !env.n || !env.spk) {
+    throw new Error('Invalid self envelope');
+  }
+  const me = await loadIdentityKeys();
+  if (!me) throw new Error('No local identity keys');
+  // Self-seal: peer pubkey and our own are the same, so open with our own.
+  const opened = nacl.box.open(
+    naclUtil.decodeBase64(env.ct),
+    naclUtil.decodeBase64(env.n),
+    naclUtil.decodeBase64(me.publicKey),
+    naclUtil.decodeBase64(me.privateKey),
+  );
+  if (!opened) throw new Error('Self-decryption failed');
+  return naclUtil.encodeUTF8(opened);
 }
 
-// ── Key rotation — called after every N messages ─────────────
-export async function rotateKeys() {
-  const newKeys = await generateIdentityKeys();
-  console.log('🔑 Keys rotated — new session started');
-  return newKeys;
+/**
+ * Try-decrypt helper for the receive path. Returns plaintext on success,
+ * the original string on non-envelope input, or a user-visible placeholder
+ * on failure. Never throws.
+ */
+export async function safeDecrypt(envelopeOrPlain) {
+  if (!isEncryptedEnvelope(envelopeOrPlain)) return envelopeOrPlain;
+  try {
+    return await decryptMessage(envelopeOrPlain);
+  } catch (e) {
+    if (__DEV__) console.warn('safeDecrypt failed:', e?.message || e);
+    return '[Can\u2019t decrypt this message on this device]';
+  }
+}
+
+// ── Fingerprint (safety-number style) ──────────────────────
+
+/**
+ * Produce a short comparable fingerprint of the pair of public keys.
+ * Users can read these aloud to verify no MITM. Deterministic.
+ */
+export async function generateFingerprint(myPublicKeyB64, theirPublicKeyB64) {
+  // SHA-512 via nacl.hash (tweetnacl) — avoids pulling in expo-crypto just for this.
+  const a = naclUtil.decodeBase64(myPublicKeyB64);
+  const b = naclUtil.decodeBase64(theirPublicKeyB64);
+  // Canonicalize order so both sides compute the same fingerprint.
+  const [first, second] = compareBytes(a, b) <= 0 ? [a, b] : [b, a];
+  const concat = new Uint8Array(first.length + second.length);
+  concat.set(first, 0); concat.set(second, first.length);
+  const digest = nacl.hash(concat); // 64 bytes
+  const hex = bytesToHex(digest).toUpperCase();
+  // 8 blocks of 4 hex chars each = 32 chars of fingerprint
+  return hex.slice(0, 32).match(/.{4}/g).join(' ');
+}
+
+// ── Vanishing-photo key (single-use symmetric key) ─────────
+// Used elsewhere in the app for once-view media encryption.
+
+export async function generateVanishKey() {
+  return naclUtil.encodeBase64(nacl.randomBytes(32));
+}
+
+// ── Helpers ────────────────────────────────────────────────
+
+function bytesToHex(bytes) {
+  let out = '';
+  for (let i = 0; i < bytes.length; i++) out += bytes[i].toString(16).padStart(2, '0');
+  return out;
+}
+
+function compareBytes(a, b) {
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    if (a[i] !== b[i]) return a[i] - b[i];
+  }
+  return a.length - b.length;
 }

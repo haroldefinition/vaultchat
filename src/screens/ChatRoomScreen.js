@@ -25,6 +25,17 @@ import { subscribeToRoom, subscribeToTyping, broadcastTyping } from '../services
 import { enqueue, flushQueue } from '../services/messageQueue';
 import { markRoomAsRead, markDelivered, receiptIcon } from '../services/readReceipts';
 import { ResolvedPhotoStack, ResolvedVideoCarousel } from '../components/MediaBubbles';
+import {
+  publishMyPublicKey,
+  getPublicKey,
+  resolveDirectRecipient,
+} from '../services/keyExchange';
+import {
+  encryptMessageForPair,
+  decryptMessage,
+  decryptSelfEnvelope,
+  isEncryptedEnvelope,
+} from '../crypto/encryption';
 
 // ── GIFs & Emojis ─────────────────────────────────────────────
 const GIFS = [
@@ -306,6 +317,17 @@ export default function ChatRoomScreen({ route, navigation }) {
   const [contactEditVis, setContactEditVis] = useState(false);
   const [contactData,    setContactData]    = useState(null);
 
+  // ── Encryption state (1:1 DMs only) ───────────────────────────
+  // recipientId + recipientPubKey get resolved on mount from rooms.member_ids.
+  // If either is missing, we fall back to plaintext so the app never breaks.
+  const [recipientId,     setRecipientId]     = useState(null);
+  const [recipientPubKey, setRecipientPubKey] = useState(null);
+  // Plaintext cache keyed by message id — lets the sender's own device render
+  // history without re-hitting the crypto path for already-decrypted rows,
+  // and lets optimistic (tempId) messages carry plaintext through to the
+  // confirmed row once Supabase echoes it back encrypted.
+  const plaintextCacheRef = useRef(new Map());
+
   // Staged media
   const [stagedPhotos, setStagedPhotos] = useState([]);  // { uri, key }
   const [stagedVideos, setStagedVideos] = useState([]);  // { uri }
@@ -323,6 +345,64 @@ export default function ChatRoomScreen({ route, navigation }) {
   const listRef       = useRef(null);
   const pendingAttach = useRef(null);
 
+  // ── Decrypt a single message row for display ──────────────────
+  // Returns a new row with `content` swapped to plaintext if the row was
+  // encrypted by us; leaves the row alone for legacy plaintext rows.
+  async function decryptRow(row) {
+    if (!row || typeof row.content !== 'string') return row;
+    // Plaintext cache hit (e.g., we just sent this — avoid re-decrypting).
+    const cached = plaintextCacheRef.current.get(row.id);
+    if (cached != null) return { ...row, content: cached };
+    if (!isEncryptedEnvelope(row.content)) return row;
+    try {
+      let plaintext;
+      if (row.sender_id && row.sender_id === myId) {
+        // I sent this — try the self-seal first, then fall back to main envelope
+        // (some older sends may not have self-seal metadata).
+        const selfEnv = row.metadata?.ct_self;
+        if (selfEnv) {
+          plaintext = await decryptSelfEnvelope(selfEnv);
+        } else {
+          plaintext = await decryptMessage(row.content);
+        }
+      } else {
+        plaintext = await decryptMessage(row.content);
+      }
+      plaintextCacheRef.current.set(row.id, plaintext);
+      return { ...row, content: plaintext };
+    } catch (e) {
+      if (__DEV__) console.warn('decryptRow failed for', row.id, e?.message);
+      return { ...row, content: '[Can\u2019t decrypt this message on this device]' };
+    }
+  }
+
+  // Decrypt many in parallel. Preserves order.
+  async function decryptRows(rows) {
+    if (!Array.isArray(rows) || !rows.length) return rows;
+    return Promise.all(rows.map(decryptRow));
+  }
+
+  // ── Resolve recipient + publish my pubkey on mount ────────────
+  useEffect(() => {
+    if (!myId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        // Publish our pubkey (best-effort) so the other side can encrypt to us.
+        publishMyPublicKey(myId).catch(() => {});
+        // Find the other member of this room.
+        const otherId = await resolveDirectRecipient(roomId, myId);
+        if (cancelled) return;
+        setRecipientId(otherId);
+        if (otherId) {
+          const pk = await getPublicKey(otherId);
+          if (!cancelled) setRecipientPubKey(pk);
+        }
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [roomId, myId]);
+
   useEffect(() => {
     loadUser();
     fetchMessages();
@@ -334,13 +414,21 @@ export default function ChatRoomScreen({ route, navigation }) {
     const unsubRoom = subscribeToRoom(
       roomId,
       // onInsert: new message arrives instantly
-      (newMsg) => {
+      async (rawMsg) => {
+        const newMsg = await decryptRow(rawMsg);
         setMessages(prev => {
-          // Don't add if we already have it (temp or real)
-          if (prev.find(m => m.id === newMsg.id || m.content === newMsg.content && m.sender_id === newMsg.sender_id)) {
-            // Replace temp with confirmed
+          // Don't add if we already have it (temp or real).
+          // Match by id, or — if the row is one of ours echoing back — by
+          // sender + decrypted content matching the optimistic temp row.
+          const dup = prev.find(m =>
+            m.id === newMsg.id ||
+            (m.sender_id === newMsg.sender_id && m.content === newMsg.content)
+          );
+          if (dup) {
             const updated = prev.map(m =>
-              m.sender_id === newMsg.sender_id && m.content === newMsg.content && String(m.id).startsWith('temp_')
+              m.sender_id === newMsg.sender_id &&
+              m.content === newMsg.content &&
+              String(m.id).startsWith('temp_')
                 ? newMsg : m
             );
             AsyncStorage.setItem(`vaultchat_msgs_${roomId}`, JSON.stringify(updated.filter(m => !String(m.id).startsWith('temp_')))).catch(() => {});
@@ -355,7 +443,8 @@ export default function ChatRoomScreen({ route, navigation }) {
         });
       },
       // onUpdate: message edited or status changed
-      (updatedMsg) => {
+      async (rawMsg) => {
+        const updatedMsg = await decryptRow(rawMsg);
         setMessages(prev => prev.map(m => m.id === updatedMsg.id ? { ...m, ...updatedMsg } : m));
       }
     );
@@ -465,8 +554,10 @@ export default function ChatRoomScreen({ route, navigation }) {
         .order('created_at', { ascending: true });
       if (!error && data && data.length > 0) {
         const real = data.filter(m => m.id && !String(m.id).startsWith('temp_'));
-        setMessages(real);
-        AsyncStorage.setItem(MKEY, JSON.stringify(real)).catch(() => {});
+        // Decrypt in parallel before rendering. Plaintext legacy rows pass through.
+        const decrypted = await decryptRows(real);
+        setMessages(decrypted);
+        AsyncStorage.setItem(MKEY, JSON.stringify(decrypted)).catch(() => {});
         // Load reactions for these messages
         setTimeout(() => {
           const ids = real.map(m => m.id).filter(Boolean);
@@ -498,21 +589,47 @@ export default function ChatRoomScreen({ route, navigation }) {
   async function postMsg(content) {
     const now = new Date().toISOString();
     const tempId = `temp_${Date.now()}`;
+    // Optimistic row uses PLAINTEXT `content` so the sender sees their own
+    // message immediately. We encrypt only the wire payload.
     const newMsg = { id: tempId, room_id: roomId, sender_id: myId, content, created_at: now };
 
     // Optimistic update
     setMessages(prev => [...prev, newMsg]);
     // inverted FlatList — new messages appear at bottom automatically
 
+    // Build the insert payload. If we have the recipient's public key, encrypt.
+    // Otherwise, fall back to plaintext so existing rooms (or partners who
+    // haven't published a key yet) still work.
+    let insertPayload = { room_id: roomId, sender_id: myId, content };
+    if (recipientPubKey) {
+      try {
+        const { content: wireContent, metadataSelf } = await encryptMessageForPair(content, recipientPubKey);
+        insertPayload = {
+          room_id:  roomId,
+          sender_id: myId,
+          content:  wireContent,
+          metadata: { ct_self: metadataSelf, encrypted: true, v: 2 },
+        };
+      } catch (e) {
+        if (__DEV__) console.warn('encrypt failed, sending plaintext:', e?.message);
+      }
+    }
+
     try {
       const { data, error } = await supabase
         .from('messages')
-        .insert({ room_id: roomId, sender_id: myId, content })
+        .insert(insertPayload)
         .select()
         .single();
       if (!error && data) {
+        // Cache the plaintext under the confirmed row id so any future
+        // re-render / realtime echo resolves instantly without re-decrypting.
+        plaintextCacheRef.current.set(data.id, content);
+        // Replace the temp row with the confirmed one, but keep plaintext
+        // `content` in the visible state (not the wire ciphertext).
+        const confirmedForUI = { ...data, content };
         setMessages(prev => {
-          const updated = prev.map(m => m.id === tempId ? data : m);
+          const updated = prev.map(m => m.id === tempId ? confirmedForUI : m);
           AsyncStorage.setItem(`vaultchat_msgs_${roomId}`, JSON.stringify(updated.filter(m => !String(m.id).startsWith('temp_')))).catch(() => {});
           return updated;
         });
@@ -524,11 +641,12 @@ export default function ChatRoomScreen({ route, navigation }) {
         await AsyncStorage.setItem(`vaultchat_msgs_${roomId}`, JSON.stringify([...existing, saved])).catch(() => {});
       }
     } catch {
-      // Network failure — queue for retry
+      // Network failure — queue the ciphertext for retry so the server never
+      // sees plaintext even on delayed delivery.
       await enqueue({
         tempId,
         table: 'messages',
-        payload: { room_id: roomId, sender_id: myId, content },
+        payload: insertPayload,
       });
       const raw = await AsyncStorage.getItem(`vaultchat_msgs_${roomId}`);
       const existing = raw ? JSON.parse(raw) : [];
@@ -562,10 +680,30 @@ export default function ChatRoomScreen({ route, navigation }) {
     const newContent = editText.trim();
     setMessages(prev => prev.map(m => m.id === menuMsg.id ? { ...m, content: newContent, edited: true } : m));
     setEditingMsg(null); setEditText('');
+
+    // Mirror the send path: encrypt the edit if this row was originally encrypted
+    // (or if we have a recipient pubkey). Otherwise fall back to plaintext.
+    let updatePayload = { content: newContent, edited: true };
+    const wasEncrypted = menuMsg?.metadata?.encrypted || isEncryptedEnvelope(menuMsg?.content);
+    if (recipientPubKey && (wasEncrypted || true)) {
+      try {
+        const { content: wireContent, metadataSelf } = await encryptMessageForPair(newContent, recipientPubKey);
+        updatePayload = {
+          content:  wireContent,
+          edited:   true,
+          metadata: { ...(menuMsg?.metadata || {}), ct_self: metadataSelf, encrypted: true, v: 2 },
+        };
+      } catch (e) {
+        if (__DEV__) console.warn('edit encrypt failed, sending plaintext:', e?.message);
+      }
+    }
+
     try {
-      await supabase.from('messages').update({ content: newContent, edited: true }).eq('id', menuMsg.id);
+      await supabase.from('messages').update(updatePayload).eq('id', menuMsg.id);
+      // Refresh plaintext cache for the edited row.
+      plaintextCacheRef.current.set(menuMsg.id, newContent);
     } catch {}
-    // Persist locally
+    // Persist locally (plaintext in state so UI keeps rendering the text)
     try {
       const raw = await AsyncStorage.getItem(`vaultchat_msgs_${roomId}`);
       if (raw) {

@@ -7,6 +7,7 @@ import {
 import { supabase } from '../services/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { saveHandle } from '../services/vaultHandle';
+import { publishMyPublicKey } from '../services/keyExchange';
 
 const LOGO    = require('../../assets/vaultchat-logo.png');
 const SW      = Dimensions.get('window').width;
@@ -175,6 +176,9 @@ export default function RegisterScreen({ route, onLoginCallback }) {
       });
       await saveHandle(`@${clean}`);
       await AsyncStorage.setItem('vaultchat_display_name', clean);
+      // Publish this device's NaCl public key so peers can encrypt to us.
+      // Best-effort — never blocks login.
+      publishMyPublicKey(userId).catch(() => {});
     } catch {}
     setLoading(false);
     onLogin?.();
