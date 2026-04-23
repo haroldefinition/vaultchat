@@ -9,6 +9,7 @@
 //
 // Scope: 1:1 DMs only. Groups + media stay plaintext for Phase 2.
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabase';
 import { ensureIdentityKeys, loadIdentityKeys } from '../crypto/encryption';
 
@@ -16,7 +17,31 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const _pubKeyCache = new Map(); // userId → { pk: string, ts: number }
 
 /**
+ * Read the stored identifier (phone in E.164) from AsyncStorage.
+ * Used as a weak-auth check when we have to publish via the RPC path
+ * (devices without a real Supabase auth session).
+ */
+async function getStoredPhone() {
+  try {
+    const raw = await AsyncStorage.getItem('vaultchat_user');
+    if (!raw) return null;
+    const u = JSON.parse(raw);
+    return typeof u?.phone === 'string' && u.phone ? u.phone : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Generate (if needed) and publish this device's public key to Supabase.
+ *
+ * Two paths:
+ *   1. Direct UPDATE — works when the device has a real Supabase auth session
+ *      (auth.uid() matches profiles.id, RLS `profiles_update_own` allows it).
+ *   2. RPC fallback — `publish_public_key(user_id, phone, public_key)` is
+ *      SECURITY DEFINER and requires the caller's stored phone to match the
+ *      profile row. Covers devices that registered via Railway /register only.
+ *
  * Safe to call on every app launch. No-op if the server already has the
  * same key. Returns `{ publicKey }` on success, `null` on failure.
  */
@@ -34,16 +59,42 @@ export async function publishMyPublicKey(myUserId) {
 
     if (existing?.public_key === publicKey) return { publicKey };
 
-    const { error } = await supabase
+    // Path 1: direct UPDATE (works when auth.uid() == myUserId).
+    // We use `.select('id')` so PostgREST returns affected rows, letting us
+    // distinguish "RLS silently blocked it" (length 0) from "actually wrote".
+    const { data: updated, error } = await supabase
       .from('profiles')
       .update({ public_key: publicKey, updated_at: new Date().toISOString() })
-      .eq('id', myUserId);
+      .eq('id', myUserId)
+      .select('id');
 
-    if (error) {
-      if (__DEV__) console.warn('publishMyPublicKey failed:', error.message);
+    if (!error && Array.isArray(updated) && updated.length > 0) {
+      return { publicKey };
+    }
+    if (__DEV__ && error) {
+      console.warn('publishMyPublicKey direct update warning:', error.message);
+    }
+
+    // Path 2: RPC fallback — phone acts as weak-auth.
+    const phone = await getStoredPhone();
+    if (!phone) {
+      if (__DEV__) console.warn('publishMyPublicKey: no phone stored, cannot use RPC path');
       return null;
     }
-    return { publicKey };
+    const { data: rpcResult, error: rpcError } = await supabase.rpc('publish_public_key', {
+      p_user_id:    myUserId,
+      p_identifier: phone,
+      p_public_key: publicKey,
+    });
+    if (rpcError) {
+      if (__DEV__) console.warn('publishMyPublicKey rpc error:', rpcError.message);
+      return null;
+    }
+    if (rpcResult && rpcResult.ok === true) {
+      return { publicKey };
+    }
+    if (__DEV__) console.warn('publishMyPublicKey rpc rejected:', rpcResult);
+    return null;
   } catch (e) {
     if (__DEV__) console.warn('publishMyPublicKey error:', e?.message || e);
     return null;
