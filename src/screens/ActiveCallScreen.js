@@ -8,6 +8,7 @@ import { useTheme } from '../services/theme';
 import { profileForSignal } from '../services/callQuality';
 import CallQualityChip from '../components/CallQualityChip';
 import AddParticipantModal from '../components/AddParticipantModal';
+import DisperseDots from '../components/DisperseDots';
 import * as callPeer from '../services/callPeer';
 import * as roomCall from '../services/roomCall';
 import { callroomUpgradeNotice } from '../services/socket';
@@ -78,55 +79,6 @@ const cb = StyleSheet.create({
   },
   icon:  { fontSize: 26 },
   label: { fontSize: 12 },
-});
-
-// ── Disperse dots — animated waveform effect around the call avatar ──
-// Renders 7 dots on each side of the avatar, scaling + fading in a
-// continuous traveling-wave pattern. Pulsing mirrors the "ring" feel
-// when the call is connecting, flattens to gentle shimmer when live.
-function DisperseDots({ accent, side = 'right', active = true }) {
-  const DOTS = 7;
-  const anims = useRef(Array.from({ length: DOTS }, () => new Animated.Value(0))).current;
-
-  useEffect(() => {
-    if (!active) { anims.forEach(a => a.setValue(0)); return; }
-    const loops = anims.map((a, i) =>
-      Animated.loop(Animated.sequence([
-        Animated.delay(i * 120),
-        Animated.timing(a, { toValue: 1, duration: 700, useNativeDriver: true }),
-        Animated.timing(a, { toValue: 0, duration: 700, useNativeDriver: true }),
-      ])),
-    );
-    loops.forEach(l => l.start());
-    return () => loops.forEach(l => l.stop());
-  }, [active]);
-
-  return (
-    <View style={[dd.row, side === 'left' ? dd.rowLeft : dd.rowRight]} pointerEvents="none">
-      {anims.map((a, i) => {
-        // Dots further from the avatar: smaller at rest, bigger peak.
-        const distanceIndex = side === 'left' ? (DOTS - 1 - i) : i;
-        const baseSize = 10 - distanceIndex * 0.9;
-        const scale = a.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1.2] });
-        const opacity = a.interpolate({ inputRange: [0, 1], outputRange: [0.15, 0.85] });
-        return (
-          <Animated.View
-            key={i}
-            style={{
-              width: baseSize, height: baseSize, borderRadius: baseSize / 2,
-              marginHorizontal: 4, backgroundColor: accent,
-              opacity, transform: [{ scale }],
-            }}
-          />
-        );
-      })}
-    </View>
-  );
-}
-const dd = StyleSheet.create({
-  row:      { flexDirection: 'row', alignItems: 'center' },
-  rowLeft:  { marginRight: 16, flexDirection: 'row' },
-  rowRight: { marginLeft:  16, flexDirection: 'row' },
 });
 
 // ── Participant tile (for 2x2 conference grid) ────────────────
