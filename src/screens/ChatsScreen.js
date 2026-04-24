@@ -10,6 +10,7 @@ import { useTheme } from '../services/theme';
 import { useUnread } from '../services/unreadBadge';
 import { getMyHandle } from '../services/vaultHandle';
 import { taptic, longPressFeedback } from '../services/haptics';
+import { requestContactsPermission, syncContacts } from '../services/contacts';
 
 const CHATS_KEY = 'vaultchat_chats';
 
@@ -168,8 +169,31 @@ export default function ChatsScreen({ navigation }) {
           onPress={() => { taptic(); navigation.navigate('NewMessage'); }}>
           <Text style={s.emptyBtnTx}>✏️  New Message</Text>
         </TouchableOpacity>
+        {/* Growth CTA — onboard users faster by matching their address
+            book against known VaultChat profiles. Request contacts
+            permission, sync, show a friendly count, then reload the
+            chat list so any discovered friends show up. */}
         <TouchableOpacity
           style={[s.emptyBtnOutline, { borderColor: accent }]}
+          onPress={async () => {
+            taptic();
+            const granted = await requestContactsPermission();
+            if (!granted) {
+              Alert.alert('Permission needed', 'Enable Contacts access in Settings so VaultChat can find friends you already know.');
+              return;
+            }
+            try {
+              const contacts = await syncContacts();
+              Alert.alert('Contacts synced', `${contacts?.length || 0} contacts imported. Anyone already on VaultChat is ready to message.`);
+              loadChats();
+            } catch (e) {
+              Alert.alert('Sync failed', e?.message || 'Please try again in a moment.');
+            }
+          }}>
+          <Text style={[s.emptyBtnOutlineTx, { color: accent }]}>👥  Sync Phone Contacts</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[s.emptyBtnOutline, { borderColor: accent, marginTop: 10 }]}
           onPress={() => { taptic(); navigation.navigate('Contacts'); }}>
           <Text style={[s.emptyBtnOutlineTx, { color: accent }]}>👤  Add a Contact</Text>
         </TouchableOpacity>

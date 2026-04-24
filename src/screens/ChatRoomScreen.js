@@ -22,6 +22,7 @@ import ReactionBar    from '../components/ReactionBar';
 import ReportMessageModal from '../components/ReportMessageModal';
 import { supabase } from '../services/supabase';
 import { placeCall } from '../services/placeCall';
+import { usePresence } from '../services/presence';
 import { subscribeToRoom, subscribeToTyping, broadcastTyping } from '../services/realtimeMessages';
 import { enqueue, flushQueue } from '../services/messageQueue';
 import { markRoomAsRead, markDelivered, receiptIcon } from '../services/readReceipts';
@@ -327,6 +328,12 @@ export default function ChatRoomScreen({ route, navigation }) {
   // recipientId + recipientPubKey get resolved on mount from rooms.member_ids.
   // If either is missing, we fall back to plaintext so the app never breaks.
   const [recipientId,     setRecipientId]     = useState(null);
+
+  // Live presence — subscribes to user:status + polls every 30s for the
+  // recipient's online / last-seen state. Renders 'Online' (green) or
+  // 'Last seen 3h ago' in the header; falls back to the E2E label if
+  // we don't know the recipient yet or they've never been seen.
+  const presence = usePresence(recipientId);
   const [recipientPubKey, setRecipientPubKey] = useState(null);
   // encryptionStatus gates the send button until we know whether we can
   // encrypt to the peer. States:
@@ -1055,7 +1062,16 @@ export default function ChatRoomScreen({ route, navigation }) {
           </View>
           <View style={{ flex: 1 }}>
             <Text style={[s.hName, { color: tx }]}>{contactData?.name || recipientName || recipientPhone || 'Chat'}</Text>
-            <Text style={[s.hSub, { color: sub }]}>🔒 End-to-end encrypted</Text>
+            {/* Presence subtitle: live 'Online' (green) / 'Last seen 3h ago'
+                when we know the peer and have a recent signal. Falls back
+                to the E2E trust line while waiting or if unknown. */}
+            {presence.online ? (
+              <Text style={[s.hSub, { color: '#00ffa3' }]}>● Online</Text>
+            ) : presence.label ? (
+              <Text style={[s.hSub, { color: sub }]}>{presence.label}</Text>
+            ) : (
+              <Text style={[s.hSub, { color: sub }]}>🔒 End-to-end encrypted</Text>
+            )}
           </View>
         </TouchableOpacity>
         <TouchableOpacity onPress={() => { setSearchOpen(v => !v); setSearchQuery(''); }} style={s.callBtn}>
