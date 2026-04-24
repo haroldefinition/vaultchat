@@ -125,6 +125,12 @@ export function declineCall({ callId, roomId, userId, toUserId }) {
 }
 
 export function endCall({ callId, roomId, userId, toUserId }) {
+  if (__DEV__) {
+    try {
+      const stack = (new Error().stack || '').split('\n').slice(2, 10).join('\n');
+      console.log('[socket] endCall emit callId=' + callId + ' userId=' + userId + ' toUserId=' + toUserId + '\n' + stack);
+    } catch {}
+  }
   socket?.emit('call:end', { callId, roomId, userId, toUserId });
 }
 
