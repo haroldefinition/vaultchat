@@ -356,12 +356,27 @@ export default function ActiveCallScreen({ route, navigation }) {
       anim.stop();
       clearInterval(timer.current);
       // If the screen unmounts while we're still in a call, tear it down.
+      // Guard against spurious cleanup firings (e.g. React dev-mode effect
+      // double-invoke, or a fast IncomingCall→ActiveCall swap) by inspecting
+      // the engine's actual state — only send leave/hangup if the engine
+      // is genuinely live. leaveRoom on a non-live roomCall was the source
+      // of the "third-joiner flap" bug in conference calls.
       if (!hungUpRef.current) {
         hungUpRef.current = true;
         if (isConference) {
-          try { roomCall.leaveRoom(); } catch {}
+          try {
+            const snap = roomCall.getState();
+            if (snap?.state === 'in-room') {
+              roomCall.leaveRoom();
+            }
+          } catch {}
         } else {
-          try { callPeer.hangup(); } catch {}
+          try {
+            const snap = callPeer.getState();
+            if (snap?.state && snap.state !== 'idle') {
+              callPeer.hangup();
+            }
+          } catch {}
         }
       }
     };

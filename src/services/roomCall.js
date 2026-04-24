@@ -373,6 +373,17 @@ export function bootstrapFromExistingPeer({
 /** Leave the conference. Others remain connected if ≥2 stay behind. */
 export function leaveRoom() {
   if (_state === 'idle') return;
+  if (__DEV__) {
+    // Dev-only diagnostic: emitting the stack so we can see which caller is
+    // firing leaveRoom. Third-joiner-flap bug (remaining=2 right after join)
+    // only reproduces on real devices + mesh, so we need the trace.
+    try {
+      const stack = new Error().stack || '';
+      // Trim to the relevant frames (after leaveRoom itself)
+      const frames = stack.split('\n').slice(2, 8).join('\n');
+      console.log('[roomCall] leaveRoom called from state=' + _state + ', peers=' + _peers.size + '\n' + frames);
+    } catch {}
+  }
   try {
     if (_callId && _roomId && _myUserId) {
       callroomLeave({ callId: _callId, roomId: _roomId, userId: _myUserId });
@@ -456,11 +467,13 @@ function _onParticipantLeft({ callId, roomId, userId }) {
   emit('peer-left', { userId });
   emit('state', _snapshot());
 
-  // If I'm the only one left in the room, tear down locally too —
-  // no point holding a mic open for an empty room.
-  if (_peers.size === 0) {
-    leaveRoom();
-  }
+  // NOTE: we deliberately do NOT auto-leaveRoom when _peers.size === 0.
+  // That felt tidy ("nobody else here, shut it down") but caused the
+  // third-joiner-flap bug: during early mesh establishment a newcomer's
+  // peer map legitimately cycles through empty as SDP exchange stabilizes,
+  // and a single spurious participant-left from a blipping peer would
+  // yank the newcomer out of their own call. The user's End button is
+  // the only trustworthy signal for "tear it down."
 }
 
 function _onRoomEnded({ callId, roomId, endedBy }) {
