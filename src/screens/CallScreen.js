@@ -321,33 +321,37 @@ export default function CallScreen({ navigation }) {
 
   return (
     <View style={[s.container, { backgroundColor: bg }]}>
-      {/* Header */}
+      {/* Header — two-row layout:
+          Row 1: big "Calls" title + right-aligned action icons (trash, +)
+          Row 2: full-width segmented tab toggle
+          This matches the iOS Phone app and stops the trash + plus from
+          crowding the Voicemail/Keypad tab labels on smaller widths. */}
       <View style={[s.header, { borderBottomColor: border }]}>
-        <Text style={[s.title, { color: accent }]}>Calls</Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <View style={[s.tabToggle, { backgroundColor: card, borderColor: border }]}>
-            <TouchableOpacity style={[s.tabBtn, tab === 'recent'    && { backgroundColor: accent }]} onPress={() => setTab('recent')}>
-              <Text style={[s.tabBtnText, { color: tab === 'recent'    ? '#fff' : sub }]}>Recent</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[s.tabBtn, tab === 'voicemail' && { backgroundColor: accent }]} onPress={() => setTab('voicemail')}>
-              <Text style={[s.tabBtnText, { color: tab === 'voicemail' ? '#fff' : sub }]}>Voicemail</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[s.tabBtn, tab === 'keypad'    && { backgroundColor: accent }]} onPress={() => setTab('keypad')}>
-              <Text style={[s.tabBtnText, { color: tab === 'keypad'    ? '#fff' : sub }]}>Keypad</Text>
+        <View style={s.headerTop}>
+          <Text style={[s.title, { color: accent }]}>Calls</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            {tab === 'recent' && calls.length > 0 && (
+              <TouchableOpacity
+                style={[s.iconBtn, { backgroundColor: '#ff3b3022' }]}
+                onPress={confirmClearAll}
+                accessibilityLabel="Clear all recents">
+                <Text style={{ fontSize: 16 }}>🗑</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity style={[s.iconBtn, { backgroundColor: accent }]} onPress={() => navigation.navigate('NewCall')}>
+              <Text style={s.plusCircleText}>+</Text>
             </TouchableOpacity>
           </View>
-          {/* Clear-all — only visible when on the Recent tab AND there's
-              actually something to clear. Red tint to signal destructive. */}
-          {tab === 'recent' && calls.length > 0 && (
-            <TouchableOpacity
-              style={[s.plusCircleBtn, { backgroundColor: '#ff3b3022' }]}
-              onPress={confirmClearAll}
-              accessibilityLabel="Clear all recents">
-              <Text style={{ fontSize: 16 }}>🗑</Text>
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity style={[s.plusCircleBtn, { backgroundColor: accent }]} onPress={() => navigation.navigate('NewCall')}>
-            <Text style={s.plusCircleText}>+</Text>
+        </View>
+        <View style={[s.tabToggle, { backgroundColor: card, borderColor: border }]}>
+          <TouchableOpacity style={[s.tabBtn, tab === 'recent'    && { backgroundColor: accent }]} onPress={() => setTab('recent')}>
+            <Text style={[s.tabBtnText, { color: tab === 'recent'    ? '#fff' : sub }]}>Recent</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[s.tabBtn, tab === 'voicemail' && { backgroundColor: accent }]} onPress={() => setTab('voicemail')}>
+            <Text style={[s.tabBtnText, { color: tab === 'voicemail' ? '#fff' : sub }]}>Voicemail</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[s.tabBtn, tab === 'keypad'    && { backgroundColor: accent }]} onPress={() => setTab('keypad')}>
+            <Text style={[s.tabBtnText, { color: tab === 'keypad'    ? '#fff' : sub }]}>Keypad</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -545,13 +549,17 @@ export default function CallScreen({ navigation }) {
 
 const s = StyleSheet.create({
   container:        { flex: 1 },
-  header:           { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 60, paddingBottom: 14, borderBottomWidth: 1 },
-  title:            { fontSize: 24, fontWeight: 'bold' },
+  header:           { paddingHorizontal: 20, paddingTop: 60, paddingBottom: 14, borderBottomWidth: StyleSheet.hairlineWidth, gap: 14 },
+  headerTop:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  title:            { fontSize: 28, fontWeight: '800' },
+  iconBtn:          { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   plusCircleBtn:    { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   plusCircleText:   { color: '#000', fontSize: 24, fontWeight: '300', lineHeight: 28 },
-  tabToggle:        { flexDirection: 'row', borderRadius: 20, borderWidth: 1, overflow: 'hidden' },
-  tabBtn:           { paddingHorizontal: 14, paddingVertical: 8 },
-  tabBtnText:       { fontSize: 13, fontWeight: 'bold' },
+  // Segmented control: equal-width flex tabs + rounded pill container.
+  // padding on the container gives the iOS "inset" look around the active segment.
+  tabToggle:        { flexDirection: 'row', borderRadius: 22, borderWidth: 1, padding: 3 },
+  tabBtn:           { flex: 1, paddingVertical: 8, borderRadius: 19, alignItems: 'center' },
+  tabBtnText:       { fontSize: 13, fontWeight: '700' },
   featureBanner:    { margin: 12, padding: 10, borderRadius: 12, borderWidth: 1, alignItems: 'center' },
   featureText:      { fontSize: 11, fontWeight: 'bold', textAlign: 'center' },
   empty:            { alignItems: 'center', justifyContent: 'center', padding: 60 },
