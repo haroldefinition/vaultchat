@@ -1,4 +1,5 @@
 import "react-native-gesture-handler";
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 // VaultChat — App.js
 import React, { useEffect, useState } from 'react';
@@ -241,17 +242,28 @@ export default function App() {
     })();
   }, []);
 
-  if (!ready) return <UnreadProvider><ThemeProvider><SplashScreen /></ThemeProvider></UnreadProvider>;
+  // GestureHandlerRootView wraps all three return paths because
+  // react-native-gesture-handler's Swipeable (used in ChatsScreen's
+  // pin/archive/mark-unread actions) requires it as an ancestor or
+  // gestures aren't recognized and the lib throws a render error.
+  if (!ready) return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <UnreadProvider><ThemeProvider><SplashScreen /></ThemeProvider></UnreadProvider>
+    </GestureHandlerRootView>
+  );
 
   if (isLocked) return (
-    <UnreadProvider>
-    <ThemeProvider>
-      <BiometricLockScreen onUnlock={() => setIsLocked(false)} />
-    </ThemeProvider>
-    </UnreadProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <UnreadProvider>
+      <ThemeProvider>
+        <BiometricLockScreen onUnlock={() => setIsLocked(false)} />
+      </ThemeProvider>
+      </UnreadProvider>
+    </GestureHandlerRootView>
   );
 
   return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
     <UnreadProvider>
     <ThemeProvider>
       <NavigationContainer ref={navigationRef}>
@@ -296,6 +308,7 @@ export default function App() {
         </Stack.Navigator>
       </NavigationContainer>
     </ThemeProvider>
-  </UnreadProvider>
+    </UnreadProvider>
+    </GestureHandlerRootView>
   );
 }
