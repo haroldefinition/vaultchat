@@ -28,7 +28,11 @@ import ChatsScreen         from './src/screens/ChatsScreen';
 import ChatRoomScreen      from './src/screens/ChatRoomScreen';
 import CallScreen          from './src/screens/CallScreen';
 import ActiveCallScreen    from './src/screens/ActiveCallScreen';
-import GroupCallScreen     from './src/screens/GroupCallScreen';
+// NOTE: GroupCallScreen was an early-phase stub with MAX_PARTICIPANTS=8 and
+// no wiring to the real conference engine (roomCall.js). Removed from the
+// navigator in task #98 since nothing navigated to it. The real group-call
+// entry point is task #63 — wire a phone icon in GroupChatScreen to
+// ActiveCallScreen with mode='outgoing-conference' + the group's members.
 import GroupScreen         from './src/screens/GroupScreen';
 import GroupChatScreen     from './src/screens/GroupChatScreen';
 import DiscoverScreen      from './src/screens/DiscoverScreen';
@@ -280,7 +284,7 @@ export default function App() {
               <Stack.Screen name="GroupChat"     component={GroupChatScreen} />
               <Stack.Screen name="ActiveCall"    component={ActiveCallScreen}   options={{ animation:'slide_from_bottom' }} />
               <Stack.Screen name="IncomingCall"  component={IncomingCallScreen} options={{ animation:'slide_from_bottom', gestureEnabled: false }} />
-              <Stack.Screen name="GroupCall"     component={GroupCallScreen}    options={{ animation:'slide_from_bottom' }} />
+              {/* GroupCall stub screen removed — real group-calling wire-up is task #63 */}
               <Stack.Screen name="NewCall"       component={NewCallScreen} />
               <Stack.Screen name="NewMessage"    component={NewMessageScreen} />
               <Stack.Screen name="NewContact"    component={NewContactScreen} />

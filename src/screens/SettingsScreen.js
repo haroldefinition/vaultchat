@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, Alert, Image, TextInput } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, Alert, Image, TextInput, Modal } from 'react-native';
 import { supabase } from '../services/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
@@ -544,13 +544,109 @@ export default function SettingsScreen({ navigation }) {
           <Row icon="🔐" label="Encryption Protocol" value="Signal" />
           <Row icon="📄" label="Privacy Policy"    onPress={() => navigation.navigate('PrivacyPolicy')} />
           <Row icon="📋" label="Terms of Service"  onPress={() => navigation.navigate('TermsOfService')} />
-          <Row icon="⭐" label="Rate the App" onPress={() => Alert.alert('Thank you!', 'App Store rating coming soon.')} />
+          {/* "Rate the App" row hidden until VaultChat is live in the App
+              Store. Re-enable with the real Linking.openURL(`itms-apps://
+              itunes.apple.com/app/idYOUR_APP_ID?action=write-review`)
+              once the app has an App Store ID. */}
         </Section>
 
         <TouchableOpacity style={st.signOutBtn} onPress={signOut}>
           <Text style={st.signOutText}>Sign Out</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      {/* ── PIN entry modal ────────────────────────────────────
+          Shown when the user taps Set Real PIN or Decoy PIN. Enters a
+          6-digit PIN via a numeric keypad, saves it to AsyncStorage under
+          the appropriate key (vaultchat_real_pin or vaultchat_decoy_pin)
+          which BiometricLockScreen already reads to validate entries. */}
+      <Modal visible={pinModal} transparent animationType="fade" onRequestClose={() => setPinModal(false)}>
+        <TouchableOpacity
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center' }}
+          activeOpacity={1}
+          onPress={() => setPinModal(false)}>
+          <TouchableOpacity
+            activeOpacity={1}
+            style={{ width: '85%', borderRadius: 20, backgroundColor: card, borderWidth: 1, borderColor: border, padding: 22, alignItems: 'center' }}>
+            <Text style={{ color: tx, fontSize: 18, fontWeight: '700', marginBottom: 4 }}>
+              {pinType === 'real' ? 'Set Real PIN' : 'Set Decoy PIN'}
+            </Text>
+            <Text style={{ color: sub, fontSize: 12, textAlign: 'center', marginBottom: 16 }}>
+              {pinType === 'real'
+                ? 'Your primary unlock PIN. Required to open the app after backgrounding.'
+                : 'A decoy PIN that unlocks into a hidden/empty chat list — useful if someone coerces you to open the app.'}
+            </Text>
+            {/* 6-dot indicator */}
+            <View style={{ flexDirection: 'row', gap: 14, marginBottom: 20 }}>
+              {[0,1,2,3,4,5].map(i => (
+                <View
+                  key={i}
+                  style={{
+                    width: 16, height: 16, borderRadius: 8,
+                    borderWidth: 2, borderColor: accent,
+                    backgroundColor: pinInput.length > i ? accent : 'transparent',
+                  }}
+                />
+              ))}
+            </View>
+            {/* Numeric keypad */}
+            <View style={{ gap: 10, marginBottom: 14 }}>
+              {[['1','2','3'],['4','5','6'],['7','8','9'],['⌫','0','✓']].map((row, ri) => (
+                <View key={ri} style={{ flexDirection: 'row', gap: 10 }}>
+                  {row.map((d) => {
+                    const isBack = d === '⌫';
+                    const isOk   = d === '✓';
+                    const canSubmit = pinInput.length === 6;
+                    return (
+                      <TouchableOpacity
+                        key={d}
+                        disabled={isOk && !canSubmit}
+                        onPress={async () => {
+                          if (isBack) {
+                            setPinInput(p => p.slice(0, -1));
+                          } else if (isOk) {
+                            if (!canSubmit) return;
+                            const key = pinType === 'real' ? 'vaultchat_real_pin' : 'vaultchat_decoy_pin';
+                            await AsyncStorage.setItem(key, pinInput);
+                            if (pinType === 'real') setRealPin(pinInput);
+                            else                    setDecoyPin(pinInput);
+                            setPinModal(false);
+                            setPinInput('');
+                            Alert.alert('PIN saved', pinType === 'real' ? 'Your real PIN is set.' : 'Your decoy PIN is set.');
+                          } else if (pinInput.length < 6) {
+                            setPinInput(p => p + d);
+                          }
+                        }}
+                        style={{
+                          width: 64, height: 64, borderRadius: 32,
+                          backgroundColor: isOk && canSubmit ? accent : inputBg,
+                          alignItems: 'center', justifyContent: 'center',
+                          opacity: (isOk && !canSubmit) ? 0.35 : 1,
+                        }}>
+                        <Text style={{ color: isOk && canSubmit ? '#fff' : tx, fontSize: 22, fontWeight: '500' }}>{d}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              ))}
+            </View>
+            {/* Clear existing PIN */}
+            {((pinType === 'real' && realPin) || (pinType === 'decoy' && decoyPin)) && (
+              <TouchableOpacity
+                onPress={async () => {
+                  const key = pinType === 'real' ? 'vaultchat_real_pin' : 'vaultchat_decoy_pin';
+                  await AsyncStorage.removeItem(key);
+                  if (pinType === 'real') setRealPin('');
+                  else                    setDecoyPin('');
+                  setPinModal(false);
+                  setPinInput('');
+                }}>
+                <Text style={{ color: '#ff4444', fontSize: 13, fontWeight: '600' }}>Remove PIN</Text>
+              </TouchableOpacity>
+            )}
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }

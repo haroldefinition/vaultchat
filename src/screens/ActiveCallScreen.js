@@ -572,24 +572,24 @@ export default function ActiveCallScreen({ route, navigation }) {
           />
         </View>
         <View style={s.controlRow}>
-          <CallBtn
-            theme={{ tx, sub, inputBg }}
-            icon={isVideo ? '📹' : '🎥'}
-            label="Video"
-            active={isVideo}
-            activeColor={accent}
-            onPress={() => {
-              haptic();
-              if (isVideo) {
-                Alert.alert('Camera flipped');
-              } else {
+          {/* Video button intentionally hidden until task #64 (video calling UI)
+              lands. Once RTCView + camera switching are wired, restore this
+              control — it should toggle camera on/off when already in video,
+              or escalate a voice call into video when tapped from audio. */}
+          {__DEV__ && (
+            <CallBtn
+              theme={{ tx, sub, inputBg }}
+              icon="🎥"
+              label="Video"
+              onPress={() => {
+                haptic();
                 Alert.alert(
-                  'Video calls coming soon',
-                  'Full video is on the roadmap. For now, voice calls are HD-encrypted end-to-end.',
+                  'Video calls — dev preview',
+                  'Full video rendering (RTCView + PIP self-view + camera flip) lands with task #64. Dev button kept here so the layout stays balanced during testing.',
                 );
-              }
-            }}
-          />
+              }}
+            />
+          )}
           <CallBtn
             theme={{ tx, sub, inputBg }}
             icon="+"
