@@ -1151,6 +1151,8 @@ export default function ChatRoomScreen({ route, navigation }) {
             onReply={() => setReplyTo(item)}
             tappedId={tappedId}
             onTap={id => setTappedId(prev => prev === id ? null : id)}
+            reactions={reactions[item.id] || []}
+            onReact={emoji => toggleReaction(item.id, emoji)}
           />
         )}
         ListEmptyComponent={
