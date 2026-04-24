@@ -273,12 +273,14 @@ async function _flushPendingCandidates() {
 }
 
 function _onCallDeclined({ callId }) {
+  if (__DEV__) console.log('[callPeer] call:declined received callId=', callId, 'our=', _callId);
   if (callId !== _callId) return;
   emit('declined', { callId });
   _cleanup();
 }
 
 function _onCallEnded({ callId, endedBy }) {
+  if (__DEV__) console.log('[callPeer] call:ended received callId=', callId, 'endedBy=', endedBy, 'our=', _callId);
   if (callId !== _callId) return;
   emit('ended', { callId, endedBy });
   _cleanup();
@@ -287,6 +289,12 @@ function _onCallEnded({ callId, endedBy }) {
 // ── Controls ────────────────────────────────────────────────
 
 export function hangup() {
+  if (__DEV__) {
+    try {
+      const stack = (new Error().stack || '').split('\n').slice(2, 8).join('\n');
+      console.log('[callPeer] hangup called, state=' + _state + '\n' + stack);
+    } catch {}
+  }
   if (_state === 'idle') return;
   try {
     if (_callId && _roomId && _peerUserId) {
