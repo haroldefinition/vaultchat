@@ -42,8 +42,29 @@ export default function ReactionBar({ reactions, myUserId, onReact, accent, card
 }
 
 const s = StyleSheet.create({
-  row:   { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 4, marginHorizontal: 4 },
-  pill:  { flexDirection: 'row', alignItems: 'center', borderRadius: 14, paddingHorizontal: 8, paddingVertical: 4, gap: 3 },
+  // iMessage-style overlap: the reactions row is pulled UP into the
+  // bubble's bottom edge via a negative marginTop, so the chips sit
+  // on top of the lower corner of the message rather than below it.
+  // The bubble remains fully readable because the chips are small
+  // and anchored to the corner — they only cover a thin strip of
+  // padding at the bottom of the bubble, not the message text.
+  row:   {
+    flexDirection: 'row', flexWrap: 'wrap', gap: 4,
+    marginTop: -14,          // pull into bubble
+    marginHorizontal: 8,
+    marginBottom: 4,         // restores space before the timestamp
+    zIndex: 2,               // float above the bubble
+  },
+  pill:  {
+    flexDirection: 'row', alignItems: 'center',
+    borderRadius: 14,
+    paddingHorizontal: 8, paddingVertical: 4,
+    gap: 3,
+    // Subtle shadow makes the chip feel like it's floating over the bubble.
+    shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 2,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 2,
+  },
   emoji: { fontSize: 16 },
   count: { fontSize: 12, fontWeight: '700' },
 });
