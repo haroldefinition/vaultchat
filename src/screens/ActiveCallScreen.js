@@ -270,6 +270,16 @@ export default function ActiveCallScreen({ route, navigation }) {
 
     // roomCall subscription — drives conference state (participants + creatorId).
     // Runs always; it's a no-op until roomCall.startConference / bootstrap / accept fires.
+    //
+    // Status text mapping: roomCall's own state machine is 'idle' | 'joining' |
+    // 'incoming' | 'in-room' — it has no 'connected' state because 'in-room' just
+    // means "the server acknowledges me as a member." Whether there's an actual
+    // live media leg is a per-peer question. We therefore drive the header
+    // status off the peer-state event: the first time ANY peer reports
+    // state='connected' (ICE established), we flip to "Connected". Before that
+    // we show "Ringing..." for the creator and "Connecting..." for joiners
+    // (already handled by the useState initializer), so the header has a
+    // sensible label throughout the lifecycle.
     const unsubRoom = roomCall.subscribe((event, payload) => {
       if (event === 'state') {
         const snap = roomCall.getState();
@@ -277,12 +287,16 @@ export default function ActiveCallScreen({ route, navigation }) {
           sawActiveStateRef.current = true;
           setIsConference(true);
           if (snap.creatorId) setCreatorId(snap.creatorId);
-          // Map roomCall states → UI status text.
-          if (snap.state === 'connecting') setStatus('Connecting...');
-          else if (snap.state === 'connected') { setStatus('Connected'); anim.stop(); }
-          else if (snap.state === 'ringing')   setStatus('Ringing...');
-          // Refresh participants.
-          setParticipants(roomCall.getParticipants() || []);
+          // If any peer is already at 'connected' by the time we get this
+          // state event (e.g. bootstrapFromExistingPeer handoff path, where
+          // we inherit a pc that's already ICE-connected), promote status
+          // immediately. Otherwise keep whatever the useState initial set.
+          const ps = (roomCall.getParticipants() || []);
+          if (ps.some(p => p.state === 'connected')) {
+            setStatus('Connected');
+            anim.stop();
+          }
+          setParticipants(ps);
         } else if (snap?.state === 'idle' && isConference) {
           // Conference ended.
           if (!hungUpRef.current) {
@@ -290,9 +304,16 @@ export default function ActiveCallScreen({ route, navigation }) {
             navigation.goBack();
           }
         }
+      } else if (event === 'peer-state') {
+        // Per-peer ICE transitioned. The first time any leg hits 'connected'
+        // is our signal that media is flowing → flip header to "Connected".
+        if (payload?.state === 'connected') {
+          setStatus('Connected');
+          anim.stop();
+        }
+        setParticipants(roomCall.getParticipants() || []);
       } else if (
         event === 'peer-joined' ||
-        event === 'peer-state'  ||
         event === 'peer-stream' ||
         event === 'peer-left'
       ) {
