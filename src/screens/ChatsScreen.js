@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   TextInput, Modal, Image, Alert, RefreshControl,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Swipeable } from 'react-native-gesture-handler';
 import ContactEditModal from '../components/ContactEditModal';
 import { useTheme } from '../services/theme';
 import { useUnread } from '../services/unreadBadge';
@@ -24,6 +25,12 @@ export default function ChatsScreen({ navigation }) {
   const [editModalVis, setEditModalVis] = useState(false);
   const [editTarget,   setEditTarget]   = useState(null);
   const [selected,     setSelected]     = useState(null);
+  const [showArchived, setShowArchived] = useState(false);
+
+  // Track the currently-open Swipeable so we can close it when another
+  // row is swiped. Without this, users can end up with multiple rows
+  // stuck in their "open" state and the UI feels broken.
+  const openSwipeRef = useRef(null);
 
   useEffect(() => {
     const unsub = navigation.addListener('focus', () => {
@@ -49,6 +56,53 @@ export default function ChatsScreen({ navigation }) {
     setChats(updated);
     await AsyncStorage.setItem(CHATS_KEY, JSON.stringify(updated));
   }
+
+  // ── Direct-item helpers used by swipe actions ───────────────
+  // Distinct from the modal versions below because swipe actions
+  // need to toggle a specific row without going through `selected`.
+
+  // Identify a chat reliably — some rows have `id`, older ones only
+  // have `roomId`; fall back through both so swipe actions on any
+  // row shape work.
+  function sameChat(a, b) {
+    if (!a || !b) return false;
+    if (a.id && b.id) return a.id === b.id;
+    if (a.roomId && b.roomId) return a.roomId === b.roomId;
+    return false;
+  }
+
+  async function togglePinAt(item) {
+    taptic();
+    const updated = chats
+      .map(c => sameChat(c, item) ? { ...c, pinned: !c.pinned } : c)
+      .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+    await saveChats(updated);
+    openSwipeRef.current?.close?.();
+  }
+
+  async function toggleArchiveAt(item) {
+    taptic();
+    const updated = chats.map(c =>
+      sameChat(c, item) ? { ...c, archived: !c.archived } : c
+    );
+    await saveChats(updated);
+    openSwipeRef.current?.close?.();
+  }
+
+  // "Mark as unread" — distinct from server-driven unread counter.
+  // Sets a local `markedUnread` flag that surfaces a blue dot until
+  // the user opens the chat (at which point ChatRoomScreen's existing
+  // read-receipt path should clear the flag on open).
+  async function toggleUnreadAt(item) {
+    taptic();
+    const updated = chats.map(c =>
+      sameChat(c, item) ? { ...c, markedUnread: !c.markedUnread } : c,
+    );
+    await saveChats(updated);
+    openSwipeRef.current?.close?.();
+  }
+
+  // ── Legacy modal-driven versions (still used by long-press) ──
 
   async function pinChat() {
     const updated = chats
@@ -76,16 +130,20 @@ export default function ChatsScreen({ navigation }) {
     ]);
   }
 
+  const matchesSearch = (c) =>
+    !search ||
+    c.name?.toLowerCase().includes(search.toLowerCase()) ||
+    c.phone?.includes(search);
+
   const visible = chats
-    .filter(c => !c.archived)
-    .filter(c =>
-      !search ||
-      c.name?.toLowerCase().includes(search.toLowerCase()) ||
-      c.phone?.includes(search)
-    )
+    .filter(c => !c.archived && matchesSearch(c))
     .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
 
-  const archived = chats.filter(c => c.archived);
+  const archived = chats.filter(c => c.archived && matchesSearch(c));
+
+  // When the user taps the Archived footer, splice archived chats into
+  // the list so they can still be swiped (un-archive, pin, etc.).
+  const listData = showArchived ? [...visible, ...archived] : visible;
 
   // ── Better empty state ────────────────────────────────────────
   const EmptyState = () => {
@@ -161,8 +219,8 @@ export default function ChatsScreen({ navigation }) {
 
       {/* Chat list */}
       <FlatList
-        data={visible}
-        keyExtractor={(item, i) => item.id || i.toString()}
+        data={listData}
+        keyExtractor={(item, i) => item.id || item.roomId || i.toString()}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -171,65 +229,118 @@ export default function ChatsScreen({ navigation }) {
             colors={[accent]}
           />
         }
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={[s.row, { borderBottomColor: border }, item.pinned && { backgroundColor: card }]}
-            onPress={() => {
-              taptic();
-              navigation.navigate('ChatRoom', {
-                roomId: item.roomId,
-                recipientPhone: item.phone,
-                recipientName: item.name,
-                recipientPhoto: item.photo,
-              });
-            }}
-            onLongPress={() => {
-              longPressFeedback();
-              setSelected(item);
-              setActionModal(true);
-            }}
-            delayLongPress={400}>
-            {/* Avatar */}
+        renderItem={({ item }) => {
+          // Right swipe (reveals from left) → Pin / Unpin
+          const renderLeftActions = () => (
             <TouchableOpacity
-              style={[s.avatar, { backgroundColor: accent }]}
-              onPress={() => navigation.navigate('ContactView', {
-                contact: { name: item.name, phone: item.phone, photo: item.photo, email: item.email || '', notes: item.notes || '' }
-              })}>
-              {item.photo
-                ? <Image source={{ uri: item.photo }} style={s.avatarImg} />
-                : <Text style={s.avatarText}>{(item.name || '?')[0].toUpperCase()}</Text>}
+              style={[s.swipeAction, { backgroundColor: accent }]}
+              onPress={() => togglePinAt(item)}>
+              <Text style={s.swipeIcon}>📌</Text>
+              <Text style={s.swipeLabel}>{item.pinned ? 'Unpin' : 'Pin'}</Text>
             </TouchableOpacity>
-            {/* Info */}
-            <View style={s.info}>
-              <View style={s.nameRow}>
-                {item.pinned && <Text style={s.pin}>📌</Text>}
-                <Text style={[s.name, { color: tx }]}>{item.name || 'Unknown'}</Text>
-              </View>
-              {item.handle
-                ? <Text style={[s.subHandle, { color: '#5856d6' }]}>{item.handle}</Text>
-                : null}
-              <Text style={[s.lastMsg, { color: sub }]} numberOfLines={1}>
-                {item.lastMessage || 'Tap to chat'}
-              </Text>
+          );
+          // Left swipe (reveals from right) → Unread, Archive
+          const renderRightActions = () => (
+            <View style={{ flexDirection: 'row' }}>
+              <TouchableOpacity
+                style={[s.swipeAction, { backgroundColor: '#5856d6' }]}
+                onPress={() => toggleUnreadAt(item)}>
+                <Text style={s.swipeIcon}>●</Text>
+                <Text style={s.swipeLabel}>{item.markedUnread ? 'Read' : 'Unread'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.swipeAction, { backgroundColor: '#8e8e93' }]}
+                onPress={() => toggleArchiveAt(item)}>
+                <Text style={s.swipeIcon}>📦</Text>
+                <Text style={s.swipeLabel}>{item.archived ? 'Unarc' : 'Archive'}</Text>
+              </TouchableOpacity>
             </View>
-            {/* Time + unread dot */}
-            <View style={s.rightCol}>
-              <Text style={[s.time, { color: sub }]}>{item.time || ''}</Text>
-              {item.unread > 0 && (
-                <View style={[s.unreadDot, { backgroundColor: accent }]}>
-                  <Text style={s.unreadTx}>{item.unread > 99 ? '99+' : item.unread}</Text>
+          );
+
+          return (
+            <Swipeable
+              renderLeftActions={renderLeftActions}
+              renderRightActions={renderRightActions}
+              friction={2}
+              leftThreshold={60}
+              rightThreshold={60}
+              onSwipeableWillOpen={(ref) => {
+                if (openSwipeRef.current && openSwipeRef.current !== ref) {
+                  openSwipeRef.current.close();
+                }
+                openSwipeRef.current = ref;
+              }}>
+              <TouchableOpacity
+                style={[s.row, { borderBottomColor: border, backgroundColor: bg }, item.pinned && { backgroundColor: card }]}
+                onPress={async () => {
+                  taptic();
+                  // Opening a chat auto-clears the manually-marked-unread flag.
+                  if (item.markedUnread) {
+                    const updated = chats.map(c =>
+                      sameChat(c, item) ? { ...c, markedUnread: false } : c,
+                    );
+                    saveChats(updated);
+                  }
+                  navigation.navigate('ChatRoom', {
+                    roomId: item.roomId,
+                    recipientPhone: item.phone,
+                    recipientName: item.name,
+                    recipientPhoto: item.photo,
+                  });
+                }}
+                onLongPress={() => {
+                  longPressFeedback();
+                  setSelected(item);
+                  setActionModal(true);
+                }}
+                delayLongPress={400}>
+                {/* Avatar */}
+                <TouchableOpacity
+                  style={[s.avatar, { backgroundColor: accent }]}
+                  onPress={() => navigation.navigate('ContactView', {
+                    contact: { name: item.name, phone: item.phone, photo: item.photo, email: item.email || '', notes: item.notes || '' }
+                  })}>
+                  {item.photo
+                    ? <Image source={{ uri: item.photo }} style={s.avatarImg} />
+                    : <Text style={s.avatarText}>{(item.name || '?')[0].toUpperCase()}</Text>}
+                </TouchableOpacity>
+                {/* Info */}
+                <View style={s.info}>
+                  <View style={s.nameRow}>
+                    {item.pinned && <Text style={s.pin}>📌</Text>}
+                    <Text style={[s.name, { color: tx }]}>{item.name || 'Unknown'}</Text>
+                  </View>
+                  {item.handle
+                    ? <Text style={[s.subHandle, { color: '#5856d6' }]}>{item.handle}</Text>
+                    : null}
+                  <Text style={[s.lastMsg, { color: sub }]} numberOfLines={1}>
+                    {item.lastMessage || 'Tap to chat'}
+                  </Text>
                 </View>
-              )}
-            </View>
-          </TouchableOpacity>
-        )}
+                {/* Time + unread indicator */}
+                <View style={s.rightCol}>
+                  <Text style={[s.time, { color: sub }]}>{item.time || ''}</Text>
+                  {(item.unread > 0 || item.markedUnread) && (
+                    <View style={[s.unreadDot, { backgroundColor: accent }]}>
+                      <Text style={s.unreadTx}>
+                        {item.unread > 99 ? '99+' : (item.unread || '')}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              </TouchableOpacity>
+            </Swipeable>
+          );
+        }}
         ListEmptyComponent={<EmptyState />}
         ListFooterComponent={
           archived.length > 0 ? (
             <TouchableOpacity
               style={[s.archivedRow, { borderTopColor: border }]}
-              onPress={() => Alert.alert('Archived', archived.map(c => c.name || c.phone).join('\n'))}>
-              <Text style={{ color: sub, fontSize: 14 }}>📦 Archived ({archived.length})</Text>
+              onPress={() => { taptic(); setShowArchived(v => !v); }}>
+              <Text style={{ color: sub, fontSize: 14 }}>
+                📦 Archived ({archived.length}) {showArchived ? '▾' : '▸'}
+              </Text>
             </TouchableOpacity>
           ) : null
         }
@@ -245,6 +356,13 @@ export default function ChatsScreen({ navigation }) {
             </TouchableOpacity>
             <TouchableOpacity style={[s.actionBtn, { borderBottomColor: border }]} onPress={archiveChat}>
               <Text style={[s.actionText, { color: tx }]}>{selected?.archived ? '📥 Unarchive' : '📦 Archive'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[s.actionBtn, { borderBottomColor: border }]}
+              onPress={() => { toggleUnreadAt(selected); setActionModal(false); }}>
+              <Text style={[s.actionText, { color: tx }]}>
+                {selected?.markedUnread ? '● Mark as Read' : '● Mark as Unread'}
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.actionBtn} onPress={deleteChat}>
               <Text style={[s.actionText, { color: '#ff4444' }]}>🗑️ Delete Chat</Text>
@@ -315,6 +433,14 @@ const s = StyleSheet.create({
   emptyBtnOutline:  { width: '100%', paddingVertical: 14, borderRadius: 24, alignItems: 'center', borderWidth: 1.5 },
   emptyBtnOutlineTx:{ fontWeight: '700', fontSize: 15 },
   archivedRow:      { padding: 16, alignItems: 'center', borderTopWidth: 1 },
+
+  // Swipe action buttons — reveal behind a chat row when the user
+  // swipes horizontally. Color-coded: accent for pin, indigo for
+  // mark-unread, gray for archive. Fixed-width so multi-button
+  // groups don't resize weirdly when content changes.
+  swipeAction:      { width: 88, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+  swipeIcon:        { fontSize: 22, color: '#fff' },
+  swipeLabel:       { fontSize: 11, color: '#fff', marginTop: 4, fontWeight: '600' },
   overlay:          { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' },
   actionBox:        { width: '80%', borderRadius: 20, borderWidth: 1, overflow: 'hidden' },
   actionTitle:      { fontSize: 16, fontWeight: 'bold', padding: 16, textAlign: 'center' },
