@@ -149,12 +149,14 @@ export async function startOutgoing({ callId, roomId, callerId, callerName, peer
 
 // Triggered when the socket reports the peer accepted — now create + send offer.
 async function _onCallAccepted({ callId }) {
+  if (__DEV__) console.log('[callPeer] call:accepted received callId=', callId, 'our callId=', _callId, 'pc?', !!_pc);
   if (!_pc || callId !== _callId) return;
   try {
     let offer = await _pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: false });
     offer = { ...offer, sdp: enableOpusFec(offer.sdp) };
     await _pc.setLocalDescription(offer);
     sendWebRTCOffer(_peerUserId, offer, _callId);
+    if (__DEV__) console.log('[callPeer] sent webrtc:offer to', _peerUserId);
   } catch (e) {
     if (__DEV__) console.warn('callPeer offer error:', e?.message || e);
     hangup();
@@ -235,10 +237,12 @@ async function _onOffer({ offer, callId, fromUserId }) {
 }
 
 async function _onAnswer({ answer, callId, fromUserId }) {
+  if (__DEV__) console.log('[callPeer] webrtc:answer received from=', fromUserId, 'our peer=', _peerUserId, 'callId match?', callId === _callId);
   if (!_pc || callId !== _callId || fromUserId !== _peerUserId) return;
   try {
     await _pc.setRemoteDescription(new RTCSessionDescription(answer));
     await _flushPendingCandidates();
+    if (__DEV__) console.log('[callPeer] remote description set, awaiting ICE');
   } catch (e) {
     if (__DEV__) console.warn('callPeer onAnswer error:', e?.message || e);
   }
@@ -336,6 +340,7 @@ async function _createPeerConnection() {
 
   _pc.addEventListener('iceconnectionstatechange', () => {
     const s = _pc?.iceConnectionState;
+    if (__DEV__) console.log('[callPeer] iceConnectionState →', s);
     emit('iceState', s);
     if (s === 'connected' || s === 'completed') {
       if (_state !== 'connected') {
