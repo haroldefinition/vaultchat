@@ -40,6 +40,11 @@ export default function DisperseDots({ accent, side = 'right', active = true, sp
     return () => loops.forEach(l => l.stop());
   }, [active, speed]);
 
+  // When the call connects we want the dots GONE, not just dimmed. Returning
+  // null here reserves no layout space — fine because the avatar stage is
+  // a flex row that just collapses neatly when the dots disappear.
+  if (!active) return null;
+
   return (
     <View style={[s.row, side === 'left' ? s.rowLeft : s.rowRight]} pointerEvents="none">
       {anims.map((a, i) => {
@@ -47,7 +52,10 @@ export default function DisperseDots({ accent, side = 'right', active = true, sp
         const distanceIndex = side === 'left' ? (DOTS - 1 - i) : i;
         const baseSize = 10 - distanceIndex * 0.9;
         const scale   = a.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1.2] });
-        const opacity = a.interpolate({ inputRange: [0, 1], outputRange: [0.15, 0.9] });
+        // Higher min opacity (0.35) so the dots are visible even at rest —
+        // fixes the "barely there" look on light-mode backgrounds where the
+        // accent color has low contrast against the canvas.
+        const opacity = a.interpolate({ inputRange: [0, 1], outputRange: [0.35, 1.0] });
         return (
           <Animated.View
             key={i}
