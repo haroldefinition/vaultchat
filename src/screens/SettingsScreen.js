@@ -295,6 +295,23 @@ export default function SettingsScreen({ navigation }) {
             </View>
           </View>
 
+          {/* QR Code shortcut — opens QRContactScreen so the user can show
+              their code to someone standing next to them, or scan one. */}
+          <TouchableOpacity
+            style={{
+              marginTop: 18, flexDirection: 'row', alignItems: 'center',
+              backgroundColor: accent + '18', borderColor: accent + '44', borderWidth: 1,
+              borderRadius: 14, paddingHorizontal: 16, paddingVertical: 14,
+            }}
+            onPress={() => navigation.navigate('QRContact', { initialTab: 'mine' })}>
+            <Text style={{ fontSize: 22 }}>🔲</Text>
+            <View style={{ flex: 1, marginLeft: 14 }}>
+              <Text style={{ color: accent, fontWeight: '700', fontSize: 15 }}>My QR Code</Text>
+              <Text style={{ color: sub, fontSize: 12, marginTop: 2 }}>Let someone add you instantly</Text>
+            </View>
+            <Text style={{ color: accent, fontSize: 18 }}>›</Text>
+          </TouchableOpacity>
+
           <TouchableOpacity style={[st.saveBtn, { backgroundColor: accent }]} onPress={saveProfile}>
             <Text style={st.saveBtnText}>Save Profile</Text>
           </TouchableOpacity>

@@ -48,6 +48,12 @@
           "color": "#0057a8"
         }
       ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "VaultChat uses the camera only to read QR codes when you're exchanging contacts."
+        }
+      ],
       "expo-video",
       "expo-audio"
     ],

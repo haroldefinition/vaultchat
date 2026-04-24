@@ -87,11 +87,21 @@ export default function NewContactScreen({ route, navigation }) {
           <Text style={[s.cancelTx, { color: sub }]}>Cancel</Text>
         </TouchableOpacity>
         <Text style={[s.headerTitle, { color: tx }]}>New Contact</Text>
-        <TouchableOpacity onPress={saveContact} disabled={loading} style={s.headerBtn}>
-          {loading
-            ? <ActivityIndicator color={accent} size="small" />
-            : <Text style={[s.doneTx, { color: accent }]}>Done</Text>}
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          {/* Scan-QR shortcut so the user doesn't have to fill the form
+              for someone standing next to them who can flash their code. */}
+          <TouchableOpacity
+            onPress={() => navigation.navigate('QRContact', { initialTab: 'scan' })}
+            accessibilityLabel="Scan QR code"
+            style={{ paddingHorizontal: 4 }}>
+            <Text style={{ fontSize: 20 }}>📷</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={saveContact} disabled={loading} style={s.headerBtn}>
+            {loading
+              ? <ActivityIndicator color={accent} size="small" />
+              : <Text style={[s.doneTx, { color: accent }]}>Done</Text>}
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView
