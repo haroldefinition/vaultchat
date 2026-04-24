@@ -44,7 +44,9 @@ export function hashPair(a, b) {
   return `${p1}-${p2.slice(0,4)}-4${p2.slice(1,4)}-a${p3.slice(0,3)}-${p1}${p2.slice(0,4)}`;
 }
 
-function makeCallId() {
+// Exported so other surfaces (group calling, etc.) can mint a callId
+// that downstream code (callPeer, roomCall, server signaling) is happy with.
+export function makeCallId() {
   // 128-ish random bits; collision-free for the in-flight window of a single call.
   const rnd = Math.random().toString(16).slice(2, 10)
             + Math.random().toString(16).slice(2, 10);

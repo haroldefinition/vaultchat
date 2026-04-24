@@ -27,6 +27,8 @@ import ContactEditModal from '../components/ContactEditModal';
 import PremiumModal from '../components/PremiumModal';
 import ReportMessageModal from '../components/ReportMessageModal';
 import { ResolvedPhotoStack, ResolvedVideoCarousel } from '../components/MediaBubbles';
+import { makeCallId } from '../services/placeCall';
+import { getMyDisplayName } from '../services/vaultHandle';
 
 // ── Media helpers ─────────────────────────────────────────────
 function SinglePhoto({ msgKey, isLocal, onOpen, onLongPress }) {
@@ -358,6 +360,46 @@ export default function GroupChatScreen({ route, navigation }) {
     const unsub = navigation.addListener('focus', loadGroup);
     return () => { cancelled = true; unsub && unsub(); };
   }, [groupId, navigation]);
+
+  // Kick off a group voice/video call from the group chat header.
+  //
+  // Today group members are stored as bare name strings (see GroupScreen
+  // ManageMembersModal — only a name is persisted), so we can't resolve
+  // them to auth.users.id rows up-front to pre-populate the conference.
+  // Instead we hand the conference engine an empty participant list and
+  // rely on the existing "+ Add Call" modal in ActiveCallScreen to let
+  // the user invite each person by @handle or phone. Once group members
+  // carry userIds (future schema upgrade), pass them here as
+  // initialParticipants and they'll all ring at once.
+  //
+  // roomId uses the groupId directly — same room for chat and call keeps
+  // signaling routes aligned and avoids spinning up a parallel room.
+  async function startGroupCall(type /* 'voice' | 'video' */) {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const myUserId = session?.user?.id || null;
+      if (!myUserId) {
+        Alert.alert('Sign in required', 'Log back in before starting a group call.');
+        return;
+      }
+      const myName = await getMyDisplayName();
+      const callId = makeCallId();
+
+      navigation.navigate('ActiveCall', {
+        mode:        'outgoing-conference',
+        callId,
+        roomId:      groupId,
+        myUserId,
+        myName,
+        recipientName: groupName || 'Group',
+        callType:    type === 'video' ? 'video' : 'voice',
+        isConference: true,
+        initialParticipants: [], // populated via Add Participant during the call
+      });
+    } catch (e) {
+      Alert.alert('Call failed', e?.message || 'Unable to start the group call.');
+    }
+  }
 
   // Leave group — remove from own AsyncStorage groups list. Does not
   // delete the underlying group_messages rows (other members keep the
@@ -791,6 +833,23 @@ export default function GroupChatScreen({ route, navigation }) {
               ? `${groupMembers.length} ${groupMembers.length === 1 ? 'member' : 'members'}`
               : 'Encrypted'}
           </Text>
+        </TouchableOpacity>
+        {/* Group call launchers — voice + video. Tapping either spins up
+            a fresh conference with just me; the existing Add Participant
+            modal on ActiveCallScreen invites everyone else by @handle
+            or phone. Once member records carry userIds we can pre-ring
+            the whole group in one shot via initialParticipants. */}
+        <TouchableOpacity
+          onPress={() => startGroupCall('voice')}
+          accessibilityLabel="Start group voice call"
+          style={{ paddingHorizontal: 6 }}>
+          <Text style={{ fontSize: 20 }}>📞</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => startGroupCall('video')}
+          accessibilityLabel="Start group video call"
+          style={{ paddingHorizontal: 6 }}>
+          <Text style={{ fontSize: 20 }}>📹</Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={leaveGroup} style={{ paddingHorizontal: 8 }}>
           <Text style={{ fontSize: 18, color: sub }}>⋯</Text>
