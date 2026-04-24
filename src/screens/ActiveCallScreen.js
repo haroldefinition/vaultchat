@@ -51,17 +51,22 @@ const qb = StyleSheet.create({
 // ── Circular call control button ─────────────────────────────
 // Mockup-style pill button: circle icon on top, small label below.
 // `active` inverts the background to highlight a pressed/on state
-// (e.g. Mute on, Speaker on, Video on).
-function CallBtn({ icon, label, onPress, active, activeColor }) {
+// (e.g. Mute on, Speaker on, Video on). Theme-aware so it works
+// against both the dark-mode near-black canvas AND the light-mode
+// white canvas — tinted surface + tx-colored icon + sub-colored label.
+function CallBtn({ icon, label, onPress, active, activeColor, theme }) {
+  const bg   = active && activeColor ? activeColor : (theme?.inputBg || 'rgba(255,255,255,0.09)');
+  const ic   = active ? '#ffffff' : (theme?.tx  || '#ffffff');
+  const lbl  = theme?.sub || '#cfd1d6';
   return (
     <View style={cb.col}>
       <TouchableOpacity
         onPress={onPress}
         activeOpacity={0.75}
-        style={[cb.btn, active && activeColor && { backgroundColor: activeColor }]}>
-        <Text style={cb.icon}>{icon}</Text>
+        style={[cb.btn, { backgroundColor: bg }]}>
+        <Text style={[cb.icon, { color: ic }]}>{icon}</Text>
       </TouchableOpacity>
-      <Text style={cb.label}>{label}</Text>
+      <Text style={[cb.label, { color: lbl }]}>{label}</Text>
     </View>
   );
 }
@@ -69,11 +74,10 @@ const cb = StyleSheet.create({
   col:   { alignItems: 'center', gap: 8, width: 80 },
   btn:   {
     width: 68, height: 68, borderRadius: 34,
-    backgroundColor: 'rgba(255,255,255,0.09)',
     alignItems: 'center', justifyContent: 'center',
   },
-  icon:  { fontSize: 26, color: '#fff' },
-  label: { fontSize: 12, color: '#cfd1d6' },
+  icon:  { fontSize: 26 },
+  label: { fontSize: 12 },
 });
 
 // ── Disperse dots — animated waveform effect around the call avatar ──
@@ -498,7 +502,7 @@ export default function ActiveCallScreen({ route, navigation }) {
       {/* E2E Encrypted header — mirrors the mockup's trust signal */}
       {!showGrid && (
         <View style={s.e2eHeader}>
-          <Text style={s.e2eText}>🔒  End-to-end Encrypted</Text>
+          <Text style={[s.e2eText, { color: sub }]}>🔒  End-to-end Encrypted</Text>
         </View>
       )}
 
@@ -565,8 +569,8 @@ export default function ActiveCallScreen({ route, navigation }) {
             </Animated.View>
           </View>
 
-          <Text style={s.name}>{recipientName || 'Unknown'}</Text>
-          <Text style={[s.status, { color: status === 'Connected' ? '#ffffff' : '#8e8e93' }]}>
+          <Text style={[s.name, { color: tx }]}>{recipientName || 'Unknown'}</Text>
+          <Text style={[s.status, { color: status === 'Connected' ? tx : sub }]}>
             {status === 'Connected' ? fmt(duration) : status}
           </Text>
           {onHold && <Text style={{ color: '#ff9500', fontSize: 13, marginTop: 4 }}>⏸ On Hold</Text>}
@@ -579,6 +583,7 @@ export default function ActiveCallScreen({ route, navigation }) {
       <View style={s.controls}>
         <View style={s.controlRow}>
           <CallBtn
+            theme={{ tx, sub, inputBg }}
             icon={muted ? '🔇' : '🎤'}
             label={muted ? 'Unmute' : 'Mute'}
             active={muted}
@@ -594,11 +599,13 @@ export default function ActiveCallScreen({ route, navigation }) {
             }}
           />
           <CallBtn
+            theme={{ tx, sub, inputBg }}
             icon="⌘"
             label="Keypad"
             onPress={() => { haptic(); setKeypadModal(true); }}
           />
           <CallBtn
+            theme={{ tx, sub, inputBg }}
             icon="🔊"
             label="Speaker"
             active={speaker}
@@ -613,6 +620,7 @@ export default function ActiveCallScreen({ route, navigation }) {
         </View>
         <View style={s.controlRow}>
           <CallBtn
+            theme={{ tx, sub, inputBg }}
             icon={isVideo ? '📹' : '🎥'}
             label="Video"
             active={isVideo}
@@ -630,11 +638,13 @@ export default function ActiveCallScreen({ route, navigation }) {
             }}
           />
           <CallBtn
+            theme={{ tx, sub, inputBg }}
             icon="+"
             label="Add Call"
             onPress={() => { haptic(); setAddModal(true); }}
           />
           <CallBtn
+            theme={{ tx, sub, inputBg }}
             icon="⋯"
             label="More"
             onPress={() => { haptic(); setMoreModal(true); }}
@@ -648,7 +658,7 @@ export default function ActiveCallScreen({ route, navigation }) {
         <TouchableOpacity style={s.endBtn} onPress={handleEndPress}>
           <Text style={s.endIcon}>📵</Text>
         </TouchableOpacity>
-        <Text style={s.endLabel}>{endLabel}</Text>
+        <Text style={[s.endLabel, { color: tx }]}>{endLabel}</Text>
       </View>
 
       {/* Add Participant modal (search bar + keypad) */}
@@ -670,7 +680,7 @@ export default function ActiveCallScreen({ route, navigation }) {
         <View style={s.modalBackdrop}>
           <View style={[s.modalSheet, { backgroundColor: card }]}>
             <Text style={[s.modalTitle, { color: tx }]}>Keypad</Text>
-            <Text style={s.dtmfDisplay}>{dtmfBuffer || ' '}</Text>
+            <Text style={[s.dtmfDisplay, { color: tx }]}>{dtmfBuffer || ' '}</Text>
             <View style={{ paddingHorizontal: 20, gap: 10 }}>
               {[
                 ['1','2','3'],
