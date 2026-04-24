@@ -193,8 +193,6 @@ function Bubble({ item, myId, tx, sub, card, accent, bubbleOut, bubbleIn, bubble
         <>
           <ReplyPreview
             content={quoted}
-            label="↩ Reply"
-            labelColor={me ? 'rgba(255,255,255,0.7)' : accent}
             textColor={me ? 'rgba(255,255,255,0.6)' : sub}
             borderColor={me ? 'rgba(255,255,255,0.5)' : accent}
           />
@@ -1177,14 +1175,14 @@ export default function ChatRoomScreen({ route, navigation }) {
         </View>
       )}
 
-      {/* Reply bar */}
+      {/* Reply bar — shows the quoted content only, no "↩ Replying" label
+          per user request. The ✕ button + the left-colored border still
+          make it clear this is a pending-reply state. */}
       {replyTo && (
         <View style={[s.replyBar, { backgroundColor: card, borderTopColor: border }]}>
           <View style={{ flex: 1 }}>
             <ReplyPreview
               content={replyTo.content}
-              label="↩ Replying"
-              labelColor={accent}
               textColor={sub}
               borderColor={accent}
             />
