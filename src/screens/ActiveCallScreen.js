@@ -48,6 +48,83 @@ const qb = StyleSheet.create({
   subLabel: { fontSize: 10, color: 'rgba(255,255,255,0.45)', letterSpacing: 0.3 },
 });
 
+// ── Circular call control button ─────────────────────────────
+// Mockup-style pill button: circle icon on top, small label below.
+// `active` inverts the background to highlight a pressed/on state
+// (e.g. Mute on, Speaker on, Video on).
+function CallBtn({ icon, label, onPress, active, activeColor }) {
+  return (
+    <View style={cb.col}>
+      <TouchableOpacity
+        onPress={onPress}
+        activeOpacity={0.75}
+        style={[cb.btn, active && activeColor && { backgroundColor: activeColor }]}>
+        <Text style={cb.icon}>{icon}</Text>
+      </TouchableOpacity>
+      <Text style={cb.label}>{label}</Text>
+    </View>
+  );
+}
+const cb = StyleSheet.create({
+  col:   { alignItems: 'center', gap: 8, width: 80 },
+  btn:   {
+    width: 68, height: 68, borderRadius: 34,
+    backgroundColor: 'rgba(255,255,255,0.09)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  icon:  { fontSize: 26, color: '#fff' },
+  label: { fontSize: 12, color: '#cfd1d6' },
+});
+
+// ── Disperse dots — animated waveform effect around the call avatar ──
+// Renders 7 dots on each side of the avatar, scaling + fading in a
+// continuous traveling-wave pattern. Pulsing mirrors the "ring" feel
+// when the call is connecting, flattens to gentle shimmer when live.
+function DisperseDots({ accent, side = 'right', active = true }) {
+  const DOTS = 7;
+  const anims = useRef(Array.from({ length: DOTS }, () => new Animated.Value(0))).current;
+
+  useEffect(() => {
+    if (!active) { anims.forEach(a => a.setValue(0)); return; }
+    const loops = anims.map((a, i) =>
+      Animated.loop(Animated.sequence([
+        Animated.delay(i * 120),
+        Animated.timing(a, { toValue: 1, duration: 700, useNativeDriver: true }),
+        Animated.timing(a, { toValue: 0, duration: 700, useNativeDriver: true }),
+      ])),
+    );
+    loops.forEach(l => l.start());
+    return () => loops.forEach(l => l.stop());
+  }, [active]);
+
+  return (
+    <View style={[dd.row, side === 'left' ? dd.rowLeft : dd.rowRight]} pointerEvents="none">
+      {anims.map((a, i) => {
+        // Dots further from the avatar: smaller at rest, bigger peak.
+        const distanceIndex = side === 'left' ? (DOTS - 1 - i) : i;
+        const baseSize = 10 - distanceIndex * 0.9;
+        const scale = a.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1.2] });
+        const opacity = a.interpolate({ inputRange: [0, 1], outputRange: [0.15, 0.85] });
+        return (
+          <Animated.View
+            key={i}
+            style={{
+              width: baseSize, height: baseSize, borderRadius: baseSize / 2,
+              marginHorizontal: 4, backgroundColor: accent,
+              opacity, transform: [{ scale }],
+            }}
+          />
+        );
+      })}
+    </View>
+  );
+}
+const dd = StyleSheet.create({
+  row:      { flexDirection: 'row', alignItems: 'center', position: 'absolute', top: '50%' },
+  rowLeft:  { right: '100%', marginRight: 12, marginTop: -6 },
+  rowRight: { left:  '100%', marginLeft:  12, marginTop: -6 },
+});
+
 // ── Participant tile (for 2x2 conference grid) ────────────────
 function ParticipantTile({ name, state, accent, isMe }) {
   const stateLabel =
@@ -115,8 +192,11 @@ export default function ActiveCallScreen({ route, navigation }) {
   const [muted,     setMuted]     = useState(false);
   const [speaker,   setSpeaker]   = useState(false);
   const [onHold,    setOnHold]    = useState(false);
-  const [quality,   setQuality]   = useState('HD');
-  const [addModal,  setAddModal]  = useState(false);
+  const [quality,      setQuality]      = useState('HD');
+  const [addModal,     setAddModal]     = useState(false);
+  const [keypadModal,  setKeypadModal]  = useState(false);
+  const [moreModal,    setMoreModal]    = useState(false);
+  const [dtmfBuffer,   setDtmfBuffer]   = useState('');
 
   // Conference state — mirrors roomCall.getParticipants().
   // For 1:1 calls we synthesize a 2-entry list from route params so the
@@ -414,21 +494,23 @@ export default function ActiveCallScreen({ route, navigation }) {
   const showGrid = isConference && participants.length >= 1;
 
   return (
-    <View style={[s.container, { backgroundColor: '#07091a' }]}>
-      {/* Quality badge — shows signal + routing info */}
-      {status === 'Connected' && (
-        <View style={s.qualityRow}>
-          <QualityBadge quality={quality} />
-          {(quality === 'Low' || quality === 'Min') && (
-            <Text style={s.ruralNote}>
-              📶 Routing through secure relay for low-signal areas
-            </Text>
-          )}
-          {/* Live adaptation banner — invisible on good networks, shows when
-              Opus bitrate has been adjusted for the current call path. */}
-          <CallQualityChip />
+    <View style={[s.container, { backgroundColor: bg }]}>
+      {/* E2E Encrypted header — mirrors the mockup's trust signal */}
+      {!showGrid && (
+        <View style={s.e2eHeader}>
+          <Text style={s.e2eText}>🔒  End-to-end Encrypted</Text>
         </View>
       )}
+
+      {/* Rural-relay hint — only shown when the call has degraded, stays
+          unobtrusive so it doesn't compete with the main call UI. */}
+      {status === 'Connected' && (quality === 'Low' || quality === 'Min') && (
+        <Text style={s.ruralNote}>
+          📶 Routing through secure relay for low-signal areas
+        </Text>
+      )}
+      {/* Live adaptation banner — invisible on good networks. */}
+      {status === 'Connected' && <CallQualityChip />}
 
       {/* Top section — single-avatar for 1:1, or 2x2 grid for conference */}
       {showGrid ? (
@@ -466,60 +548,97 @@ export default function ActiveCallScreen({ route, navigation }) {
         </View>
       ) : (
         <View style={s.top}>
-          <Text style={s.callTypeLabel}>{isVideo ? '📹 Video Call' : '📞 Voice Call'}</Text>
-          <Animated.View style={[s.avatar, { transform: [{ scale: status === 'Connecting...' ? pulse : 1 }], backgroundColor: accent }]}>
-            <Text style={s.avatarTx}>{(recipientName || '?')[0]?.toUpperCase()}</Text>
-          </Animated.View>
+          <View style={s.avatarStage}>
+            {/* Disperse waveform dots on both sides of the avatar */}
+            <DisperseDots accent={accent} side="left"  active={status !== 'Connected'} />
+            <DisperseDots accent={accent} side="right" active={status !== 'Connected'} />
+            {/* Glow ring + avatar */}
+            <Animated.View
+              style={[
+                s.avatarGlow,
+                { borderColor: accent, shadowColor: accent,
+                  transform: [{ scale: status === 'Connecting...' ? pulse : 1 }] },
+              ]}>
+              <View style={[s.avatar, { backgroundColor: accent }]}>
+                <Text style={s.avatarTx}>{(recipientName || '?')[0]?.toUpperCase()}</Text>
+              </View>
+            </Animated.View>
+          </View>
+
           <Text style={s.name}>{recipientName || 'Unknown'}</Text>
-          <Text style={[s.status, { color: status === 'Connected' ? '#00ffa3' : '#aaa' }]}>
+          <Text style={[s.status, { color: status === 'Connected' ? '#ffffff' : '#8e8e93' }]}>
             {status === 'Connected' ? fmt(duration) : status}
           </Text>
           {onHold && <Text style={{ color: '#ff9500', fontSize: 13, marginTop: 4 }}>⏸ On Hold</Text>}
         </View>
       )}
 
-      {/* Controls */}
+      {/* Controls — 3x2 grid matching the voice call mockup
+          Row 1:  Mute   Keypad   Speaker
+          Row 2:  Video  Add Call More                          */}
       <View style={s.controls}>
         <View style={s.controlRow}>
-          <TouchableOpacity style={[s.btn, muted && { backgroundColor: '#ff4444' }]}
+          <CallBtn
+            icon={muted ? '🔇' : '🎤'}
+            label={muted ? 'Unmute' : 'Mute'}
+            active={muted}
+            activeColor="#ff4444"
             onPress={() => {
               haptic();
               const next = !muted;
               setMuted(next);
-              if (isRealCall) callPeer.setMute(next, myUserId, 'audio');
-            }}>
-            <Text style={s.btnIcon}>{muted ? '🔇' : '🎤'}</Text>
-            <Text style={s.btnLabel}>{muted ? 'Unmute' : 'Mute'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[s.btn, speaker && { backgroundColor: accent }]}
+              if (isRealCall) {
+                if (isConference) roomCall.setMute?.(next, 'audio');
+                else              callPeer.setMute(next, myUserId, 'audio');
+              }
+            }}
+          />
+          <CallBtn
+            icon="⌘"
+            label="Keypad"
+            onPress={() => { haptic(); setKeypadModal(true); }}
+          />
+          <CallBtn
+            icon="🔊"
+            label="Speaker"
+            active={speaker}
+            activeColor={accent}
             onPress={() => {
               haptic();
               const next = !speaker;
               setSpeaker(next);
-              // Switch the audio route at the OS level — earpiece vs speakerphone.
               (next ? setSpeakerMode() : setEarpieceMode()).catch(() => {});
-            }}>
-            <Text style={s.btnIcon}>🔊</Text>
-            <Text style={s.btnLabel}>Speaker</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[s.btn, onHold && { backgroundColor: '#ff9500' }]}
-            onPress={() => { haptic(); setOnHold(v => !v); }}>
-            <Text style={s.btnIcon}>{onHold ? '▶️' : '⏸'}</Text>
-            <Text style={s.btnLabel}>{onHold ? 'Resume' : 'Hold'}</Text>
-          </TouchableOpacity>
+            }}
+          />
         </View>
         <View style={s.controlRow}>
-          {/* + Add opens AddParticipantModal (search bar + keypad) */}
-          <TouchableOpacity style={s.btn} onPress={() => { haptic(); setAddModal(true); }}>
-            <Text style={s.btnIcon}>➕</Text>
-            <Text style={s.btnLabel}>Add</Text>
-          </TouchableOpacity>
-          {isVideo && (
-            <TouchableOpacity style={s.btn} onPress={() => { haptic(); Alert.alert('Camera flipped'); }}>
-              <Text style={s.btnIcon}>🔄</Text>
-              <Text style={s.btnLabel}>Flip</Text>
-            </TouchableOpacity>
-          )}
+          <CallBtn
+            icon={isVideo ? '📹' : '🎥'}
+            label="Video"
+            active={isVideo}
+            activeColor={accent}
+            onPress={() => {
+              haptic();
+              if (isVideo) {
+                Alert.alert('Camera flipped');
+              } else {
+                Alert.alert(
+                  'Video calls coming soon',
+                  'Full video is on the roadmap. For now, voice calls are HD-encrypted end-to-end.',
+                );
+              }
+            }}
+          />
+          <CallBtn
+            icon="+"
+            label="Add Call"
+            onPress={() => { haptic(); setAddModal(true); }}
+          />
+          <CallBtn
+            icon="⋯"
+            label="More"
+            onPress={() => { haptic(); setMoreModal(true); }}
+          />
         </View>
       </View>
 
@@ -540,6 +659,81 @@ export default function ActiveCallScreen({ route, navigation }) {
           theme={{ tx, sub, card, accent, inputBg, border }}
         />
       </Modal>
+
+      {/* In-call DTMF Keypad — for navigating phone menus.
+          WebRTC DTMF isn't emitted over voice-only mesh calls (we'd
+          need sendDTMFTones on an RTP transceiver, which isn't wired
+          up yet), so this surfaces the UI + collects the buffer for
+          future use. Labels are live-updated so the user at least sees
+          which digits they've pressed. */}
+      <Modal visible={keypadModal} animationType="slide" transparent>
+        <View style={s.modalBackdrop}>
+          <View style={[s.modalSheet, { backgroundColor: card }]}>
+            <Text style={[s.modalTitle, { color: tx }]}>Keypad</Text>
+            <Text style={s.dtmfDisplay}>{dtmfBuffer || ' '}</Text>
+            <View style={{ paddingHorizontal: 20, gap: 10 }}>
+              {[
+                ['1','2','3'],
+                ['4','5','6'],
+                ['7','8','9'],
+                ['*','0','#'],
+              ].map((row, ri) => (
+                <View key={ri} style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
+                  {row.map(d => (
+                    <TouchableOpacity
+                      key={d}
+                      onPress={() => { haptic(); setDtmfBuffer(prev => prev + d); }}
+                      style={[s.dtmfKey, { backgroundColor: inputBg }]}>
+                      <Text style={[s.dtmfKeyTx, { color: tx }]}>{d}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ))}
+            </View>
+            <TouchableOpacity
+              onPress={() => { setKeypadModal(false); setDtmfBuffer(''); }}
+              style={s.modalClose}>
+              <Text style={{ color: accent, fontWeight: '700' }}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* "More" action sheet — extra in-call controls that didn't fit in
+          the main 3x2 grid. Currently minimal; add items as features land. */}
+      <Modal visible={moreModal} animationType="fade" transparent>
+        <TouchableOpacity
+          style={s.modalBackdrop}
+          activeOpacity={1}
+          onPress={() => setMoreModal(false)}>
+          <View style={[s.moreSheet, { backgroundColor: card }]}>
+            <TouchableOpacity
+              style={s.moreRow}
+              onPress={() => {
+                setMoreModal(false);
+                haptic();
+                setOnHold(v => !v);
+              }}>
+              <Text style={s.moreIcon}>{onHold ? '▶️' : '⏸'}</Text>
+              <Text style={[s.moreLabel, { color: tx }]}>{onHold ? 'Resume' : 'Hold call'}</Text>
+            </TouchableOpacity>
+            <View style={[s.divider, { backgroundColor: border }]} />
+            <TouchableOpacity
+              style={s.moreRow}
+              onPress={() => { setMoreModal(false); Alert.alert('Call info', `Call ID: ${callId || '—'}\nRoom: ${roomId || '—'}\nQuality: ${quality}`); }}>
+              <Text style={s.moreIcon}>ℹ️</Text>
+              <Text style={[s.moreLabel, { color: tx }]}>Call info</Text>
+            </TouchableOpacity>
+            <View style={[s.divider, { backgroundColor: border }]} />
+            <TouchableOpacity
+              style={s.moreRow}
+              onPress={() => setMoreModal(false)}>
+              <Text style={s.moreIcon}>✕</Text>
+              <Text style={[s.moreLabel, { color: sub }]}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -558,16 +752,49 @@ const s = StyleSheet.create({
   participant:    { width: 64, height: 80, borderRadius: 16, alignItems: 'center', justifyContent: 'center', padding: 8 },
   partTx:         { color: '#fff', fontSize: 22, fontWeight: 'bold' },
   partName:       { color: '#fff', fontSize: 10, marginTop: 4 },
-  controls:       { flex: 1, justifyContent: 'center', paddingHorizontal: 40, gap: 24 },
-  controlRow:     { flexDirection: 'row', justifyContent: 'space-around' },
-  btn:            { width: 72, height: 72, borderRadius: 36, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center', gap: 4 },
-  btnIcon:        { fontSize: 26 },
-  btnLabel:       { color: '#aaa', fontSize: 11 },
+
+  // End-to-end encrypted header
+  e2eHeader:      { paddingTop: 56, paddingBottom: 4, alignItems: 'center' },
+  e2eText:        { color: '#cfd1d6', fontSize: 13, letterSpacing: 0.3 },
+  ruralNote:      { fontSize: 11, color: 'rgba(255,255,255,0.5)', textAlign: 'center', paddingHorizontal: 32, paddingTop: 6 },
+
+  // Avatar stage — glow ring + disperse dots
+  avatarStage:    { marginTop: 40, marginBottom: 22, alignItems: 'center', justifyContent: 'center' },
+  avatarGlow:     {
+    width: 170, height: 170, borderRadius: 85,
+    borderWidth: 3, padding: 4, alignItems: 'center', justifyContent: 'center',
+    shadowOpacity: 0.55, shadowRadius: 30, shadowOffset: { width: 0, height: 0 },
+  },
+  avatar:         { width: 154, height: 154, borderRadius: 77, alignItems: 'center', justifyContent: 'center' },
+
+  // Controls 3x2 grid
+  controls:       { paddingHorizontal: 20, paddingVertical: 28, gap: 28, alignItems: 'center' },
+  controlRow:     { flexDirection: 'row', width: '100%', justifyContent: 'space-around' },
+
+  // End button
   endRow:         { alignItems: 'center', paddingBottom: 40, gap: 6 },
-  endBtn:         { width: 72, height: 72, borderRadius: 36, backgroundColor: '#ff3b30', alignItems: 'center', justifyContent: 'center' },
+  endBtn:         {
+    width: 76, height: 76, borderRadius: 38,
+    backgroundColor: '#ff3b30', alignItems: 'center', justifyContent: 'center',
+  },
   endIcon:        { fontSize: 30 },
   endLabel:       { color: '#fff', fontSize: 13, fontWeight: '600', marginTop: 4 },
+
   // Conference grid
-  gridWrap:       { paddingTop: 20, paddingBottom: 14, paddingHorizontal: 12, alignItems: 'center' },
+  gridWrap:       { paddingTop: 60, paddingBottom: 14, paddingHorizontal: 12, alignItems: 'center' },
   gridRow:        { flexDirection: 'row', width: '100%', justifyContent: 'center', marginBottom: 12, gap: 12 },
+
+  // Modal sheets (Keypad + More)
+  modalBackdrop:  { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
+  modalSheet:     { paddingTop: 22, paddingBottom: 40, borderTopLeftRadius: 20, borderTopRightRadius: 20 },
+  modalTitle:     { textAlign: 'center', fontSize: 16, fontWeight: '700', marginBottom: 14 },
+  modalClose:     { alignSelf: 'center', marginTop: 18, paddingVertical: 8, paddingHorizontal: 28 },
+  dtmfDisplay:    { color: '#fff', fontSize: 26, letterSpacing: 4, textAlign: 'center', minHeight: 34, marginBottom: 18 },
+  dtmfKey:        { width: 76, height: 76, borderRadius: 38, alignItems: 'center', justifyContent: 'center' },
+  dtmfKeyTx:      { fontSize: 28, fontWeight: '400' },
+  moreSheet:      { marginTop: 'auto', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingVertical: 6 },
+  moreRow:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 22, paddingVertical: 18, gap: 14 },
+  moreIcon:       { fontSize: 22 },
+  moreLabel:      { fontSize: 16, fontWeight: '500' },
+  divider:        { height: StyleSheet.hairlineWidth, marginHorizontal: 16 },
 });
