@@ -112,6 +112,35 @@ function Bubble({ item, currentUserId, colors, onFullScreen, onPlay, onLongPress
   const cap   = nlIdx >= 0 ? raw.substring(nlIdx + 1).trim() : '';
   const isMedia = ['GALLERY:', 'LOCALIMG:', 'IMG:', 'VIDEOS:', 'LOCALVID:', 'VID:'].some(p => main.startsWith(p));
 
+  // Split a message body into alternating plain-text and @mention spans
+  // so we can style the mentions in the accent color without
+  // re-parsing at render time every frame.
+  const renderWithMentions = (body, baseColor, mentionColor) => {
+    const out = [];
+    const re  = /@[a-z0-9_]{2,}/gi;
+    let last  = 0;
+    let match;
+    let i     = 0;
+    while ((match = re.exec(body)) !== null) {
+      if (match.index > last) {
+        out.push(<Text key={`t${i}`} style={{ color: baseColor }}>{body.slice(last, match.index)}</Text>);
+      }
+      out.push(
+        <Text
+          key={`m${i}`}
+          style={{ color: mentionColor, fontWeight: '700' }}>
+          {match[0]}
+        </Text>,
+      );
+      last = match.index + match[0].length;
+      i++;
+    }
+    if (last < body.length) {
+      out.push(<Text key={`t${i}`} style={{ color: baseColor }}>{body.slice(last)}</Text>);
+    }
+    return out.length ? out : [<Text key="t0" style={{ color: baseColor }}>{body}</Text>];
+  };
+
   const body = () => {
     if (item.type === 'gif') return <Image source={{ uri: raw }} style={{ width: 200, height: 150, borderRadius: 12 }} resizeMode="contain" />;
     if (main.startsWith('GALLERY:')) return <><ResolvedPhotoStack keys={main.replace('GALLERY:', '').split('|')} onLongPress={onLongPress} />{cap ? <Text style={[g.cap, { color: isMe ? 'rgba(255,255,255,0.9)' : tx }]}>{cap}</Text> : null}</>;
@@ -131,10 +160,10 @@ function Bubble({ item, currentUserId, colors, onFullScreen, onPlay, onLongPress
           textColor={isMe ? 'rgba(255,255,255,0.65)' : sub}
           borderColor={isMe ? 'rgba(255,255,255,0.5)' : accent}
         />
-        <Text style={[g.msgTx, { color: isMe ? '#fff' : tx }]}>{raw}</Text>
+        <Text style={g.msgTx}>{renderWithMentions(raw, isMe ? '#fff' : tx, isMe ? '#ffe27a' : accent)}</Text>
       </>
     );
-    return <Text style={[g.msgTx, { color: isMe ? '#fff' : tx }]}>{raw}</Text>;
+    return <Text style={g.msgTx}>{renderWithMentions(raw, isMe ? '#fff' : tx, isMe ? '#ffe27a' : accent)}</Text>;
   };
   const showFull = tappedId === item.id;
   const fullTimeStr = (() => {
@@ -179,9 +208,24 @@ function Bubble({ item, currentUserId, colors, onFullScreen, onPlay, onLongPress
 
 // ── Main screen ───────────────────────────────────────────────
 export default function GroupChatScreen({ route, navigation }) {
-  const { groupId, groupName } = route.params || {};
+  const { groupId, groupName: initialGroupName } = route.params || {};
   const colors = useTheme();
   const { bg, card, tx, sub, border, inputBg, accent } = colors;
+
+  // ── Group identity (#75) — loaded from AsyncStorage on mount ─
+  // Keep these in state so live edits (name/photo/description via the
+  // info modal) re-render the header immediately without a round-trip.
+  const [groupName,    setGroupName]    = useState(initialGroupName || 'Group');
+  const [groupPhoto,   setGroupPhoto]   = useState(null);
+  const [groupDesc,    setGroupDesc]    = useState('');
+  const [groupMembers, setGroupMembers] = useState([]); // array of member descriptors
+
+  // ── @mentions (#80) ─────────────────────────────────────────
+  // Detect when the user is mid-@-mention in the composer so we can
+  // pop up an autocomplete list of group members. `mentionQuery` holds
+  // whatever's between the '@' and the cursor/space — e.g. typing
+  // 'hey @al' sets mentionQuery='al'. null means no mention in progress.
+  const [mentionQuery, setMentionQuery] = useState(null);
 
   const [messages,      setMessages]      = useState([]);
   const [inputText,     setInputText]     = useState('');
@@ -291,6 +335,56 @@ export default function GroupChatScreen({ route, navigation }) {
       setTimeout(() => handleAttach(t), 700);
     }
   }, [attachModal]);
+
+  // Load the group's stored identity (name/photo/desc/members) on mount
+  // and whenever a focus event tells us the user may have edited it in
+  // another screen. AsyncStorage is the source of truth for groups today.
+  useEffect(() => {
+    let cancelled = false;
+    async function loadGroup() {
+      try {
+        const raw = await AsyncStorage.getItem('vaultchat_groups');
+        if (!raw) return;
+        const gs = JSON.parse(raw);
+        const g = gs.find(x => x.id === groupId);
+        if (!g || cancelled) return;
+        setGroupName(g.name || initialGroupName || 'Group');
+        setGroupPhoto(g.photo || null);
+        setGroupDesc(g.desc || '');
+        setGroupMembers(Array.isArray(g.members) ? g.members : []);
+      } catch {}
+    }
+    loadGroup();
+    const unsub = navigation.addListener('focus', loadGroup);
+    return () => { cancelled = true; unsub && unsub(); };
+  }, [groupId, navigation]);
+
+  // Leave group — remove from own AsyncStorage groups list. Does not
+  // delete the underlying group_messages rows (other members keep the
+  // group intact); just drops this device's reference to it.
+  async function leaveGroup() {
+    Alert.alert(
+      'Leave group',
+      `You will stop receiving messages from "${groupName}". Continue?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Leave',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const raw = await AsyncStorage.getItem('vaultchat_groups');
+              if (raw) {
+                const filtered = JSON.parse(raw).filter(g => g.id !== groupId);
+                await AsyncStorage.setItem('vaultchat_groups', JSON.stringify(filtered));
+              }
+            } catch {}
+            navigation.goBack();
+          },
+        },
+      ],
+    );
+  }
 
   async function initUser() {
     try {
@@ -683,14 +777,24 @@ export default function GroupChatScreen({ route, navigation }) {
         <TouchableOpacity onPress={() => navigation.goBack()} style={{ padding: 4 }}>
           <Text style={[g.backTx, { color: accent }]}>‹</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[g.groupAvatar, { backgroundColor: (accent || '#6C63FF') + '22' }]}
+        <TouchableOpacity
+          style={[g.groupAvatar, { backgroundColor: (accent || '#6C63FF') + '22', overflow: 'hidden' }]}
           onPress={() => setInfoEditModal(true)}>
-          <Text style={{ fontSize: 18 }}>👥</Text>
+          {groupPhoto
+            ? <Image source={{ uri: groupPhoto }} style={{ width: '100%', height: '100%' }} />
+            : <Text style={{ fontSize: 18 }}>👥</Text>}
         </TouchableOpacity>
-        <View style={{ flex: 1 }}>
-          <Text style={[g.hName, { color: tx }]}>{groupName || 'Group'}</Text>
-          <Text style={[g.hSub, { color: accent }]}>🔒 Encrypted</Text>
-        </View>
+        <TouchableOpacity style={{ flex: 1 }} onPress={() => setInfoEditModal(true)}>
+          <Text style={[g.hName, { color: tx }]} numberOfLines={1}>{groupName || 'Group'}</Text>
+          <Text style={[g.hSub, { color: sub }]}>
+            🔒  {groupMembers.length > 0
+              ? `${groupMembers.length} ${groupMembers.length === 1 ? 'member' : 'members'}`
+              : 'Encrypted'}
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={leaveGroup} style={{ paddingHorizontal: 8 }}>
+          <Text style={{ fontSize: 18, color: sub }}>⋯</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Pinned message banner — tap to scroll to it, long-press or ✕ to unpin */}
@@ -814,6 +918,50 @@ export default function GroupChatScreen({ route, navigation }) {
             </View>
           )}
 
+          {/* @mentions autocomplete — floats above the composer while the
+              user is mid-'@word' typing. Filtered by query substring. */}
+          {mentionQuery !== null && (() => {
+            const q = mentionQuery.toLowerCase();
+            const candidates = groupMembers
+              .map(m => (typeof m === 'string' ? { name: m, handle: m } : m))
+              .filter(m => {
+                const h = (m.handle || m.name || '').toLowerCase().replace(/^@/, '');
+                return !q || h.startsWith(q) || h.includes(q);
+              })
+              .slice(0, 6);
+            if (!candidates.length) return null;
+            return (
+              <View style={[g.mentionPop, { backgroundColor: card, borderColor: border }]}>
+                {candidates.map((m, i) => {
+                  const handle = (m.handle || m.name || 'member').replace(/^@/, '');
+                  const display = m.name && m.name !== handle ? m.name : `@${handle}`;
+                  return (
+                    <TouchableOpacity
+                      key={i}
+                      onPress={() => {
+                        // Replace the in-progress '@query' with '@handle ' at the cursor.
+                        const atIdx = inputText.lastIndexOf('@');
+                        if (atIdx < 0) return;
+                        const head = inputText.slice(0, atIdx);
+                        const next = `${head}@${handle} `;
+                        setInputText(next);
+                        setMentionQuery(null);
+                      }}
+                      style={[g.mentionRow, { borderBottomColor: border }]}>
+                      <View style={[g.mentionAvatar, { backgroundColor: accent }]}>
+                        <Text style={{ color: '#fff', fontWeight: '700' }}>{(display || '?')[1 - (display?.startsWith('@') ? 0 : 1)]?.toUpperCase() || (display || '?')[0]?.toUpperCase()}</Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[g.mentionName, { color: tx }]}>{display}</Text>
+                        <Text style={[g.mentionSub, { color: sub }]}>@{handle}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            );
+          })()}
+
           <View style={[g.inputBar, { backgroundColor: card, borderTopColor: border }]}>
           <TouchableOpacity style={[g.plusBtn, { backgroundColor: inputBg, borderColor: accent }]} onPress={() => setAttachModal(true)}>
             <Text style={[g.plusTx, { color: accent }]}>+</Text>
@@ -825,6 +973,16 @@ export default function GroupChatScreen({ route, navigation }) {
             onChangeText={v => {
               setInputText(v);
               broadcastTyping(groupId, currentUserId, currentHandle || 'member', v.length > 0);
+
+              // Detect if we're mid-@-mention. Scan backwards from end until
+              // we hit a space or the start. If we hit '@' first, we're in
+              // a mention context and capture whatever follows it as the query.
+              const tail = v.split(/\s/).pop() || '';
+              if (tail.startsWith('@')) {
+                setMentionQuery(tail.slice(1));
+              } else if (mentionQuery !== null) {
+                setMentionQuery(null);
+              }
             }}
             onBlur={() => broadcastTyping(groupId, currentUserId, currentHandle || 'member', false)}
             multiline maxLength={2000} />
@@ -955,22 +1113,43 @@ export default function GroupChatScreen({ route, navigation }) {
         </View>
       </Modal>
 
-      {/* Group info edit modal (tap header avatar) */}
+      {/* Group info edit modal (tap header avatar or member count row) —
+          reuses ContactEditModal to keep one form component. Notes field
+          on the modal doubles as the group description. The modal's
+          existing photo-upload path handles Supabase Storage for us. */}
       <ContactEditModal
         visible={infoEditModal}
-        contact={{ firstName: groupName, id: groupId, phone: '', email: '' }}
+        contact={{
+          firstName: groupName,
+          id:        groupId,
+          phone:     '',
+          email:     '',
+          photo:     groupPhoto,
+          notes:     groupDesc,
+        }}
         onClose={() => setInfoEditModal(false)}
-        onSave={(updated) => {
+        onSave={async (updated) => {
           setInfoEditModal(false);
-          // Update group name in AsyncStorage
-          AsyncStorage.getItem('vaultchat_groups').then(raw => {
+          // Optimistic local update so the header re-renders instantly.
+          const newName  = updated.firstName || groupName;
+          const newPhoto = updated.photo !== undefined ? updated.photo : groupPhoto;
+          const newDesc  = updated.notes  !== undefined ? updated.notes  : groupDesc;
+          setGroupName(newName);
+          setGroupPhoto(newPhoto);
+          setGroupDesc(newDesc);
+
+          // Persist to AsyncStorage so the Chats list picks up the new name/photo.
+          try {
+            const raw = await AsyncStorage.getItem('vaultchat_groups');
             if (raw) {
               const gs = JSON.parse(raw).map(g =>
-                g.id === groupId ? { ...g, name: updated.firstName || groupName, photo: updated.photo } : g
+                g.id === groupId
+                  ? { ...g, name: newName, photo: newPhoto, desc: newDesc }
+                  : g,
               );
-              AsyncStorage.setItem('vaultchat_groups', JSON.stringify(gs));
+              await AsyncStorage.setItem('vaultchat_groups', JSON.stringify(gs));
             }
-          }).catch(() => {});
+          } catch {}
         }}
         colors={{ bg, card, tx, sub, border, inputBg, accent }}
       />
@@ -1042,6 +1221,21 @@ const g = StyleSheet.create({
   emptyBox:       { alignItems: 'center', paddingTop: 80 },
   emptyTx:        { fontSize: 14, textAlign: 'center', lineHeight: 20 },
   inputBar:       { flexDirection: 'row', alignItems: 'center', padding: 10, paddingHorizontal: 12, borderTopWidth: StyleSheet.hairlineWidth, gap: 8, paddingBottom: 24, minHeight: 70 },
+
+  // @mention autocomplete
+  mentionPop:     {
+    marginHorizontal: 12, marginBottom: 6,
+    borderRadius: 12, borderWidth: StyleSheet.hairlineWidth,
+    maxHeight: 260, overflow: 'hidden',
+  },
+  mentionRow:     {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingVertical: 10, paddingHorizontal: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  mentionAvatar:  { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  mentionName:    { fontSize: 14, fontWeight: '600' },
+  mentionSub:     { fontSize: 11 },
   plusBtn:        { width: 44, height: 44, borderRadius: 22, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
   plusTx:         { fontSize: 26, fontWeight: '300', lineHeight: 30 },
   sheetHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 4, marginBottom: 8 },
