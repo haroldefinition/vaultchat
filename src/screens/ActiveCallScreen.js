@@ -553,10 +553,9 @@ export default function ActiveCallScreen({ route, navigation }) {
       ) : (
         <View style={s.top}>
           <View style={s.avatarStage}>
-            {/* Disperse waveform dots on both sides of the avatar */}
+            {/* Left disperse waveform dots */}
             <DisperseDots accent={accent} side="left"  active={status !== 'Connected'} />
-            <DisperseDots accent={accent} side="right" active={status !== 'Connected'} />
-            {/* Glow ring + avatar */}
+            {/* Glow ring + avatar (centered) */}
             <Animated.View
               style={[
                 s.avatarGlow,
@@ -567,6 +566,8 @@ export default function ActiveCallScreen({ route, navigation }) {
                 <Text style={s.avatarTx}>{(recipientName || '?')[0]?.toUpperCase()}</Text>
               </View>
             </Animated.View>
+            {/* Right disperse waveform dots */}
+            <DisperseDots accent={accent} side="right" active={status !== 'Connected'} />
           </View>
 
           <Text style={[s.name, { color: tx }]}>{recipientName || 'Unknown'}</Text>
