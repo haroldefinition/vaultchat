@@ -485,12 +485,14 @@ function _onRoomEnded({ callId, roomId, endedBy }) {
 // ── Offer / answer / ICE (shared per-peer routing) ───────────
 
 async function _createOfferFor({ userId, userName }) {
+  if (__DEV__) console.log('[roomCall] createOfferFor', userId);
   const peer = _ensurePeer(userId, userName, true);
   try {
     let offer = await peer.pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: _callType === 'video' });
     offer = { ...offer, sdp: enableOpusFec(offer.sdp) };
     await peer.pc.setLocalDescription(offer);
     sendWebRTCOffer(userId, offer, _callId);
+    if (__DEV__) console.log('[roomCall] sent offer to', userId);
   } catch (e) {
     if (__DEV__) console.warn('[roomCall] offer error for', userId, e?.message || e);
     peer.state = 'failed';
@@ -499,6 +501,7 @@ async function _createOfferFor({ userId, userName }) {
 }
 
 async function _onOffer({ offer, callId, fromUserId }) {
+  if (__DEV__) console.log('[roomCall] webrtc:offer from', fromUserId, 'callId match?', callId === _callId, 'state=', _state);
   if (callId !== _callId || !fromUserId) return;
   if (_state !== 'in-room') return;
   if (fromUserId === _myUserId) return;
@@ -514,6 +517,7 @@ async function _onOffer({ offer, callId, fromUserId }) {
     answer = { ...answer, sdp: enableOpusFec(answer.sdp) };
     await peer.pc.setLocalDescription(answer);
     sendWebRTCAnswer(fromUserId, answer, _callId);
+    if (__DEV__) console.log('[roomCall] sent answer to', fromUserId);
   } catch (e) {
     if (__DEV__) console.warn('[roomCall] onOffer error for', fromUserId, e?.message || e);
     peer.state = 'failed';
@@ -522,12 +526,14 @@ async function _onOffer({ offer, callId, fromUserId }) {
 }
 
 async function _onAnswer({ answer, callId, fromUserId }) {
+  if (__DEV__) console.log('[roomCall] webrtc:answer from', fromUserId, 'have peer?', _peers.has(fromUserId));
   if (callId !== _callId || !fromUserId) return;
   const peer = _peers.get(fromUserId);
   if (!peer) return;
   try {
     await peer.pc.setRemoteDescription(new RTCSessionDescription(answer));
     await _flushPendingCandidates(peer);
+    if (__DEV__) console.log('[roomCall] answer applied from', fromUserId);
   } catch (e) {
     if (__DEV__) console.warn('[roomCall] onAnswer error for', fromUserId, e?.message || e);
   }
@@ -536,7 +542,10 @@ async function _onAnswer({ answer, callId, fromUserId }) {
 async function _onIce({ candidate, fromUserId }) {
   if (!fromUserId || !candidate) return;
   const peer = _peers.get(fromUserId);
-  if (!peer) return;
+  if (!peer) {
+    if (__DEV__) console.log('[roomCall] ICE from unknown peer', fromUserId, '— ignoring');
+    return;
+  }
   try {
     if (!peer.pc.remoteDescription) {
       peer.pendingCandidates.push(candidate);
@@ -615,6 +624,7 @@ function _attachPcListeners(pc, userId) {
     const peer = _peers.get(userId);
     if (!peer) return;
     const s = pc.iceConnectionState;
+    if (__DEV__) console.log('[roomCall] peer', userId, 'iceConnectionState →', s);
     if (s === 'connected' || s === 'completed') {
       if (peer.state !== 'connected') {
         peer.state = 'connected';
