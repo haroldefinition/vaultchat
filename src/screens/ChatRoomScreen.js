@@ -1062,16 +1062,21 @@ export default function ChatRoomScreen({ route, navigation }) {
           </View>
           <View style={{ flex: 1 }}>
             <Text style={[s.hName, { color: tx }]}>{contactData?.name || recipientName || recipientPhone || 'Chat'}</Text>
-            {/* Presence subtitle: live 'Online' (green) / 'Last seen 3h ago'
-                when we know the peer and have a recent signal. Falls back
-                to the E2E trust line while waiting or if unknown. */}
-            {presence.online ? (
-              <Text style={[s.hSub, { color: '#00ffa3' }]}>● Online</Text>
-            ) : presence.label ? (
-              <Text style={[s.hSub, { color: sub }]}>{presence.label}</Text>
-            ) : (
-              <Text style={[s.hSub, { color: sub }]}>🔒 End-to-end encrypted</Text>
-            )}
+            {/* Combined trust + presence line: lock icon is always visible
+                so users see the E2E guarantee on every chat, and the
+                presence state appears inline after it (green dot Online
+                when connected, fuzzy 'last seen' when not). Falls back
+                to just the E2E label while we're still figuring out the
+                peer's presence. */}
+            <Text style={[s.hSub, { color: sub }]}>
+              🔒  {presence.online ? (
+                <Text style={{ color: '#34C759', fontWeight: '600' }}>● Online</Text>
+              ) : presence.label ? (
+                presence.label
+              ) : (
+                'End-to-end encrypted'
+              )}
+            </Text>
           </View>
         </TouchableOpacity>
         <TouchableOpacity onPress={() => { setSearchOpen(v => !v); setSearchQuery(''); }} style={s.callBtn}>
