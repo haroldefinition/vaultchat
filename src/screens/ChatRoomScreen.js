@@ -158,7 +158,7 @@ function VideoBubble({ uri, onPlay, onReply }) {
 }
 
 // ── Message bubble ────────────────────────────────────────────
-function Bubble({ item, myId, tx, sub, card, accent, onOpenImg, onPlayVid, onReply, onLongPress, tappedId, onTap, reactions, onReact }) {
+function Bubble({ item, myId, tx, sub, card, accent, bubbleOut, bubbleIn, bubbleOutTx, bubbleInTx, onOpenImg, onPlayVid, onReply, onLongPress, tappedId, onTap, reactions, onReact }) {
   const me      = item.sender_id === myId;
   const raw     = item.content || '';
   const nlIdx   = raw.indexOf('\n');
@@ -254,14 +254,20 @@ function Bubble({ item, myId, tx, sub, card, accent, onOpenImg, onPlayVid, onRep
         </TouchableOpacity>
       );
     }
-    return <Text style={[s.msgTx, { color: me ? '#fff' : tx }]}>{raw}</Text>;
+    return <Text style={[s.msgTx, { color: me ? bubbleOutTx : bubbleInTx }]}>{raw}</Text>;
   };
 
   return (
     <SwipeableRow onReply={() => { taptic(); onReply && onReply(); }}>
       <View style={[s.bWrap, me ? s.myWrap : s.theirWrap]}>
         <TouchableOpacity
-          style={[s.bubble, me ? s.myBubble : [s.theirBubble, { backgroundColor: card }], isMedia && s.mediaPad]}
+          style={[
+            s.bubble,
+            me
+              ? [s.myBubble,    { backgroundColor: bubbleOut }]
+              : [s.theirBubble, { backgroundColor: bubbleIn  }],
+            isMedia && s.mediaPad,
+          ]}
           onPress={() => onTap && onTap(item.id)}
           onLongPress={() => onLongPress && onLongPress(item)} delayLongPress={450} activeOpacity={0.88}>
           {body()}
@@ -290,7 +296,8 @@ function Bubble({ item, myId, tx, sub, card, accent, onOpenImg, onPlayVid, onRep
 
 // ── Main Screen ───────────────────────────────────────────────
 export default function ChatRoomScreen({ route, navigation }) {
-  const { bg, card, tx, sub, border, inputBg, accent } = useTheme();
+  const { bg, card, tx, sub, border, inputBg, accent,
+          bubbleOut, bubbleIn, bubbleOutTx, bubbleInTx } = useTheme();
   const { roomId, recipientPhone, recipientName, recipientPhoto, pendingMessage } = route.params || {};
 
   const [messages,     setMessages]     = useState([]);
@@ -1138,6 +1145,8 @@ export default function ChatRoomScreen({ route, navigation }) {
         renderItem={({ item }) => (
           <Bubble
             item={item} myId={myId} tx={tx} sub={sub} card={card} accent={accent}
+            bubbleOut={bubbleOut} bubbleIn={bubbleIn}
+            bubbleOutTx={bubbleOutTx} bubbleInTx={bubbleInTx}
             onOpenImg={uri => setFullImgUri(uri)}
             onPlayVid={uri => setVidUri(uri)}
             onLongPress={item => { longPressFeedback(); setPickerMsg(item); }}
@@ -1532,7 +1541,7 @@ const s = StyleSheet.create({
   myWrap:      { alignSelf: 'flex-end', alignItems: 'flex-end' },
   theirWrap:   { alignSelf: 'flex-start', alignItems: 'flex-start' },
   bubble:      { borderRadius: 20, paddingHorizontal: 14, paddingVertical: 10 },
-  myBubble:    { backgroundColor: '#0057a8', borderBottomRightRadius: 4 },
+  myBubble:    { borderBottomRightRadius: 4 },
   theirBubble: { borderBottomLeftRadius: 4 },
   mediaPad:    { paddingHorizontal: 4, paddingVertical: 4 },
   msgTx:       { fontSize: 15, lineHeight: 21 },
