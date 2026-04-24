@@ -93,6 +93,22 @@ export default function RegisterScreen({ route, onLoginCallback }) {
     setStep('otp');
   }
 
+  // Derive a sensible default handle from whichever identifier the user
+  // signed up with — email local-part ('jvibesengineer@gmail.com' →
+  // 'jvibesengineer') or 'user' + the last 4 phone digits. The handle
+  // step shows this pre-filled so users can accept it with one tap, but
+  // they're always free to edit before continuing.
+  function suggestHandle() {
+    if (sentTo?.method === 'phone') {
+      const digits = (phone || '').replace(/\D/g, '');
+      return `user${digits.slice(-4) || 'new'}`;
+    }
+    const srcEmail  = email || sentTo?.value || '';
+    const localPart = srcEmail.split('@')[0] || '';
+    const cleaned   = localPart.toLowerCase().replace(/[^a-z0-9_]/g, '');
+    return cleaned || 'user';
+  }
+
   // ── Verify OTP ────────────────────────────────────────────────
   async function verifyOTP() {
     if (otp.length < 6) {
@@ -117,6 +133,7 @@ export default function RegisterScreen({ route, onLoginCallback }) {
         )
       );
       setLoading(false);
+      setHandle(prev => prev || suggestHandle());
       setStep('handle');
       return;
     }
@@ -149,6 +166,7 @@ export default function RegisterScreen({ route, onLoginCallback }) {
           return;
         }
         setLoading(false);
+        setHandle(prev => prev || suggestHandle());
         setStep('handle');
         return;
       }
