@@ -477,6 +477,7 @@ function _onParticipantLeft({ callId, roomId, userId }) {
 }
 
 function _onRoomEnded({ callId, roomId, endedBy }) {
+  if (__DEV__) console.log('[roomCall] callroom:ended received callId=', callId, 'endedBy=', endedBy, 'our=', _callId);
   if (callId !== _callId || roomId !== _roomId) return;
   emit('room-ended', { endedBy });
   _cleanup();
@@ -700,6 +701,12 @@ function _unbindSocket() {
 // ── Teardown ─────────────────────────────────────────────────
 
 function _cleanup() {
+  if (__DEV__) {
+    try {
+      const stack = (new Error().stack || '').split('\n').slice(2, 10).join('\n');
+      console.log('[roomCall] _cleanup called from state=' + _state + ', peers=' + _peers.size + '\n' + stack);
+    } catch {}
+  }
   // Close every peer connection
   for (const peer of _peers.values()) {
     try { peer.pc?.close(); } catch {}
