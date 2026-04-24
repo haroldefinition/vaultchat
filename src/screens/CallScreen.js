@@ -405,9 +405,6 @@ export default function CallScreen({ navigation }) {
         </View>
       ) : (
         <View style={{ flex: 1 }}>
-          <View style={[s.featureBanner, { backgroundColor: card, borderColor: border }]}>
-            <Text style={[s.featureText, { color: accent }]}>✓ Background Persist  ✓ Hold/Swap  ✓ Never Drop  ✓ Noise Cancel</Text>
-          </View>
           <FlatList
             data={calls}
             keyExtractor={item => item.id}
