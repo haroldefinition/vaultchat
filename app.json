@@ -15,6 +15,7 @@
       "bundleIdentifier": "com.chatvault.vaultchat",
       "buildNumber": "1",
       "infoPlist": {
+        "UIBackgroundModes": ["audio", "voip"],
         "NSPhotoLibraryUsageDescription": "VaultChat needs access to your photos and videos to share them in chats.",
         "NSPhotoLibraryAddUsageDescription": "VaultChat needs access to save photos.",
         "NSCameraUsageDescription": "VaultChat needs camera access to take photos and videos.",
