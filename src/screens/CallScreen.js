@@ -3,19 +3,63 @@ import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, Vibration,
   Modal, TextInput, ScrollView, Animated, Image,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../services/theme';
 import { setupCallKit } from '../services/callkit';
 import * as ImagePicker from 'expo-image-picker';
 import ContactEditModal from '../components/ContactEditModal';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { placeCall } from '../services/placeCall';
+import * as callLog from '../services/callLog';
 
-// ── Sample data ───────────────────────────────────────────────
-const SAMPLE_CALLS = [
-  { id: '1', name: 'Jon',     number: '6092330963', type: 'incoming', time: 'Today, 5:42 PM',     duration: '3m 21s' },
-  { id: '2', name: 'Unknown', number: '2675551234', type: 'missed',   time: 'Today, 2:10 PM',     duration: '' },
-  { id: '3', name: 'Jon',     number: '6092330963', type: 'outgoing', time: 'Yesterday, 8:00 PM', duration: '12m 4s' },
-];
+// ── Humanize timestamp ────────────────────────────────────────
+// "Today, 5:42 PM" / "Yesterday, 2:10 PM" / "Mon, 11:05 AM" / "Apr 3, 11:05 AM"
+function formatCallTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startOfDay = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const dayDiff = Math.round((startOfToday - startOfDay) / 86400000);
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (dayDiff === 0) return `Today, ${time}`;
+  if (dayDiff === 1) return `Yesterday, ${time}`;
+  if (dayDiff < 7)    return `${d.toLocaleDateString([], { weekday: 'short' })}, ${time}`;
+  return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${time}`;
+}
+
+function formatDuration(sec) {
+  if (!sec || sec <= 0) return '';
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+// Renderer-level adapter — the log schema uses direction+status, but the
+// existing row/info-modal UI was written around a single `type` field
+// (incoming | outgoing | missed). Map the log entry into that shape so
+// the layout code stays untouched. 'declined' and 'cancelled' both show
+// as 'missed' in the list — they're all "did not connect" from the user's
+// perspective, and the info modal still shows the true status underneath.
+function adaptEntry(entry) {
+  const isMissed = entry.status === 'missed' || entry.status === 'declined' || entry.status === 'cancelled';
+  const type = isMissed
+    ? 'missed'
+    : (entry.direction === 'outgoing' ? 'outgoing' : 'incoming');
+  return {
+    id:           entry.id,
+    type,
+    name:         entry.peerName || entry.peerPhone || 'Unknown',
+    number:       entry.peerPhone || '',
+    peerUserId:   entry.peerUserId || null,
+    time:         formatCallTime(entry.endedAt || entry.startedAt),
+    duration:     formatDuration(entry.durationSec),
+    callType:     entry.callType || 'voice',
+    status:       entry.status,
+    direction:    entry.direction,
+    _raw:         entry,
+  };
+}
 
 const VOICEMAILS = [
   { id:'vm1', from:'Mom',         phone:'+1 555 234 5678', duration:'0:42', date:'Today 9:14 AM',     read:false },
@@ -178,7 +222,7 @@ function CallContactEditor({ item, onClose, onSave, accent, bg, card, tx, sub, b
 // ── Main CallScreen ───────────────────────────────────────────
 export default function CallScreen({ navigation }) {
   const { bg, card, tx, sub, border, inputBg, accent } = useTheme();
-  const [calls,          setCalls]          = useState(SAMPLE_CALLS);
+  const [calls,          setCalls]          = useState([]);
   const [tab,            setTab]            = useState('recent');
   const [dialInput,      setDialInput]      = useState('');
   const [editCallModal,  setEditCallModal]  = useState(false);
@@ -188,19 +232,73 @@ export default function CallScreen({ navigation }) {
 
   useEffect(() => {
     setupCallKit();
-    loadCalls();
   }, []);
+
+  // Refresh on initial mount + on tab focus + on every call log write.
+  // Focus covers: returning from ActiveCallScreen after a call ends.
+  // The subscribe() callback covers: in-app writes that happen while the
+  // tab is already mounted (e.g. a missed call arrives while looking at
+  // the Recent list — it should appear without needing a blur/focus cycle).
+  useFocusEffect(
+    React.useCallback(() => {
+      loadCalls();
+      const unsub = callLog.subscribe(loadCalls);
+      return () => unsub();
+    }, [])
+  );
 
   async function loadCalls() {
     try {
-      const saved = await AsyncStorage.getItem('vaultchat_calls');
-      if (saved) setCalls(JSON.parse(saved));
-    } catch {}
+      const entries = await callLog.listCalls();
+      setCalls(entries.map(adaptEntry));
+    } catch {
+      setCalls([]);
+    }
   }
 
-  function makeCall(name, number, type = 'voice') {
-    if (!number) { Alert.alert('Enter a number'); return; }
-    placeCall({ navigation, recipientName: name || '', recipientPhone: number, type });
+  function makeCall(nameOrObj, number, type = 'voice') {
+    // Accept either the legacy (name, number, type) signature OR a single
+    // row object so callers can pass the adapted entry directly and we can
+    // forward peerUserId to placeCall for the fast userId-first routing path.
+    if (typeof nameOrObj === 'object' && nameOrObj) {
+      const row = nameOrObj;
+      placeCall({
+        navigation,
+        peerUserId:     row.peerUserId || undefined,
+        recipientName:  row.name || '',
+        recipientPhone: row.number || '',
+        type:           type || row.callType || 'voice',
+      });
+      return;
+    }
+    if (!number && !nameOrObj) { Alert.alert('Enter a number'); return; }
+    placeCall({ navigation, recipientName: nameOrObj || '', recipientPhone: number, type });
+  }
+
+  function confirmDeleteCall(item) {
+    Alert.alert(
+      'Delete from Recents',
+      `Remove this call with ${item.name}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: async () => {
+            await callLog.deleteCall(item.id);
+            // subscribe() will trigger a reload — nothing else to do.
+        }},
+      ]
+    );
+  }
+
+  function confirmClearAll() {
+    if (calls.length === 0) return;
+    Alert.alert(
+      'Clear all recents?',
+      'This removes every call from your Recents list. Active calls aren’t affected.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Clear All', style: 'destructive', onPress: async () => { await callLog.clearCalls(); }},
+      ]
+    );
   }
 
   function addDigit(d) { Vibration.vibrate(15); setDialInput(p => p.length < 10 ? p + d : p); }
@@ -208,6 +306,18 @@ export default function CallScreen({ navigation }) {
 
   const typeColor = type => type === 'missed' ? '#ff4444' : tx;
   const typeIcon  = type => type === 'incoming' ? '↙' : type === 'outgoing' ? '↗' : '✗';
+
+  // Sub-line label that reflects the real underlying status (missed vs
+  // declined vs cancelled all render as red 'missed' style upstream, but
+  // we still want to tell the user what actually happened).
+  function subLineLabel(item) {
+    const { status, direction } = item;
+    if (status === 'completed') return direction === 'incoming' ? 'Incoming' : 'Outgoing';
+    if (status === 'missed')    return 'Missed';
+    if (status === 'declined')  return direction === 'incoming' ? 'Declined' : 'Peer declined';
+    if (status === 'cancelled') return 'Cancelled';
+    return direction === 'incoming' ? 'Incoming' : 'Outgoing';
+  }
 
   return (
     <View style={[s.container, { backgroundColor: bg }]}>
@@ -226,6 +336,16 @@ export default function CallScreen({ navigation }) {
               <Text style={[s.tabBtnText, { color: tab === 'keypad'    ? '#fff' : sub }]}>Keypad</Text>
             </TouchableOpacity>
           </View>
+          {/* Clear-all — only visible when on the Recent tab AND there's
+              actually something to clear. Red tint to signal destructive. */}
+          {tab === 'recent' && calls.length > 0 && (
+            <TouchableOpacity
+              style={[s.plusCircleBtn, { backgroundColor: '#ff3b3022' }]}
+              onPress={confirmClearAll}
+              accessibilityLabel="Clear all recents">
+              <Text style={{ fontSize: 16 }}>🗑</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={[s.plusCircleBtn, { backgroundColor: accent }]} onPress={() => navigation.navigate('NewCall')}>
             <Text style={s.plusCircleText}>+</Text>
           </TouchableOpacity>
@@ -288,39 +408,54 @@ export default function CallScreen({ navigation }) {
             data={calls}
             keyExtractor={item => item.id}
             renderItem={({ item }) => (
-              <View style={[s.callItem, { borderBottomColor: border }]}>
-                <TouchableOpacity
-                  style={[s.avatar, { backgroundColor: item.type === 'missed' ? '#ff4444' : accent }]}
-                  onPress={() => { setEditCallTarget(item); setEditCallModal(true); }}>
-                  <Text style={s.avatarText}>{(item.name || '?')[0]}</Text>
-                </TouchableOpacity>
-                <View style={s.callInfo}>
-                  <Text style={[s.callName, { color: typeColor(item.type) }]}>{item.name}</Text>
-                  <Text style={[s.callSub, { color: sub }]}>
-                    {typeIcon(item.type)} {item.type === 'incoming' ? 'Incoming' : item.type === 'outgoing' ? 'Outgoing' : 'Missed'} · {item.time}
-                  </Text>
-                  {item.duration ? <Text style={[s.callDuration, { color: sub }]}>⏱ {item.duration}</Text> : null}
-                </View>
-                <View style={s.callActions}>
+              // Long-press on the row → delete confirmation. Feels natural
+              // for a single-row destructive action without adding swipes.
+              <TouchableOpacity
+                activeOpacity={0.85}
+                delayLongPress={350}
+                onLongPress={() => confirmDeleteCall(item)}
+                onPress={() => { setInfoTarget(item); setInfoModal(true); }}>
+                <View style={[s.callItem, { borderBottomColor: border }]}>
                   <TouchableOpacity
-                    style={[s.infoBtn, { borderColor: accent }]}
-                    onPress={() => { setInfoTarget(item); setInfoModal(true); }}>
-                    <Text style={[s.infoBtnText, { color: accent }]}>i</Text>
+                    style={[s.avatar, { backgroundColor: item.type === 'missed' ? '#ff4444' : accent }]}
+                    onPress={() => { setEditCallTarget(item); setEditCallModal(true); }}>
+                    <Text style={s.avatarText}>{(item.name || '?')[0]}</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={[s.callBtn, { backgroundColor: '#34C759' }]} onPress={() => makeCall(item.name, item.number, 'voice')}>
-                    <Text style={{ fontSize: 18 }}>📞</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[s.callBtn, { backgroundColor: '#1a73e8' }]} onPress={() => makeCall(item.name, item.number, 'video')}>
-                    <Text style={{ fontSize: 18 }}>📹</Text>
-                  </TouchableOpacity>
+                  <View style={s.callInfo}>
+                    <Text style={[s.callName, { color: typeColor(item.type) }]}>{item.name}</Text>
+                    <Text style={[s.callSub, { color: sub }]}>
+                      {typeIcon(item.type)} {subLineLabel(item)} · {item.callType === 'video' ? '📹 ' : ''}{item.time}
+                    </Text>
+                    {item.duration ? <Text style={[s.callDuration, { color: sub }]}>⏱ {item.duration}</Text> : null}
+                  </View>
+                  <View style={s.callActions}>
+                    <TouchableOpacity
+                      style={[s.infoBtn, { borderColor: accent }]}
+                      onPress={() => { setInfoTarget(item); setInfoModal(true); }}>
+                      <Text style={[s.infoBtnText, { color: accent }]}>i</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[s.callBtn, { backgroundColor: '#34C759' }]} onPress={() => makeCall(item, null, 'voice')}>
+                      <Text style={{ fontSize: 18 }}>📞</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[s.callBtn, { backgroundColor: '#1a73e8' }]} onPress={() => makeCall(item, null, 'video')}>
+                      <Text style={{ fontSize: 18 }}>📹</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
-              </View>
+              </TouchableOpacity>
             )}
             ListEmptyComponent={
               <View style={s.empty}>
                 <Text style={s.emptyIcon}>📞</Text>
                 <Text style={[s.emptyText, { color: tx }]}>No recent calls</Text>
-                <Text style={[s.emptySub, { color: sub }]}>Tap + to make a call</Text>
+                <Text style={[s.emptySub, { color: sub }]}>
+                  Place or receive a call and it will show up here.
+                </Text>
+                <TouchableOpacity
+                  style={[s.emptyCta, { backgroundColor: accent }]}
+                  onPress={() => navigation.navigate('NewCall')}>
+                  <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>＋ New Call</Text>
+                </TouchableOpacity>
               </View>
             }
           />
@@ -358,12 +493,12 @@ export default function CallScreen({ navigation }) {
             {/* Action buttons */}
             <View style={s.infoActions}>
               <TouchableOpacity style={[s.infoActionBtn, { backgroundColor: '#34C75922' }]}
-                onPress={() => { setInfoModal(false); makeCall(infoTarget?.name, infoTarget?.number, 'voice'); }}>
+                onPress={() => { setInfoModal(false); if (infoTarget) makeCall(infoTarget, null, 'voice'); }}>
                 <Text style={{ fontSize: 22 }}>📞</Text>
                 <Text style={{ color: '#34C759', fontSize: 12, fontWeight: '600', marginTop: 4 }}>Call Back</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[s.infoActionBtn, { backgroundColor: '#1a73e822' }]}
-                onPress={() => { setInfoModal(false); makeCall(infoTarget?.name, infoTarget?.number, 'video'); }}>
+                onPress={() => { setInfoModal(false); if (infoTarget) makeCall(infoTarget, null, 'video'); }}>
                 <Text style={{ fontSize: 22 }}>📹</Text>
                 <Text style={{ color: '#1a73e8', fontSize: 12, fontWeight: '600', marginTop: 4 }}>FaceTime</Text>
               </TouchableOpacity>
@@ -371,6 +506,11 @@ export default function CallScreen({ navigation }) {
                 onPress={() => { setInfoModal(false); setEditCallTarget(infoTarget); setEditCallModal(true); }}>
                 <Text style={{ fontSize: 22 }}>✏️</Text>
                 <Text style={[{ fontSize: 12, fontWeight: '600', marginTop: 4, color: accent }]}>Edit</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[s.infoActionBtn, { backgroundColor: '#ff3b3022' }]}
+                onPress={() => { const t = infoTarget; setInfoModal(false); if (t) confirmDeleteCall(t); }}>
+                <Text style={{ fontSize: 22 }}>🗑</Text>
+                <Text style={{ color: '#ff3b30', fontSize: 12, fontWeight: '600', marginTop: 4 }}>Delete</Text>
               </TouchableOpacity>
             </View>
 
@@ -381,15 +521,20 @@ export default function CallScreen({ navigation }) {
         </TouchableOpacity>
       </Modal>
 
-      {/* Universal contact edit modal */}
+      {/* Universal contact edit modal — writes the new display name back
+          to the call log so it persists across restarts. renameCallPeer
+          also propagates to every other entry for the same peerUserId,
+          matching the iOS Recents rename UX. */}
       <ContactEditModal
         visible={editCallModal}
         contact={editCallTarget}
         onClose={() => { setEditCallModal(false); setEditCallTarget(null); }}
-        onSave={(updated) => {
-          setCalls(prev => prev.map(c => c.id === updated.id
-            ? { ...c, name: updated.name, photo: updated.photo, email: updated.email }
-            : c));
+        onSave={async (updated) => {
+          try {
+            if (updated?.id && updated?.name) {
+              await callLog.renameCallPeer(updated.id, updated.name);
+            }
+          } catch {}
           setEditCallModal(false); setEditCallTarget(null);
         }}
         colors={{ bg, card, tx, sub, border, inputBg, accent }}
@@ -412,7 +557,8 @@ const s = StyleSheet.create({
   empty:            { alignItems: 'center', justifyContent: 'center', padding: 60 },
   emptyIcon:        { fontSize: 48, marginBottom: 12 },
   emptyText:        { fontSize: 18, fontWeight: 'bold', marginBottom: 6 },
-  emptySub:         { fontSize: 14 },
+  emptySub:         { fontSize: 14, textAlign: 'center', paddingHorizontal: 24 },
+  emptyCta:         { marginTop: 20, paddingHorizontal: 22, paddingVertical: 12, borderRadius: 22 },
   callItem:         { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1 },
   avatar:           { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
   avatarText:       { color: '#fff', fontWeight: 'bold', fontSize: 18 },

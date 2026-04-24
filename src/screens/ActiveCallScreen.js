@@ -11,6 +11,7 @@ import AddParticipantModal from '../components/AddParticipantModal';
 import DisperseDots from '../components/DisperseDots';
 import * as callPeer from '../services/callPeer';
 import * as roomCall from '../services/roomCall';
+import * as callLog from '../services/callLog';
 import { callroomUpgradeNotice } from '../services/socket';
 import { getMyDisplayName } from '../services/vaultHandle';
 import { setEarpieceMode, setSpeakerMode } from '../services/audioSession';
@@ -167,6 +168,7 @@ export default function ActiveCallScreen({ route, navigation }) {
   const timer = useRef(null);
   const hungUpRef = useRef(false); // guard against double-hangup in unmount
   const sawActiveStateRef = useRef(false); // true once we've seen any non-idle state (prevents initial-snapshot teardown)
+  const callLogRef = useRef(null); // callLog.beginCall() handle for writing this call's entry
 
   // Derived: am I the conference creator? Only then do we show "End for Everyone".
   const isCreator = isConference && creatorId && creatorId === myUserId;
@@ -196,6 +198,28 @@ export default function ActiveCallScreen({ route, navigation }) {
       return () => { clearTimeout(connect); clearInterval(qualTimer); anim.stop(); };
     }
 
+    // Begin the Recents journal entry up-front so even a force-quit mid-call
+    // leaves a row in the log. Direction is inferred from `mode`:
+    //   answer / answer-conference → the user just accepted a ring, so this
+    //                                 is an incoming call that's already answered
+    //   anything else               → outgoing
+    // For the incoming-answered path we pre-mark the entry as answered since
+    // the user tapped Accept in IncomingCallScreen to get here (the ring
+    // started earlier but we don't retroactively have that timestamp —
+    // startedAt = now is close enough for the Recents display).
+    {
+      const direction = (mode === 'answer' || mode === 'answer-conference') ? 'incoming' : 'outgoing';
+      callLogRef.current = callLog.beginCall({
+        id:         callId,
+        direction,
+        peerUserId: peerUserId || null,
+        peerName:   recipientName || null,
+        peerPhone:  recipientPhone || null,
+        callType:   callType || 'voice',
+      });
+      if (direction === 'incoming') callLogRef.current.markAnswered();
+    }
+
     // Real call path — subscribe FIRST so we catch the state flip.
     // NB: callPeer.subscribe emits the current state synchronously on attach.
     // Before startOutgoing/accept has run, that snapshot is `idle`. We must
@@ -211,26 +235,35 @@ export default function ActiveCallScreen({ route, navigation }) {
         else if (st === 'placing')   { sawActiveStateRef.current = true; setStatus('Ringing...'); }
         else if (st === 'incoming')  { sawActiveStateRef.current = true; }
         else if (st === 'accepted')  { sawActiveStateRef.current = true; setStatus('Connecting...'); }
-        else if (st === 'connected') { sawActiveStateRef.current = true; setStatus('Connected'); anim.stop(); }
+        else if (st === 'connected') {
+          sawActiveStateRef.current = true;
+          setStatus('Connected');
+          anim.stop();
+          callLogRef.current?.markAnswered();
+        }
         else if (st === 'idle')      {
           if (!sawActiveStateRef.current) return;
           if (payload?.handedOff) return;                  // upgrade in progress, not an end
           if (isConference) return;                         // roomCall has taken over
           if (!hungUpRef.current) {
             hungUpRef.current = true;
+            callLogRef.current?.markEnded();
             navigation.goBack();
           }
         }
       } else if (event === 'declined') {
         Alert.alert('Call declined', 'The recipient declined the call.');
         hungUpRef.current = true;
+        callLogRef.current?.markDeclined();
         navigation.goBack();
       } else if (event === 'ended') {
         hungUpRef.current = true;
+        callLogRef.current?.markEnded();
         navigation.goBack();
       } else if (event === 'connectionLost') {
         Alert.alert('Call ended', 'The connection was lost.');
         hungUpRef.current = true;
+        callLogRef.current?.markEnded();
         navigation.goBack();
       }
     });

@@ -26,6 +26,7 @@ import { useTheme } from '../services/theme';
 import DisperseDots from '../components/DisperseDots';
 import * as callPeer from '../services/callPeer';
 import * as roomCall from '../services/roomCall';
+import * as callLog from '../services/callLog';
 
 export default function IncomingCallScreen({ route, navigation }) {
   const { bg, tx, sub, accent } = useTheme();
@@ -36,6 +37,9 @@ export default function IncomingCallScreen({ route, navigation }) {
   } = route.params || {};
   const pulse = useRef(new Animated.Value(1)).current;
   const sawActiveStateRef = useRef(false); // ignore the initial snapshot — see note in ActiveCallScreen
+  const callLogRef = useRef(null);         // call-log handle, owns the Recents entry for this ring
+  const acceptedRef = useRef(false);       // true once user taps Accept — prevents the unmount
+                                            // cleanup from overwriting ActiveCallScreen's 'completed' write
 
   useEffect(() => {
     // Faster pulse than ActiveCallScreen — mirrors the urgent feel of a ring.
@@ -48,6 +52,19 @@ export default function IncomingCallScreen({ route, navigation }) {
     // Vibrate pattern — matches an incoming-call ring feel without audio.
     const vibrateTimer = setInterval(() => Vibration.vibrate([0, 400, 300, 400]), 2200);
     Vibration.vibrate([0, 400, 300, 400]);
+
+    // Open the Recents entry for this ring. Defaults to status='missed' —
+    // only flipped if the user taps Decline, or if they tap Accept (in which
+    // case ActiveCallScreen takes over and upserts by the same callId with
+    // status='completed').
+    callLogRef.current = callLog.beginCall({
+      id:         callId,
+      direction:  'incoming',
+      peerUserId: callerId || null,
+      peerName:   callerName || null,
+      peerPhone:  null,
+      callType:   type || 'voice',
+    });
 
     // Subscribe to whichever engine owns this invite. Guard against the
     // initial 'idle' snapshot that both engines emit synchronously on
@@ -67,10 +84,23 @@ export default function IncomingCallScreen({ route, navigation }) {
       }
     });
 
-    return () => { anim.stop(); clearInterval(vibrateTimer); Vibration.cancel(); unsub(); };
+    return () => {
+      anim.stop();
+      clearInterval(vibrateTimer);
+      Vibration.cancel();
+      unsub();
+      // Finalize the log entry — but ONLY if the user didn't tap Accept.
+      // If they did, ActiveCallScreen is now the owner of this callId and
+      // will write its own 'completed' entry; flushing here would stomp it
+      // back to 'missed'.
+      if (!acceptedRef.current) {
+        try { callLogRef.current?.markEnded(); } catch {}
+      }
+    };
   }, []);
 
   function onAccept() {
+    acceptedRef.current = true;
     Vibration.cancel();
     navigation.replace('ActiveCall', {
       mode:          isConference ? 'answer-conference' : 'answer',
@@ -84,6 +114,7 @@ export default function IncomingCallScreen({ route, navigation }) {
 
   function onDecline() {
     Vibration.cancel();
+    try { callLogRef.current?.markDeclined(); } catch {}
     if (isConference) {
       try { roomCall.declineIncoming(myUserId); } catch {}
     } else {
