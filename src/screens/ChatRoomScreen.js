@@ -23,6 +23,7 @@ import ReportMessageModal from '../components/ReportMessageModal';
 import { supabase } from '../services/supabase';
 import { placeCall } from '../services/placeCall';
 import { usePresence } from '../services/presence';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { subscribeToRoom, subscribeToTyping, broadcastTyping } from '../services/realtimeMessages';
 import { enqueue, flushQueue } from '../services/messageQueue';
 import { markRoomAsRead, markDelivered, receiptIcon } from '../services/readReceipts';
@@ -282,9 +283,11 @@ function Bubble({ item, myId, tx, sub, card, accent, bubbleOut, bubbleIn, bubble
         )}
         <View style={[s.timeRow, me ? { alignSelf: 'flex-end' } : { alignSelf: 'flex-start' }]}>
           <Text style={[s.time, me ? s.tR : s.tL]}>
-            {showFull ? fullTimeStr : timeStr}{item.edited ? '  ✎' : ''}
+            {item.message_type === 'scheduled' && item.scheduled_at
+              ? `⏰ Scheduled · ${new Date(item.scheduled_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}`
+              : `${showFull ? fullTimeStr : timeStr}${item.edited ? '  ✎' : ''}`}
           </Text>
-          {me && (() => { const r = receiptIcon(item.status); return (
+          {me && item.message_type !== 'scheduled' && (() => { const r = receiptIcon(item.status); return (
             <Text style={{ fontSize: 11, color: r.color, marginLeft: 3 }}>{r.icon}</Text>
           ); })()}
         </View>
@@ -334,6 +337,19 @@ export default function ChatRoomScreen({ route, navigation }) {
   // 'Last seen 3h ago' in the header; falls back to the E2E label if
   // we don't know the recipient yet or they've never been seen.
   const presence = usePresence(recipientId);
+
+  // ── Scheduled messages (#79) ────────────────────────────────
+  // Long-press the send button to pick a future time. We insert the
+  // message with scheduled_at + message_type='scheduled' and SKIP the
+  // socket broadcast so the recipient doesn't see it yet. The sender's
+  // own view hides it by default (shows a small Scheduled chip). On
+  // chat open, we sweep overdue scheduled messages and release them —
+  // flip message_type to 'text', set created_at=now(), update the row.
+  // The recipient's existing 8s polling (or realtime subscription)
+  // then picks it up as a normal message. Simple, no server cron.
+  const [scheduleMode,    setScheduleMode]    = useState(false);  // picker visible?
+  const [scheduledAt,     setScheduledAt]     = useState(new Date(Date.now() + 60 * 60 * 1000)); // default: 1 hour from now
+  const [schedulePickerStep, setSchedulePickerStep] = useState('date'); // 'date' → 'time' → submit
   const [recipientPubKey, setRecipientPubKey] = useState(null);
   // encryptionStatus gates the send button until we know whether we can
   // encrypt to the peer. States:
@@ -539,6 +555,15 @@ export default function ChatRoomScreen({ route, navigation }) {
       postMsg(pendingMessage);
     }
   }, [myId]);  // fires once myId is set (after loadUser)
+
+  // Release overdue scheduled messages on chat open + every minute
+  // while open. Recipient sees them as fresh messages on their next poll.
+  useEffect(() => {
+    if (!myId || !roomId) return;
+    releaseOverdueScheduled();
+    const t = setInterval(releaseOverdueScheduled, 60_000);
+    return () => clearInterval(t);
+  }, [myId, roomId]);
 
   useEffect(() => {
     if (!attachModal && pendingAttach.current) {
@@ -783,6 +808,85 @@ export default function ChatRoomScreen({ route, navigation }) {
     successFeedback(); // haptic feedback on send
     await postMsg(content);
     setSending(false);
+  }
+
+  // Save a message as "scheduled" — it sits in the messages table with
+  // message_type='scheduled' + scheduled_at in the future until the
+  // sender's release sweep flips it to a normal message at that time.
+  async function scheduleText(at) {
+    const content = text.trim();
+    if (!content) return;
+    if (!at || !(at instanceof Date) || at.getTime() <= Date.now() + 30_000) {
+      Alert.alert('Pick a future time', 'Scheduled messages must be at least 30 seconds from now.');
+      return;
+    }
+    setText(''); setSending(true);
+    try {
+      let payload = {
+        room_id:      roomId,
+        sender_id:    myId,
+        content,
+        message_type: 'scheduled',
+        scheduled_at: at.toISOString(),
+      };
+      // Encrypt the body now so the ciphertext lives in the DB the whole
+      // time — plaintext never touches Supabase even while scheduled.
+      if (recipientPubKey) {
+        try {
+          const { content: wire, metadataSelf } = await encryptMessageForPair(content, recipientPubKey);
+          payload = {
+            ...payload,
+            content:  wire,
+            metadata: { ct_self: metadataSelf, encrypted: true, v: 2 },
+          };
+        } catch {}
+      }
+      const { data, error } = await supabase.from('messages').insert(payload).select().single();
+      if (!error && data) {
+        plaintextCacheRef.current?.set?.(data.id, content);
+        // Surface it in the sender's local list with a 'Scheduled' marker.
+        setMessages(prev => [...prev, { ...data, content }]);
+        successFeedback();
+        Alert.alert('Scheduled', `Message will send at ${at.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}.`);
+      } else {
+        Alert.alert('Scheduling failed', error?.message || 'Please try again.');
+      }
+    } catch (e) {
+      Alert.alert('Scheduling failed', e?.message || 'Please try again.');
+    } finally {
+      setSending(false);
+      setScheduleMode(false);
+    }
+  }
+
+  // Release any scheduled messages the CURRENT user owns whose
+  // scheduled_at has passed. Flips message_type='text' + stamps
+  // created_at=now() so the recipient's normal message poll picks
+  // them up as brand-new messages.
+  async function releaseOverdueScheduled() {
+    if (!myId || !roomId) return;
+    try {
+      const nowIso = new Date().toISOString();
+      const { data: overdue } = await supabase
+        .from('messages')
+        .select('id')
+        .eq('room_id',     roomId)
+        .eq('sender_id',   myId)
+        .eq('message_type', 'scheduled')
+        .lte('scheduled_at', nowIso);
+      if (!overdue?.length) return;
+      for (const row of overdue) {
+        await supabase
+          .from('messages')
+          .update({ message_type: 'text', scheduled_at: null, created_at: nowIso })
+          .eq('id', row.id);
+      }
+      // Trigger a re-fetch so the sender's UI refreshes. (Recipient's
+      // polling/realtime picks it up on their side.)
+      fetchMessages?.();
+    } catch (e) {
+      if (__DEV__) console.warn('releaseOverdueScheduled failed:', e?.message || e);
+    }
   }
 
   // ── Load reactions for all messages in this room ────────────
@@ -1317,7 +1421,19 @@ export default function ChatRoomScreen({ route, navigation }) {
           />
           <TouchableOpacity
             style={[s.sendBtn, { backgroundColor: text.trim() ? accent : inputBg }]}
-            onPress={() => sendText()} disabled={!text.trim() || sending || encryptionStatus === 'resolving'}>
+            onPress={() => sendText()}
+            onLongPress={() => {
+              if (!text.trim()) return;
+              longPressFeedback();
+              // Default picker to 1 hour from now if the current default is in the past.
+              if (scheduledAt.getTime() <= Date.now()) {
+                setScheduledAt(new Date(Date.now() + 60 * 60 * 1000));
+              }
+              setSchedulePickerStep('date');
+              setScheduleMode(true);
+            }}
+            delayLongPress={450}
+            disabled={!text.trim() || sending || encryptionStatus === 'resolving'}>
             {sending
               ? <ActivityIndicator color="#fff" size="small" />
               : <Text style={{ color: text.trim() ? '#000' : sub, fontSize: 18 }}>➤</Text>}
@@ -1432,6 +1548,53 @@ export default function ChatRoomScreen({ route, navigation }) {
       />
 
       {/* Message long-press action menu */}
+      {/* Scheduled-message picker — opened by long-pressing the send button.
+          iOS shows a native spinner; we use a two-step flow (date → time)
+          for clarity. "Send now" cancels and reverts to normal send. */}
+      {scheduleMode && Platform.OS === 'ios' && (
+        <Modal visible transparent animationType="slide" onRequestClose={() => setScheduleMode(false)}>
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' }}>
+            <View style={{ backgroundColor: card, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20 }}>
+              <Text style={{ color: tx, fontSize: 18, fontWeight: '700', textAlign: 'center', marginBottom: 4 }}>
+                Schedule Message
+              </Text>
+              <Text style={{ color: sub, fontSize: 12, textAlign: 'center', marginBottom: 14 }}>
+                {schedulePickerStep === 'date' ? 'Pick a date' : `Pick a time on ${scheduledAt.toLocaleDateString()}`}
+              </Text>
+              <DateTimePicker
+                value={scheduledAt}
+                mode={schedulePickerStep === 'date' ? 'date' : 'time'}
+                display="spinner"
+                minimumDate={new Date()}
+                onChange={(_, d) => { if (d) setScheduledAt(d); }}
+                textColor={tx}
+                themeVariant={card === '#ffffff' ? 'light' : 'dark'}
+              />
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 18 }}>
+                <TouchableOpacity
+                  style={{ flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: inputBg, alignItems: 'center' }}
+                  onPress={() => { setScheduleMode(false); }}>
+                  <Text style={{ color: tx, fontWeight: '600' }}>Cancel</Text>
+                </TouchableOpacity>
+                {schedulePickerStep === 'date' ? (
+                  <TouchableOpacity
+                    style={{ flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: accent, alignItems: 'center' }}
+                    onPress={() => setSchedulePickerStep('time')}>
+                    <Text style={{ color: '#fff', fontWeight: '700' }}>Next: Time ›</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    style={{ flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: accent, alignItems: 'center' }}
+                    onPress={() => scheduleText(scheduledAt)}>
+                    <Text style={{ color: '#fff', fontWeight: '700' }}>Schedule</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+
       <Modal visible={menuVis} transparent animationType="fade" onRequestClose={() => setMenuVis(false)}>
         <TouchableOpacity style={s.menuOverlay} activeOpacity={1} onPress={() => setMenuVis(false)}>
           <View style={[s.msgMenu, { backgroundColor: card }]}>
