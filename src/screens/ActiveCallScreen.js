@@ -124,9 +124,9 @@ function DisperseDots({ accent, side = 'right', active = true }) {
   );
 }
 const dd = StyleSheet.create({
-  row:      { flexDirection: 'row', alignItems: 'center', position: 'absolute', top: '50%' },
-  rowLeft:  { right: '100%', marginRight: 12, marginTop: -6 },
-  rowRight: { left:  '100%', marginLeft:  12, marginTop: -6 },
+  row:      { flexDirection: 'row', alignItems: 'center' },
+  rowLeft:  { marginRight: 16, flexDirection: 'row' },
+  rowRight: { marginLeft:  16, flexDirection: 'row' },
 });
 
 // ── Participant tile (for 2x2 conference grid) ────────────────
@@ -768,8 +768,14 @@ const s = StyleSheet.create({
   e2eText:        { color: '#cfd1d6', fontSize: 13, letterSpacing: 0.3 },
   ruralNote:      { fontSize: 11, color: 'rgba(255,255,255,0.5)', textAlign: 'center', paddingHorizontal: 32, paddingTop: 6 },
 
-  // Avatar stage — glow ring + disperse dots
-  avatarStage:    { marginTop: 40, marginBottom: 22, alignItems: 'center', justifyContent: 'center' },
+  // Avatar stage — glow ring + disperse dots. Flex-row so the dots
+  // sit to the left/right of the avatar as siblings; the row is
+  // centered horizontally, which gives the dots room on both sides.
+  avatarStage:    {
+    flexDirection: 'row',
+    marginTop: 40, marginBottom: 22,
+    alignItems: 'center', justifyContent: 'center',
+  },
   avatarGlow:     {
     width: 170, height: 170, borderRadius: 85,
     borderWidth: 3, padding: 4, alignItems: 'center', justifyContent: 'center',
