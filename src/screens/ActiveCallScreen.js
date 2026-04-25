@@ -537,7 +537,15 @@ export default function ActiveCallScreen({ route, navigation }) {
       {/* Live adaptation banner — invisible on good networks. */}
       {status === 'Connected' && <CallQualityChip />}
 
-      {/* Top section — single-avatar for 1:1, or 2x2 grid for conference */}
+      {/* Top section — three layouts:
+          1. Conference (showGrid): 2x2/3-tile participant grid
+          2. 1:1 video (isVideo && !showGrid): full-bleed remote +
+             PIP self-view top-right (matches mockup). Real video
+             rendering will land with task #64; for now the bleed
+             area is a tinted accent-colored canvas with the peer's
+             initial as a stand-in for the remote stream, and the
+             PIP shows "You" with our own initial.
+          3. 1:1 voice (default): glowing avatar + disperse dots */}
       {showGrid ? (
         <View style={s.gridWrap}>
           <Text style={s.callTypeLabel}>
@@ -546,8 +554,6 @@ export default function ActiveCallScreen({ route, navigation }) {
           <Text style={[s.status, { color: status === 'Connected' ? '#00ffa3' : '#aaa', marginBottom: 14 }]}>
             {status === 'Connected' ? fmt(duration) : status}
           </Text>
-          {/* 2x2 grid — renders self + up to 3 remote peers. Row layout:
-              2 people = 1 row of 2. 3 = 1 row of 2 + 1 centered. 4 = 2 rows of 2. */}
           {(() => {
             const allTiles = [
               { userId: myUserId, userName: 'You', state: 'connected', hasStream: true, isMe: true },
@@ -570,6 +576,30 @@ export default function ActiveCallScreen({ route, navigation }) {
               </View>
             ));
           })()}
+        </View>
+      ) : isVideo ? (
+        // ── 1:1 VIDEO LAYOUT ──────────────────────────────────
+        <View style={s.videoStage}>
+          {/* Remote-video bleed — placeholder until #64 wires RTCView.
+              Centered initial on an accent-tinted canvas reads better
+              than a flat black rectangle while we're waiting. */}
+          <View style={[s.videoRemote, { backgroundColor: accent + '33' }]}>
+            <Text style={[s.videoRemoteInitial, { color: accent }]}>
+              {(recipientName || '?')[0]?.toUpperCase()}
+            </Text>
+          </View>
+          {/* Timer pill, top center */}
+          <View style={s.videoTimer}>
+            <Text style={s.videoTimerTx}>
+              {status === 'Connected' ? fmt(duration) : status}
+            </Text>
+          </View>
+          {/* PIP self-view, top right */}
+          <View style={[s.videoPip, { borderColor: accent }]}>
+            <View style={[s.videoPipInner, { backgroundColor: accent }]}>
+              <Text style={s.videoPipInitial}>Y</Text>
+            </View>
+          </View>
         </View>
       ) : (
         <View style={s.top}>
@@ -599,9 +629,71 @@ export default function ActiveCallScreen({ route, navigation }) {
         </View>
       )}
 
-      {/* Controls — 3x2 grid matching the voice call mockup
-          Row 1:  Mute   Keypad   Speaker
-          Row 2:  Video  Add Call More                          */}
+      {/* Controls layout switches based on call mode:
+          - 1:1 video (not conference): single 4-button row (Mute /
+            Video / Speaker / End) per the mockup. End is INLINE here,
+            so the separate big-red end button is hidden below.
+          - voice or conference: 3x2 grid of buttons + separate End. */}
+      {(isVideo && !showGrid) ? (
+        <View style={s.videoControls}>
+          <CallBtn
+            theme={{ tx, sub, inputBg }}
+            icon={muted ? '🔇' : '🎤'}
+            label={muted ? 'Unmute' : 'Mute'}
+            active={muted}
+            activeColor="#ff4444"
+            onPress={() => {
+              haptic();
+              const next = !muted;
+              setMuted(next);
+              if (isRealCall) {
+                if (isConference) roomCall.setMute?.(next, 'audio');
+                else              callPeer.setMute(next, myUserId, 'audio');
+              }
+            }}
+          />
+          {/* Video toggle — placeholder until task #64 wires RTCView +
+              real camera control. For now it just shows an explainer
+              alert so the layout slot is filled. */}
+          <CallBtn
+            theme={{ tx, sub, inputBg }}
+            icon="🎥"
+            label="Video"
+            onPress={() => {
+              haptic();
+              Alert.alert(
+                'Camera control',
+                'Full video rendering + camera flip lands with task #64. The button slot is in place so the layout is final.',
+              );
+            }}
+          />
+          <CallBtn
+            theme={{ tx, sub, inputBg }}
+            icon="🔊"
+            label="Speaker"
+            active={speaker}
+            activeColor={accent}
+            onPress={() => {
+              haptic();
+              const next = !speaker;
+              setSpeaker(next);
+              (next ? setSpeakerMode() : setEarpieceMode()).catch(() => {});
+            }}
+          />
+          {/* End — inline with the other controls in video mode, big
+              red circle to match the mockup. */}
+          <View style={{ alignItems: 'center', gap: 8, width: 80 }}>
+            <TouchableOpacity
+              onPress={handleEndPress}
+              activeOpacity={0.85}
+              style={{ width: 68, height: 68, borderRadius: 34, backgroundColor: '#ff3b30', alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={{ fontSize: 26 }}>📵</Text>
+            </TouchableOpacity>
+            <Text style={{ fontSize: 12, color: sub }}>End</Text>
+          </View>
+        </View>
+      ) : (
+      // ── Voice / Conference: original 3x2 grid + separate End button ──
       <View style={s.controls}>
         <View style={s.controlRow}>
           <CallBtn
@@ -673,15 +765,18 @@ export default function ActiveCallScreen({ route, navigation }) {
           />
         </View>
       </View>
+      )}
 
-      {/* End call — dynamic label: 'End for Everyone' for conference creator,
-          'Leave' for other conference members, 'End' for 1:1. */}
-      <View style={s.endRow}>
-        <TouchableOpacity style={s.endBtn} onPress={handleEndPress}>
-          <Text style={s.endIcon}>📵</Text>
-        </TouchableOpacity>
-        <Text style={[s.endLabel, { color: tx }]}>{endLabel}</Text>
-      </View>
+      {/* End call — voice/conference only. Hidden in 1:1 video mode
+          since the End button is inline in the videoControls row. */}
+      {!(isVideo && !showGrid) && (
+        <View style={s.endRow}>
+          <TouchableOpacity style={s.endBtn} onPress={handleEndPress}>
+            <Text style={s.endIcon}>📵</Text>
+          </TouchableOpacity>
+          <Text style={[s.endLabel, { color: tx }]}>{endLabel}</Text>
+        </View>
+      )}
 
       {/* Add Participant modal (search bar + keypad) */}
       <Modal visible={addModal} animationType="slide">
@@ -835,4 +930,31 @@ const s = StyleSheet.create({
   moreIcon:       { fontSize: 22 },
   moreLabel:      { fontSize: 16, fontWeight: '500' },
   divider:        { height: StyleSheet.hairlineWidth, marginHorizontal: 16 },
+
+  // ── Video call layout (1:1) ──────────────────────────────────
+  // videoStage fills the whole top region of the screen with a
+  // tinted "remote video" placeholder and overlays a PIP self-view
+  // top-right plus a timer pill top-center. videoControls is a
+  // single 4-button row at the bottom (Mute / Video / Speaker / End).
+  videoStage:        { flex: 1, position: 'relative', marginHorizontal: 12, marginBottom: 8, borderRadius: 22, overflow: 'hidden' },
+  videoRemote:       { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  videoRemoteInitial:{ fontSize: 96, fontWeight: '800' },
+  videoTimer:        {
+    position: 'absolute', top: 14, alignSelf: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 14,
+    paddingHorizontal: 12, paddingVertical: 5,
+  },
+  videoTimerTx:      { color: '#ffffff', fontWeight: '700', fontSize: 13, letterSpacing: 0.4 },
+  videoPip:          {
+    position: 'absolute', top: 14, right: 14,
+    width: 96, height: 130, borderRadius: 14,
+    borderWidth: 2, overflow: 'hidden',
+    backgroundColor: '#000',
+  },
+  videoPipInner:     { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  videoPipInitial:   { color: '#ffffff', fontSize: 32, fontWeight: '800' },
+  videoControls:     {
+    flexDirection: 'row', justifyContent: 'space-around',
+    paddingHorizontal: 16, paddingVertical: 26,
+  },
 });
