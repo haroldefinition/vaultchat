@@ -241,10 +241,11 @@ export function PhotoStack({ keys, onLongPress }) {
         <Animated.View
           style={[
             s.card, s.cardTop,
-            // Premium accent border + tinted shadow on the top photo card.
-            // shadowColor uses the theme accent so the glow reads as part
-            // of the color story (violet in dark, Fiji blue in light).
-            { borderWidth: 1, borderColor: accent, shadowColor: accent, shadowOpacity: 0.45, shadowRadius: 14 },
+            // iMessage-style subtle frame: hairline accent border with a
+            // soft tinted shadow. Thinner than before so it doesn't
+            // compete with the photo content, and matches better when
+            // multiple photos are stacked underneath.
+            { borderWidth: StyleSheet.hairlineWidth, borderColor: accent, shadowColor: accent, shadowOpacity: 0.28, shadowRadius: 10 },
             { transform:[{translateX:panX},{translateY:panY},{rotate:rotateCard}] },
           ]}
           {...pr.panHandlers}>
@@ -313,8 +314,11 @@ const s = StyleSheet.create({
   deckArea:    { width:CARD_W+30, height:CARD_H+30, alignItems:'center', justifyContent:'center' },
   card:        { position:'absolute', width:CARD_W, height:CARD_H, borderRadius:18, overflow:'hidden', backgroundColor:'#111', shadowColor:'#000', shadowOffset:{width:0,height:6}, shadowOpacity:0.4, shadowRadius:12, elevation:8 },
   cardTop:     { zIndex:10 },
-  cardBg1:     { transform:[{rotate:'3.5deg'},{scale:0.96},{translateY:-4}], zIndex:5, opacity:0.82 },
-  cardBg2:     { transform:[{rotate:'-3.5deg'},{scale:0.92},{translateY:-9}], zIndex:1, opacity:0.60 },
+  // iMessage-style stack: small downward + sideways offset on each
+  // background card with a tiny tilt. Reads as "more photos here"
+  // without the dramatic playing-card fan we had before.
+  cardBg1:     { transform:[{rotate:'1.5deg'},{scale:0.97},{translateY:6},{translateX:4}], zIndex:5, opacity:0.92 },
+  cardBg2:     { transform:[{rotate:'-1.5deg'},{scale:0.94},{translateY:12},{translateX:-4}], zIndex:1, opacity:0.78 },
   cardImg:     { width:'100%', height:'100%' },
   cardHint:    { position:'absolute', bottom:0, left:0, right:0, backgroundColor:'rgba(0,0,0,0.42)', paddingVertical:7 },
   cardHintTx:  { color:'rgba(255,255,255,0.85)', fontSize:11, textAlign:'center', fontWeight:'500' },
