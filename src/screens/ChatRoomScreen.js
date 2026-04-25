@@ -1152,14 +1152,16 @@ export default function ChatRoomScreen({ route, navigation }) {
       await recorder.stop();
       const uri = recorder.uri;
       const durSec = Math.max(1, Math.floor((Date.now() - recordingStartedAt) / 1000));
+      if (__DEV__) console.log('[voice] recorder.uri =', uri, 'durSec =', durSec);
       // Pop back to listening mode so playback works at full volume.
       try { await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }); } catch {}
       if (!uri) { Alert.alert('Recording empty', 'Nothing was captured. Try again.'); return; }
 
       setSending(true);
       const url = await uploadMedia(uri, 'voice');
+      if (__DEV__) console.log('[voice] uploadMedia returned =', url);
       if (!url) {
-        Alert.alert('Upload failed', 'Could not send the voice note. Check your connection and try again.');
+        Alert.alert('Upload failed', 'Could not send the voice note. Check Metro logs — uploadMedia returned null.');
         setSending(false);
         return;
       }

@@ -1,7 +1,13 @@
 // mediaUpload.js — Upload media to Supabase Storage from React Native
 // Uses FileSystem.uploadAsync with BINARY_CONTENT (numeric 0) to avoid
 // enum resolution issues across expo-file-system versions.
-import * as FileSystem from 'expo-file-system';
+//
+// NOTE: as of expo-file-system SDK 54, uploadAsync moved to the
+// legacy submodule. The new File/Directory API doesn't expose
+// streaming uploads yet — until it does, the legacy import is the
+// supported path. Importing from 'expo-file-system' (without the
+// /legacy suffix) throws a deprecation error at call time in SDK 54+.
+import * as FileSystem from 'expo-file-system/legacy';
 import { supabase } from './supabase';
 
 const BUCKET       = 'vaultchat-media';
@@ -65,15 +71,16 @@ export async function uploadMedia(uri, type) {
     });
 
     if (result.status !== 200 && result.status !== 201) {
-      if (__DEV__) console.warn('Upload failed status:', result.status, result.body?.slice(0, 200));
+      if (__DEV__) console.warn('[uploadMedia] FAIL', { type, ext, mime, path, status: result.status, body: (result.body || '').slice(0, 400) });
       return null;
     }
+    if (__DEV__) console.log('[uploadMedia] OK', { type, path, status: result.status });
 
     // Construct public URL directly — no extra round-trip needed
     return `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${path}`;
 
   } catch (e) {
-    if (__DEV__) console.warn('uploadMedia error:', e?.message || e);
+    if (__DEV__) console.warn('[uploadMedia] EXCEPTION', { type, message: e?.message || String(e) });
     return null;
   }
 }
