@@ -58,6 +58,9 @@ let _state = 'idle';           // see state machine above
 let _callId = null;
 let _roomId = null;
 let _peerUserId = null;        // the remote user's userId
+let _callType   = 'voice';     // 'voice' | 'video' — needed by _onCallAccepted
+                                // and accept() to decide SDP video direction
+                                // and whether to open the camera
 let _stopAutoAdapt = null;     // autoAdapt() returns an unsubscribe fn
 let _pendingCandidates = [];   // ICE received before remoteDescription is set
 let _listeners = new Set();    // external subscribers (UI)
@@ -113,6 +116,7 @@ export async function startOutgoing({ callId, roomId, callerId, callerName, peer
   _callId = callId;
   _roomId = roomId;
   _peerUserId = peerUserId;
+  _callType = type;
   _pendingCandidates = [];
   emit('state', { state: _state, callId, peerUserId });
 
@@ -152,7 +156,9 @@ async function _onCallAccepted({ callId }) {
   if (__DEV__) console.log('[callPeer] call:accepted received callId=', callId, 'our callId=', _callId, 'pc?', !!_pc);
   if (!_pc || callId !== _callId) return;
   try {
-    let offer = await _pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: false });
+    // offerToReceiveVideo flips on for video calls so the SDP m-line
+    // for video is included and the peer knows to send video back.
+    let offer = await _pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: _callType === 'video' });
     offer = { ...offer, sdp: enableOpusFec(offer.sdp) };
     await _pc.setLocalDescription(offer);
     sendWebRTCOffer(_peerUserId, offer, _callId);
@@ -181,6 +187,9 @@ export function handleIncomingInvite({ callId, roomId, callerId, type = 'voice' 
   _callId = callId;
   _roomId = roomId;
   _peerUserId = callerId;
+  _callType   = type;   // remembered so accept() opens the camera
+                         // for video calls and the SDP answer carries
+                         // a video m-line.
   _pendingCandidates = [];
   emit('state', { state: _state, callId, peerUserId: callerId, type });
 }
@@ -196,7 +205,11 @@ export async function accept(myUserId) {
   if (_state !== 'incoming') throw new Error(`Can't accept from state=${_state}`);
   try {
     await setupAudioSession();
-    await _openLocalMedia('voice');
+    // Use the type from the staged invite — opens the camera if this
+    // is a video call, mic-only if it's voice. Without this, accept()
+    // would always open mic-only and the answer SDP wouldn't carry a
+    // video m-line, so the caller would never receive video back.
+    await _openLocalMedia(_callType);
     await _createPeerConnection();
     for (const track of _localStream.getTracks()) {
       _pc.addTrack(track, _localStream);
@@ -418,6 +431,7 @@ function _cleanup() {
   _callId = null;
   _roomId = null;
   _peerUserId = null;
+  _callType = 'voice';
 }
 
 // Exposed for the incoming-call entry point so the app-level listener
@@ -461,6 +475,7 @@ export function handoffToRoomCall() {
   _callId = null;
   _roomId = null;
   _peerUserId = null;
+  _callType = 'voice';
 
   const wasState = _state;
   _state = 'idle';

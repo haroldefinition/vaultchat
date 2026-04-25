@@ -9,6 +9,7 @@ import { profileForSignal } from '../services/callQuality';
 import CallQualityChip from '../components/CallQualityChip';
 import AddParticipantModal from '../components/AddParticipantModal';
 import DisperseDots from '../components/DisperseDots';
+import { RTCView } from 'react-native-webrtc';
 import * as callPeer from '../services/callPeer';
 import * as roomCall from '../services/roomCall';
 import * as callLog from '../services/callLog';
@@ -182,6 +183,14 @@ export default function ActiveCallScreen({ route, navigation }) {
   const sawActiveStateRef = useRef(false); // true once we've seen any non-idle state (prevents initial-snapshot teardown)
   const callLogRef = useRef(null); // callLog.beginCall() handle for writing this call's entry
 
+  // ── Video streams (task #64) ─────────────────────────────────
+  // Subscribed from callPeer's 'localStream' / 'remoteStream' events.
+  // RTCView renders a MediaStream by URL, so we keep the stream
+  // objects in state and pass `.toURL()` to the view at render time.
+  const [localStream,  setLocalStream]  = useState(null);
+  const [remoteStream, setRemoteStream] = useState(null);
+  const [cameraFront,  setCameraFront]  = useState(true); // for flip toggle
+
   // Derived: am I the conference creator? Only then do we show "End for Everyone".
   const isCreator = isConference && creatorId && creatorId === myUserId;
   // Participant count for grid rendering (includes me).
@@ -277,6 +286,11 @@ export default function ActiveCallScreen({ route, navigation }) {
         hungUpRef.current = true;
         callLogRef.current?.markEnded();
         navigation.goBack();
+      } else if (event === 'localStream') {
+        // payload IS the stream itself
+        setLocalStream(payload);
+      } else if (event === 'remoteStream') {
+        setRemoteStream(payload);
       }
     });
 
@@ -590,27 +604,45 @@ export default function ActiveCallScreen({ route, navigation }) {
           })()}
         </View>
       ) : isVideo ? (
-        // ── 1:1 VIDEO LAYOUT ──────────────────────────────────
+        // ── 1:1 VIDEO LAYOUT (task #64) ───────────────────────
+        // Real RTCView for the remote stream + local PIP. Falls back
+        // to the accent-tinted initial placeholder while streams are
+        // still negotiating (pre-connect, or peer hasn't enabled video).
         <View style={s.videoStage}>
-          {/* Remote-video bleed — placeholder until #64 wires RTCView.
-              Centered initial on an accent-tinted canvas reads better
-              than a flat black rectangle while we're waiting. */}
-          <View style={[s.videoRemote, { backgroundColor: accent + '33' }]}>
-            <Text style={[s.videoRemoteInitial, { color: accent }]}>
-              {(recipientName || '?')[0]?.toUpperCase()}
-            </Text>
-          </View>
+          {remoteStream
+            ? <RTCView
+                streamURL={remoteStream.toURL()}
+                style={s.videoRemote}
+                objectFit="cover"
+                mirror={false}
+              />
+            : <View style={[s.videoRemote, { backgroundColor: accent + '33' }]}>
+                <Text style={[s.videoRemoteInitial, { color: accent }]}>
+                  {(recipientName || '?')[0]?.toUpperCase()}
+                </Text>
+              </View>
+          }
           {/* Timer pill, top center */}
           <View style={s.videoTimer}>
             <Text style={s.videoTimerTx}>
               {status === 'Connected' ? fmt(duration) : status}
             </Text>
           </View>
-          {/* PIP self-view, top right */}
+          {/* PIP self-view, top right — RTCView mirrored so I see
+              myself like a mirror, the way every other video app
+              renders the local preview. */}
           <View style={[s.videoPip, { borderColor: accent }]}>
-            <View style={[s.videoPipInner, { backgroundColor: accent }]}>
-              <Text style={s.videoPipInitial}>Y</Text>
-            </View>
+            {localStream && localStream.getVideoTracks?.().length > 0
+              ? <RTCView
+                  streamURL={localStream.toURL()}
+                  style={s.videoPipInner}
+                  objectFit="cover"
+                  mirror={cameraFront}
+                />
+              : <View style={[s.videoPipInner, { backgroundColor: accent }]}>
+                  <Text style={s.videoPipInitial}>Y</Text>
+                </View>
+            }
           </View>
         </View>
       ) : (
@@ -667,13 +699,21 @@ export default function ActiveCallScreen({ route, navigation }) {
           <CallBtn
             theme={{ tx, sub, inputBg }}
             Icon={VideoIcon}
-            label="Video"
+            label="Flip"
             onPress={() => {
               haptic();
-              Alert.alert(
-                'Camera control',
-                'Full video rendering + camera flip lands with task #64. The button slot is in place so the layout is final.',
-              );
+              // Camera flip — react-native-webrtc tracks expose
+              // _switchCamera() to swap front/back without
+              // renegotiating SDP. State flip drives the PIP mirror
+              // setting so the local preview re-mirrors only when
+              // actually facing the user.
+              try {
+                const track = localStream?.getVideoTracks?.()[0];
+                if (track && typeof track._switchCamera === 'function') {
+                  track._switchCamera();
+                  setCameraFront(v => !v);
+                }
+              } catch {}
             }}
           />
           <CallBtn
