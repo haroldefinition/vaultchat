@@ -27,6 +27,7 @@ import DisperseDots from '../components/DisperseDots';
 import * as callPeer from '../services/callPeer';
 import * as roomCall from '../services/roomCall';
 import * as callLog from '../services/callLog';
+import { Phone, PhoneOff, Video as VideoIcon } from 'lucide-react-native';
 
 export default function IncomingCallScreen({ route, navigation }) {
   const { bg, tx, sub, accent } = useTheme();
@@ -131,9 +132,14 @@ export default function IncomingCallScreen({ route, navigation }) {
       </View>
 
       <View style={s.top}>
-        <Text style={[s.kicker, { color: sub }]}>
-          {type === 'video' ? '📹 Incoming Video Call' : '📞 Incoming Call'}
-        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 20 }}>
+          {type === 'video'
+            ? <VideoIcon size={14} color={sub} strokeWidth={2} />
+            : <Phone     size={14} color={sub} strokeWidth={2} />}
+          <Text style={[s.kicker, { color: sub, marginBottom: 0 }]}>
+            {type === 'video' ? 'Incoming Video Call' : 'Incoming Call'}
+          </Text>
+        </View>
 
         {/* Avatar stage — dots | glow-ring avatar | dots */}
         <View style={s.avatarStage}>
@@ -158,13 +164,13 @@ export default function IncomingCallScreen({ route, navigation }) {
       <View style={s.actionsRow}>
         <View style={s.actionCol}>
           <TouchableOpacity style={[s.actionBtn, { backgroundColor: '#ff3b30' }]} onPress={onDecline}>
-            <Text style={s.actionIcon}>📵</Text>
+            <PhoneOff size={28} color="#ffffff" strokeWidth={2.2} />
           </TouchableOpacity>
           <Text style={[s.actionLabel, { color: tx }]}>Decline</Text>
         </View>
         <View style={s.actionCol}>
           <TouchableOpacity style={[s.actionBtn, { backgroundColor: '#34C759' }]} onPress={onAccept}>
-            <Text style={s.actionIcon}>📞</Text>
+            <Phone size={28} color="#ffffff" strokeWidth={2.2} />
           </TouchableOpacity>
           <Text style={[s.actionLabel, { color: tx }]}>Accept</Text>
         </View>

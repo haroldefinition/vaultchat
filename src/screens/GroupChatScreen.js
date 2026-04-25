@@ -34,6 +34,7 @@ import {
   AudioModule,
   setAudioModeAsync,
 } from 'expo-audio';
+import { Phone, Video as VideoIcon, Mic } from 'lucide-react-native';
 import { makeCallId } from '../services/placeCall';
 import { getMyDisplayName } from '../services/vaultHandle';
 
@@ -941,13 +942,13 @@ export default function GroupChatScreen({ route, navigation }) {
           onPress={() => startGroupCall('voice')}
           accessibilityLabel="Start group voice call"
           style={{ paddingHorizontal: 6 }}>
-          <Text style={{ fontSize: 20 }}>📞</Text>
+          <Phone size={20} color={accent} strokeWidth={2} />
         </TouchableOpacity>
         <TouchableOpacity
           onPress={() => startGroupCall('video')}
           accessibilityLabel="Start group video call"
           style={{ paddingHorizontal: 6 }}>
-          <Text style={{ fontSize: 20 }}>📹</Text>
+          <VideoIcon size={20} color={accent} strokeWidth={2} />
         </TouchableOpacity>
         <TouchableOpacity onPress={leaveGroup} style={{ paddingHorizontal: 8 }}>
           <Text style={{ fontSize: 18, color: sub }}>⋯</Text>
@@ -1185,7 +1186,7 @@ export default function GroupChatScreen({ route, navigation }) {
               onPress={startRecording}
               accessibilityLabel="Record voice note"
               disabled={sending}>
-              <Text style={{ color: '#fff', fontSize: 18 }}>🎤</Text>
+              <Mic size={20} color="#ffffff" strokeWidth={2} />
             </TouchableOpacity>
           )}
         </View>

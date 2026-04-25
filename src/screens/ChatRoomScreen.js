@@ -35,6 +35,7 @@ import {
   AudioModule,
   setAudioModeAsync,
 } from 'expo-audio';
+import { Phone, Video as VideoIcon, Search, Mic } from 'lucide-react-native';
 import {
   publishMyPublicKey,
   getPublicKey,
@@ -1308,13 +1309,13 @@ export default function ChatRoomScreen({ route, navigation }) {
           </View>
         </TouchableOpacity>
         <TouchableOpacity onPress={() => { setSearchOpen(v => !v); setSearchQuery(''); }} style={s.callBtn}>
-          <Text style={{ fontSize: 20 }}>🔍</Text>
+          <Search size={20} color={tx} strokeWidth={2} />
         </TouchableOpacity>
         <TouchableOpacity onPress={() => placeCall({ navigation, peerUserId: recipientId, chatRoomId: roomId, recipientName, recipientPhone, type: 'voice' })} style={s.callBtn}>
-          <Text style={{ fontSize: 22 }}>📞</Text>
+          <Phone size={22} color={accent} strokeWidth={2} />
         </TouchableOpacity>
         <TouchableOpacity onPress={() => placeCall({ navigation, peerUserId: recipientId, chatRoomId: roomId, recipientName, recipientPhone, type: 'video' })} style={s.callBtn}>
-          <Text style={{ fontSize: 22 }}>📹</Text>
+          <VideoIcon size={22} color={accent} strokeWidth={2} />
         </TouchableOpacity>
       </View>
 
@@ -1601,7 +1602,7 @@ export default function ChatRoomScreen({ route, navigation }) {
               onPress={startRecording}
               accessibilityLabel="Record voice note"
               disabled={sending || encryptionStatus === 'resolving'}>
-              <Text style={{ color: '#fff', fontSize: 18 }}>🎤</Text>
+              <Mic size={20} color="#ffffff" strokeWidth={2} />
             </TouchableOpacity>
           )}
         </View>

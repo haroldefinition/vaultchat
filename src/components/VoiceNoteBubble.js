@@ -29,6 +29,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
 import { useAudioPlayer } from 'expo-audio';
+import { Play, Pause } from 'lucide-react-native';
 
 const BAR_COUNT = 24;
 
@@ -113,7 +114,9 @@ export default function VoiceNoteBubble({ url, durationSec, accent, isMe, bgColo
         onPress={toggle}
         accessibilityLabel={isPlaying ? 'Pause voice note' : 'Play voice note'}
         style={[s.playBtn, { backgroundColor: accent + '33', borderColor: accent }]}>
-        <Text style={[s.playIcon, { color: accent }]}>{isPlaying ? '⏸' : '▶'}</Text>
+        {isPlaying
+          ? <Pause size={18} color={accent} strokeWidth={2.5} fill={accent} />
+          : <Play  size={18} color={accent} strokeWidth={2.5} fill={accent} />}
       </TouchableOpacity>
 
       <View style={s.middle}>

@@ -12,6 +12,10 @@ import DisperseDots from '../components/DisperseDots';
 import * as callPeer from '../services/callPeer';
 import * as roomCall from '../services/roomCall';
 import * as callLog from '../services/callLog';
+import {
+  Mic, MicOff, Volume2, Video as VideoIcon, VideoOff,
+  Plus, MoreHorizontal, Hash, PhoneOff, Pause, Play,
+} from 'lucide-react-native';
 import { callroomUpgradeNotice } from '../services/socket';
 import { getMyDisplayName } from '../services/vaultHandle';
 import { setEarpieceMode, setSpeakerMode } from '../services/audioSession';
@@ -56,7 +60,13 @@ const qb = StyleSheet.create({
 // (e.g. Mute on, Speaker on, Video on). Theme-aware so it works
 // against both the dark-mode near-black canvas AND the light-mode
 // white canvas — tinted surface + tx-colored icon + sub-colored label.
-function CallBtn({ icon, label, onPress, active, activeColor, theme }) {
+//
+// `Icon` is a Lucide component (passed as a component reference, not
+// instantiated — CallBtn instantiates it with the right size + color
+// so the icon picks up the active/inactive state automatically).
+// Falls back to rendering `icon` as a string for any legacy callers
+// still passing emoji.
+function CallBtn({ Icon, icon, label, onPress, active, activeColor, theme }) {
   const bg   = active && activeColor ? activeColor : (theme?.inputBg || 'rgba(255,255,255,0.09)');
   const ic   = active ? '#ffffff' : (theme?.tx  || '#ffffff');
   const lbl  = theme?.sub || '#cfd1d6';
@@ -66,7 +76,9 @@ function CallBtn({ icon, label, onPress, active, activeColor, theme }) {
         onPress={onPress}
         activeOpacity={0.75}
         style={[cb.btn, { backgroundColor: bg }]}>
-        <Text style={[cb.icon, { color: ic }]}>{icon}</Text>
+        {Icon
+          ? <Icon size={26} color={ic} strokeWidth={2} />
+          : <Text style={[cb.icon, { color: ic }]}>{icon}</Text>}
       </TouchableOpacity>
       <Text style={[cb.label, { color: lbl }]}>{label}</Text>
     </View>
@@ -638,7 +650,7 @@ export default function ActiveCallScreen({ route, navigation }) {
         <View style={s.videoControls}>
           <CallBtn
             theme={{ tx, sub, inputBg }}
-            icon={muted ? '🔇' : '🎤'}
+            Icon={muted ? MicOff : Mic}
             label={muted ? 'Unmute' : 'Mute'}
             active={muted}
             activeColor="#ff4444"
@@ -652,12 +664,9 @@ export default function ActiveCallScreen({ route, navigation }) {
               }
             }}
           />
-          {/* Video toggle — placeholder until task #64 wires RTCView +
-              real camera control. For now it just shows an explainer
-              alert so the layout slot is filled. */}
           <CallBtn
             theme={{ tx, sub, inputBg }}
-            icon="🎥"
+            Icon={VideoIcon}
             label="Video"
             onPress={() => {
               haptic();
@@ -669,7 +678,7 @@ export default function ActiveCallScreen({ route, navigation }) {
           />
           <CallBtn
             theme={{ tx, sub, inputBg }}
-            icon="🔊"
+            Icon={Volume2}
             label="Speaker"
             active={speaker}
             activeColor={accent}
@@ -680,14 +689,13 @@ export default function ActiveCallScreen({ route, navigation }) {
               (next ? setSpeakerMode() : setEarpieceMode()).catch(() => {});
             }}
           />
-          {/* End — inline with the other controls in video mode, big
-              red circle to match the mockup. */}
+          {/* End — inline red circle with PhoneOff icon, matches mockup. */}
           <View style={{ alignItems: 'center', gap: 8, width: 80 }}>
             <TouchableOpacity
               onPress={handleEndPress}
               activeOpacity={0.85}
               style={{ width: 68, height: 68, borderRadius: 34, backgroundColor: '#ff3b30', alignItems: 'center', justifyContent: 'center' }}>
-              <Text style={{ fontSize: 26 }}>📵</Text>
+              <PhoneOff size={26} color="#ffffff" strokeWidth={2.2} />
             </TouchableOpacity>
             <Text style={{ fontSize: 12, color: sub }}>End</Text>
           </View>
@@ -698,7 +706,7 @@ export default function ActiveCallScreen({ route, navigation }) {
         <View style={s.controlRow}>
           <CallBtn
             theme={{ tx, sub, inputBg }}
-            icon={muted ? '🔇' : '🎤'}
+            Icon={muted ? MicOff : Mic}
             label={muted ? 'Unmute' : 'Mute'}
             active={muted}
             activeColor="#ff4444"
@@ -714,13 +722,13 @@ export default function ActiveCallScreen({ route, navigation }) {
           />
           <CallBtn
             theme={{ tx, sub, inputBg }}
-            icon="⌘"
+            Icon={Hash}
             label="Keypad"
             onPress={() => { haptic(); setKeypadModal(true); }}
           />
           <CallBtn
             theme={{ tx, sub, inputBg }}
-            icon="🔊"
+            Icon={Volume2}
             label="Speaker"
             active={speaker}
             activeColor={accent}
@@ -740,7 +748,7 @@ export default function ActiveCallScreen({ route, navigation }) {
           {__DEV__ && (
             <CallBtn
               theme={{ tx, sub, inputBg }}
-              icon="🎥"
+              Icon={VideoIcon}
               label="Video"
               onPress={() => {
                 haptic();
@@ -753,13 +761,13 @@ export default function ActiveCallScreen({ route, navigation }) {
           )}
           <CallBtn
             theme={{ tx, sub, inputBg }}
-            icon="+"
+            Icon={Plus}
             label="Add Call"
             onPress={() => { haptic(); setAddModal(true); }}
           />
           <CallBtn
             theme={{ tx, sub, inputBg }}
-            icon="⋯"
+            Icon={MoreHorizontal}
             label="More"
             onPress={() => { haptic(); setMoreModal(true); }}
           />
@@ -772,7 +780,7 @@ export default function ActiveCallScreen({ route, navigation }) {
       {!(isVideo && !showGrid) && (
         <View style={s.endRow}>
           <TouchableOpacity style={s.endBtn} onPress={handleEndPress}>
-            <Text style={s.endIcon}>📵</Text>
+            <PhoneOff size={28} color="#ffffff" strokeWidth={2.2} />
           </TouchableOpacity>
           <Text style={[s.endLabel, { color: tx }]}>{endLabel}</Text>
         </View>
