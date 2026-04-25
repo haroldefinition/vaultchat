@@ -11,7 +11,7 @@ import { supabase } from './supabase';
 // trip the guard on the next subscribe call. This helper finds any
 // channel with the same topic and tears it down first, guaranteeing
 // .channel() returns a fresh, unsubscribed instance every time.
-function freshChannel(name) {
+export function freshChannel(name) {
   try {
     const channels = supabase.getChannels?.() || [];
     for (const c of channels) {

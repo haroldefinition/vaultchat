@@ -7,7 +7,7 @@ import {
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { useTheme } from '../services/theme';
 import { supabase } from '../services/supabase';
-import { subscribeToGroup, subscribeToTyping, broadcastTyping } from '../services/realtimeMessages';
+import { subscribeToGroup, subscribeToTyping, broadcastTyping, freshChannel } from '../services/realtimeMessages';
 import { enqueue, flushQueue } from '../services/messageQueue';
 // adsService used only in Discover/OfferInbox — not in private chats
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -357,8 +357,7 @@ export default function GroupChatScreen({ route, navigation }) {
     pollRef.current = setInterval(syncSupabase, 10000); // slower fallback
 
     // Realtime: reactions on group messages
-    const reactionSub = supabase
-      .channel(`group_reactions:${groupId}`)
+    const reactionSub = freshChannel(`group_reactions:${groupId}`)
       .on('postgres_changes', {
         event: '*', schema: 'public', table: 'message_reactions',
       }, payload => {

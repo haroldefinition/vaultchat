@@ -24,7 +24,7 @@ import { supabase } from '../services/supabase';
 import { placeCall } from '../services/placeCall';
 import { usePresence } from '../services/presence';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { subscribeToRoom, subscribeToTyping, broadcastTyping } from '../services/realtimeMessages';
+import { subscribeToRoom, subscribeToTyping, broadcastTyping, freshChannel } from '../services/realtimeMessages';
 import { enqueue, flushQueue } from '../services/messageQueue';
 import { markRoomAsRead, markDelivered, receiptIcon } from '../services/readReceipts';
 import { ResolvedPhotoStack, ResolvedVideoCarousel } from '../components/MediaBubbles';
@@ -588,8 +588,7 @@ export default function ChatRoomScreen({ route, navigation }) {
     });
 
     // Realtime: reactions
-    const reactionSub = supabase
-      .channel(`reactions:${roomId}`)
+    const reactionSub = freshChannel(`reactions:${roomId}`)
       .on('postgres_changes', {
         event: '*', schema: 'public', table: 'message_reactions',
       }, payload => {
