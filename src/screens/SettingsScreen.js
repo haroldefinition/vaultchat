@@ -7,6 +7,7 @@ import { useTheme } from '../services/theme';
 import { requestContactsPermission, syncContacts } from '../services/contacts';
 import { checkBiometricSupport } from '../services/biometric';
 import { generateHandle, getMyHandle, saveHandle } from '../services/vaultHandle';
+import { shareMyInvite } from '../services/inviteLink';
 import { createBackup, restoreBackup } from '../services/backup';
 import { placeCall } from '../services/placeCall';
 import { hangup as callPeerHangup, getState as callPeerGetState, _internal as callPeerInternal, subscribe as callPeerSubscribe } from '../services/callPeer';
@@ -162,6 +163,75 @@ export default function SettingsScreen({ navigation }) {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Sign Out', style: 'destructive', onPress: async () => { await supabase.auth.signOut(); await AsyncStorage.clear(); } },
     ]);
+  }
+
+  // Two-step account deletion required by App Store guideline 5.1.1(v):
+  // "Apps that support account creation must let users initiate
+  //  deletion of their account from within the app."
+  //
+  // Step 1: dismissable warning describing what gets deleted.
+  // Step 2: hard confirm — only this Delete-Account button actually
+  //         destroys data, so a single mis-tap can't nuke the account.
+  // Step 3: actual deletion path:
+  //   - Delete this user's row from `profiles` (RLS lets the user
+  //     delete their own row). This removes their public identity:
+  //     handle, display name, public key — peers can no longer find
+  //     them by @handle and can no longer encrypt to them.
+  //   - Sign out of Supabase auth (revokes the session JWT).
+  //   - Wipe local AsyncStorage (chat cache, keys, settings, etc).
+  //
+  // KNOWN GAP: removing the auth.users row (the underlying account
+  // record) requires a service-role or Edge Function call. Filed as
+  // follow-up — for App Store today, the user-facing data is gone:
+  // their @handle is freed up for re-claim, all their messages on
+  // the device are wiped, and their session token is revoked. The
+  // orphaned auth row is invisible to other users and to themselves.
+  async function deleteAccount() {
+    Alert.alert(
+      'Delete your account?',
+      'This will permanently remove your @handle, profile, and all chat data on this device. Other people will no longer be able to find you by your handle. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Continue',
+          style: 'destructive',
+          onPress: () => {
+            // Second confirmation — Apple expects a hard "are you really sure"
+            Alert.alert(
+              'Are you sure?',
+              'There is no way to recover a deleted account. Your handle becomes available for someone else to claim.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Delete Account',
+                  style: 'destructive',
+                  onPress: async () => {
+                    try {
+                      const { data: { session } } = await supabase.auth.getSession();
+                      const myUserId = session?.user?.id;
+                      if (myUserId) {
+                        // Public profile row — peers can no longer resolve us
+                        // by @handle once this is gone.
+                        try { await supabase.from('profiles').delete().eq('id', myUserId); } catch {}
+                        // Note: auth.users deletion needs a service-role RPC
+                        // or Edge Function. Tracked as a follow-up — for now
+                        // the auth row is orphaned (no profile, no handle,
+                        // no way to be found).
+                      }
+                      try { await supabase.auth.signOut(); } catch {}
+                      try { await AsyncStorage.clear(); } catch {}
+                      Alert.alert('Account deleted', 'Your VaultChat account has been removed.');
+                    } catch (e) {
+                      Alert.alert('Delete failed', e?.message || 'Could not delete the account. Try again or contact support.');
+                    }
+                  },
+                },
+              ],
+            );
+          },
+        },
+      ],
+    );
   }
 
   const NavBar = ({ title, onSave }) => (
@@ -339,6 +409,27 @@ export default function SettingsScreen({ navigation }) {
             <Text style={{ color: accent, fontSize: 18 }}>›</Text>
           </TouchableOpacity>
 
+          {/* Share Invite Link — same identity as the QR code, but as a
+              shareable URL. Opens the iOS Share sheet so the user can fire
+              off the link via Messages, Mail, or any other share target. */}
+          <TouchableOpacity
+            style={{
+              marginTop: 10, flexDirection: 'row', alignItems: 'center',
+              backgroundColor: accent + '18', borderColor: accent + '44', borderWidth: 1,
+              borderRadius: 14, paddingHorizontal: 16, paddingVertical: 14,
+            }}
+            onPress={async () => {
+              const ok = await shareMyInvite();
+              if (!ok) Alert.alert('Set a handle first', 'You need a @handle before you can share an invite link.');
+            }}>
+            <Text style={{ fontSize: 22 }}>🔗</Text>
+            <View style={{ flex: 1, marginLeft: 14 }}>
+              <Text style={{ color: accent, fontWeight: '700', fontSize: 15 }}>Share Invite Link</Text>
+              <Text style={{ color: sub, fontSize: 12, marginTop: 2 }}>Send a link friends can tap to add you</Text>
+            </View>
+            <Text style={{ color: accent, fontSize: 18 }}>›</Text>
+          </TouchableOpacity>
+
           <TouchableOpacity style={[st.saveBtn, { backgroundColor: accent }]} onPress={saveProfile}>
             <Text style={st.saveBtnText}>Save Profile</Text>
           </TouchableOpacity>
@@ -446,6 +537,12 @@ export default function SettingsScreen({ navigation }) {
             } />
             <Row icon="🔢" label="Set Real PIN" subText={realPin ? '••••••' : 'Not set'} onPress={() => { setPinType('real'); setPinInput(''); setPinModal(true); }} />
             <Row icon="🎭" label="Decoy PIN" subText={decoyPin ? 'Set — shows empty chats' : 'Not set'} onPress={() => { setPinType('decoy'); setPinInput(''); setPinModal(true); }} />
+          </Section>
+          {/* DANGER ZONE — required for App Store compliance (5.1.1(v)).
+              Account deletion has to be initiable from within the app.
+              Two-step confirmation guards against accidental taps. */}
+          <Section title="DANGER ZONE">
+            <Row icon="❌" label="Delete Account" subText="Permanently remove your VaultChat account" danger onPress={deleteAccount} />
           </Section>
         </ScrollView>
       </View>

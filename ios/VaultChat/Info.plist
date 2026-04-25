@@ -27,6 +27,7 @@
       <dict>
         <key>CFBundleURLSchemes</key>
         <array>
+          <string>vaultchat</string>
           <string>com.chatvault.vaultchat</string>
         </array>
       </dict>

@@ -4,6 +4,7 @@
     "slug": "vaultchat",
     "version": "1.0.0",
     "orientation": "portrait",
+    "scheme": "vaultchat",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "splash": {

@@ -12,6 +12,8 @@ import { ThemeProvider, useTheme } from './src/services/theme';
 import { UnreadProvider, useUnread } from './src/services/unreadBadge';
 import { setupPushNotifications, addNotificationResponseListener, clearBadge } from './src/services/pushNotifications';
 import { flushQueue } from './src/services/messageQueue';
+import { subscribeToInviteUrls } from './src/services/inviteLink';
+import { findByHandle } from './src/services/vaultHandle';
 import { isBiometricEnabled } from './src/services/biometric';
 import { connectSocket, disconnectSocket } from './src/services/socket';
 import { startCallListener, stopCallListener } from './src/services/callListener';
@@ -204,6 +206,34 @@ export default function App() {
       });
 
       const cleanup = addNotificationResponseListener(() => {});
+
+      // Deep-link routing for vaultchat://user/<handle> URLs (task #67).
+      // When someone taps a shared invite, we resolve the handle to a real
+      // profile and pop NewMessage with the contact pre-filled — same shape
+      // the QR scanner uses, so the in-app behavior is identical regardless
+      // of how the URL was delivered (QR, link, paste, share-sheet, etc).
+      const unsubInvite = subscribeToInviteUrls(async ({ handle, name }) => {
+        if (!handle) return;
+        const profile = await findByHandle(handle);
+        const navReady = navigationRef?.isReady?.();
+        const tryNav = () => {
+          if (!navigationRef?.isReady?.()) {
+            // Stack still warming up (cold launch via URL) — retry shortly.
+            setTimeout(tryNav, 200);
+            return;
+          }
+          navigationRef.navigate('NewMessage', {
+            selectedContact: profile
+              ? {
+                  handle: profile.vault_handle ? `@${profile.vault_handle}` : `@${handle}`,
+                  phone:  profile.phone || null,
+                  name:   profile.display_name || name || `@${handle}`,
+                }
+              : { handle: `@${handle}`, phone: null, name: name || `@${handle}` },
+          });
+        };
+        tryNav();
+      });
 
       // Bootstrap socket + global call listener for an authenticated user.
       // Safe to call multiple times — both services no-op if already set up.
