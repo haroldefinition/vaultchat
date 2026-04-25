@@ -4,7 +4,7 @@ import { supabase } from '../services/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../services/theme';
-import { requestContactsPermission, syncContacts } from '../services/contacts';
+import { requestContactsPermission, syncContacts, findFriendsOnVaultChat } from '../services/contacts';
 import { checkBiometricSupport } from '../services/biometric';
 import { generateHandle, getMyHandle, saveHandle } from '../services/vaultHandle';
 import { shareMyInvite } from '../services/inviteLink';
@@ -496,8 +496,24 @@ export default function SettingsScreen({ navigation }) {
             <Row icon="🔍" label="Find Friends on VaultChat" subText="See which contacts use the app" onPress={async () => {
               const granted = await requestContactsPermission();
               if (!granted) { Alert.alert('Permission needed', 'Allow contacts access first'); return; }
-              const contacts = await syncContacts();
-              Alert.alert('Friends Found', `Synced ${contacts.length} contacts. Friends using VaultChat will appear in your Calls tab.`);
+              const { friends, totalContacts } = await findFriendsOnVaultChat();
+              if (friends.length === 0) {
+                Alert.alert(
+                  'No matches yet',
+                  `Searched ${totalContacts} contacts — none of them are on VaultChat right now. Share your invite link to bring them on.`,
+                );
+                return;
+              }
+              // Show up to 6 names by default, then "and N more" so the
+              // alert stays readable even with a big match list. Full
+              // list cached at vaultchat_friends for future surfaces.
+              const named = friends.map(f => f.contact_name || f.display_name || (f.vault_handle ? `@${f.vault_handle}` : 'Friend'));
+              const preview = named.slice(0, 6).join('\n• ');
+              const more    = named.length > 6 ? `\n…and ${named.length - 6} more` : '';
+              Alert.alert(
+                `${friends.length} friend${friends.length === 1 ? '' : 's'} found`,
+                `From ${totalContacts} contacts:\n\n• ${preview}${more}`,
+              );
             }} />
           </Section>
           <Section title="DEVICES">
