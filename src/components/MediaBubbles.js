@@ -229,46 +229,29 @@ export function PhotoStack({ keys, onLongPress }) {
   const bg1   = count >= 2 ? uris[(topIdx + 1) % count] : null;
   const bg2   = count >= 3 ? uris[(topIdx + 2) % count] : null;
 
+  // Bubble layout intentionally chrome-free: just the stacked photo
+  // cards. The visual stack of underneath cards communicates "more
+  // photos here," and tapping any card opens the FullScreenViewer
+  // which has full swipe-to-browse, pinch-to-zoom, and a counter.
+  // No in-bubble counter row, no dots, no arrow nav — keeps the
+  // bubble visually clean like iMessage's photo stack.
   return (
     <View style={s.root}>
-      <View style={s.counterRow}>
-        <Text style={s.counterTx}>{(topIdx % count) + 1} / {count}</Text>
-        {count > 1 && <Text style={s.counterHint}>  swipe left or right</Text>}
-      </View>
       <View style={s.deckArea}>
         {bg2 && <View style={[s.card,s.cardBg2]}><Image source={{uri:bg2}} style={s.cardImg} resizeMode="cover"/></View>}
         {bg1 && <View style={[s.card,s.cardBg1]}><Image source={{uri:bg1}} style={s.cardImg} resizeMode="cover"/></View>}
         <Animated.View
           style={[
             s.card, s.cardTop,
-            // iMessage-style subtle frame: hairline accent border with a
-            // soft tinted shadow. Thinner than before so it doesn't
-            // compete with the photo content, and matches better when
-            // multiple photos are stacked underneath.
             { borderWidth: StyleSheet.hairlineWidth, borderColor: accent, shadowColor: accent, shadowOpacity: 0.28, shadowRadius: 10 },
             { transform:[{translateX:panX},{translateY:panY},{rotate:rotateCard}] },
           ]}
           {...pr.panHandlers}>
           <TouchableOpacity style={{flex:1}} onPress={() => { setFsStart(topIdx%count); setFsOpen(true); }} onLongPress={onLongPress} delayLongPress={500} activeOpacity={0.97}>
             <Image source={{uri:uris[topIdx%count]}} style={s.cardImg} resizeMode="cover"/>
-            {/* Hint removed — the visible stack of photos behind the
-                top card now communicates "more photos here" on its own,
-                and the dots/arrows below cover the swipe affordance. */}
           </TouchableOpacity>
         </Animated.View>
       </View>
-      {count > 1 && (
-        <View style={s.navRow}>
-          <TouchableOpacity style={s.navBtn} onPress={goBack}><Text style={s.navArrow}>‹</Text></TouchableOpacity>
-          <View style={s.dotRow}>
-            {Array.from({length:Math.min(count,8)}).map((_,i) => (
-              <View key={i} style={[s.dot, i===(topIdx%Math.min(count,8))&&s.dotActive]}/>
-            ))}
-            {count > 8 && <Text style={s.dotMore}>+{count-8}</Text>}
-          </View>
-          <TouchableOpacity style={s.navBtn} onPress={advance}><Text style={s.navArrow}>›</Text></TouchableOpacity>
-        </View>
-      )}
       <FullScreenViewer uris={uris} startIndex={fsStart} visible={fsOpen} onClose={() => setFsOpen(false)}/>
     </View>
   );
