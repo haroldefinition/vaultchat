@@ -131,9 +131,14 @@ function MainTabs() {
             <View style={{ position: 'relative' }}>
               <Text style={{ fontSize: 26, opacity: focused ? 1 : 0.85 }}>💬</Text>
               {count > 0 && (
+                // Accent-tinted dot (violet in dark, Fiji blue in light)
+                // matches the mockup's premium notification indicator,
+                // replacing the loud iOS-system red. Counts above 0
+                // still render the number; the small dot reads cleaner
+                // than the red badge against the dark canvas.
                 <View style={{
                   position: 'absolute', top: -4, right: -8,
-                  backgroundColor: '#ff3b30', borderRadius: 10,
+                  backgroundColor: accent, borderRadius: 10,
                   minWidth: 18, height: 18,
                   alignItems: 'center', justifyContent: 'center',
                   paddingHorizontal: 4,

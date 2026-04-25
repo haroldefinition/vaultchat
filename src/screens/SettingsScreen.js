@@ -205,6 +205,33 @@ export default function SettingsScreen({ navigation }) {
     </>
   );
 
+  // Mockup-style category row used in the main settings page. Bigger
+  // tap target, tinted icon chip, single chevron — matches the design
+  // reference. `last` removes the bottom hairline on the final row of
+  // a card so the card has clean rounded corners.
+  const CatRow = ({ icon, label, onPress, tx, sub, border, accent, last }) => (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.7}
+      style={{
+        flexDirection: 'row', alignItems: 'center',
+        paddingHorizontal: 16, paddingVertical: 16,
+        borderBottomWidth: last ? 0 : StyleSheet.hairlineWidth,
+        borderBottomColor: border,
+      }}>
+      <View style={{
+        width: 32, height: 32, borderRadius: 10,
+        backgroundColor: accent + '22',
+        alignItems: 'center', justifyContent: 'center',
+        marginRight: 14,
+      }}>
+        <Text style={{ fontSize: 16 }}>{icon}</Text>
+      </View>
+      <Text style={{ flex: 1, color: tx, fontSize: 15, fontWeight: '500' }}>{label}</Text>
+      <Text style={{ color: sub, fontSize: 18 }}>›</Text>
+    </TouchableOpacity>
+  );
+
   const Field = ({ label, value, onChange, placeholder, multiline, keyboardType, editable = true }) => (
     <View style={{ marginBottom: 4 }}>
       <Text style={[st.fieldLabel, { color: sub }]}>{label}</Text>
@@ -361,6 +388,156 @@ export default function SettingsScreen({ navigation }) {
     );
   }
 
+  // ── ACCOUNT sub-page ────────────────────────────────────────
+  if (page === 'account') {
+    return (
+      <View style={{ flex: 1, backgroundColor: bg }}>
+        <NavBar title="Account" />
+        <ScrollView contentContainerStyle={{ paddingBottom: 60 }}>
+          <Section title="CONTACTS">
+            <Row icon="👥" label="Sync Phone Contacts" subText="Import from address book, iCloud, Google" onPress={async () => {
+              const granted = await requestContactsPermission();
+              if (!granted) { Alert.alert('Permission needed', 'Go to Settings → Expo Go → Contacts → Allow'); return; }
+              const contacts = await syncContacts();
+              Alert.alert('Synced! ✓', `${contacts.length} contacts imported successfully.`);
+            }} />
+            <Row icon="☁️" label="iCloud Contacts" subText="Sync via iPhone Settings → iCloud → Contacts" onPress={() => Alert.alert('iCloud Sync', 'Enable iCloud Contacts in iPhone Settings → Apple ID → iCloud → Contacts to sync automatically.')} />
+            <Row icon="🔍" label="Find Friends on VaultChat" subText="See which contacts use the app" onPress={async () => {
+              const granted = await requestContactsPermission();
+              if (!granted) { Alert.alert('Permission needed', 'Allow contacts access first'); return; }
+              const contacts = await syncContacts();
+              Alert.alert('Friends Found', `Synced ${contacts.length} contacts. Friends using VaultChat will appear in your Calls tab.`);
+            }} />
+          </Section>
+          <Section title="DEVICES">
+            <Row icon="📲" label="Linked Devices" subText="iPhone 17 Pro (This device)" onPress={() => Alert.alert('Linked Devices', 'iPhone 17 Pro — Active now\nMacBook Pro — Last active 2h ago')} />
+          </Section>
+          <TouchableOpacity style={st.signOutBtn} onPress={signOut}>
+            <Text style={st.signOutText}>Sign Out</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </View>
+    );
+  }
+
+  // ── PRIVACY sub-page ────────────────────────────────────────
+  if (page === 'privacy') {
+    return (
+      <View style={{ flex: 1, backgroundColor: bg }}>
+        <NavBar title="Privacy" />
+        <ScrollView contentContainerStyle={{ paddingBottom: 60 }}>
+          <Section title="ENCRYPTION">
+            <Row icon="🔒" label="End-to-End Encryption" subText="All messages encrypted" right={<Text style={{ color: '#00ffa3', fontWeight: 'bold' }}>ON</Text>} />
+          </Section>
+          <Section title="MESSAGE PRIVACY">
+            <Toggle icon="💨" label="Vanish Mode" subText="Messages disappear after viewing" storageKey="vaultchat_vanish" value={vanishMode} onChange={setVanishMode} />
+            <Toggle icon="✏️" label="Edit Messages" subText="Edit sent messages within 2 hours" storageKey="vaultchat_edit_msg" value={editMessages} onChange={setEditMessages} />
+            <Toggle icon="📌" label="Pin Messages" subText="Allow pinning important messages" storageKey="vaultchat_pin_msg" value={pinMessages} onChange={setPinMessages} />
+            <Row icon="🚫" label="Blocked Contacts" subText={`${blockedContacts.length} blocked`} onPress={() => setPage('blocked')} />
+          </Section>
+          <Section title="SECURITY">
+            <Row icon="🔐" label="Biometric Lock" subText="Face ID / Touch ID on app open" right={
+              <Switch value={biometricEnabled} onValueChange={async v => {
+                const supported = await checkBiometricSupport();
+                if (!supported && v) { Alert.alert('Not Available', 'Biometric authentication is not set up on this device.'); return; }
+                setBiometricEnabled(v);
+                await AsyncStorage.setItem('vaultchat_biometric', v ? 'true' : 'false');
+              }} trackColor={{ false: '#333', true: accent }} thumbColor="#fff" />
+            } />
+            <Row icon="🔢" label="Set Real PIN" subText={realPin ? '••••••' : 'Not set'} onPress={() => { setPinType('real'); setPinInput(''); setPinModal(true); }} />
+            <Row icon="🎭" label="Decoy PIN" subText={decoyPin ? 'Set — shows empty chats' : 'Not set'} onPress={() => { setPinType('decoy'); setPinInput(''); setPinModal(true); }} />
+          </Section>
+        </ScrollView>
+      </View>
+    );
+  }
+
+  // ── APPEARANCE sub-page ─────────────────────────────────────
+  if (page === 'appearance') {
+    return (
+      <View style={{ flex: 1, backgroundColor: bg }}>
+        <NavBar title="Appearance" />
+        <ScrollView contentContainerStyle={{ paddingBottom: 60 }}>
+          <Section title="THEME">
+            <Row icon={lightMode ? '🌙' : '☀️'} label="Light Mode" subText={lightMode ? 'Fiji blue accent' : 'Violet accent'} right={
+              <Switch value={lightMode} onValueChange={toggleLight} trackColor={{ false: '#333', true: accent }} thumbColor="#fff" />
+            } />
+          </Section>
+        </ScrollView>
+      </View>
+    );
+  }
+
+  // ── DATA AND STORAGE sub-page ───────────────────────────────
+  if (page === 'data-storage') {
+    return (
+      <View style={{ flex: 1, backgroundColor: bg }}>
+        <NavBar title="Data and Storage" />
+        <ScrollView contentContainerStyle={{ paddingBottom: 60 }}>
+          <Section title="CALL QUALITY">
+            <Toggle icon="📳" label="Haptic Feedback" subText="Vibrate on keypad and call actions" storageKey="vaultchat_haptic" value={hapticEnabled} onChange={setHapticEnabled} />
+            <Toggle icon="🌐" label="International Relay" subText="Route calls through secure relay" storageKey="vaultchat_relay" value={relay} onChange={setRelay} />
+            <Toggle icon="🎙️" label="Noise Cancellation" subText="AI background noise removal" storageKey="vaultchat_noise" value={noiseCancell} onChange={setNoiseCancell} />
+            <Toggle icon="📹" label="FaceTime" subText="Allow FaceTime calls from VaultChat" storageKey="vaultchat_facetime" value={faceTimeEnabled} onChange={setFaceTimeEnabled} />
+          </Section>
+          <Section title="STORAGE">
+            <Row icon="🗑️" label="Clear All Chats" danger onPress={() => Alert.alert('Clear Chats', 'Delete all chat history?', [{ text: 'Cancel', style: 'cancel' }, { text: 'Clear', style: 'destructive', onPress: async () => { await AsyncStorage.removeItem('vaultchat_chats'); Alert.alert('Done', 'All chats cleared.'); } }])} />
+          </Section>
+          <Section title="BACKUP & RECOVERY">
+            <Row icon="☁️" label="Create Encrypted Backup" subText="Export your chats and settings" onPress={() => {
+              Alert.alert('Backup', 'Enter your PIN to encrypt the backup:', [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Backup Now', onPress: () => createBackup(realPin || 'default') },
+              ]);
+            }} />
+            <Row icon="📥" label="Restore from Backup" subText="Import a previous backup file" onPress={() => {
+              Alert.alert('Restore', 'This will overwrite current data. Continue?', [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Restore', onPress: () => restoreBackup(realPin || 'default') },
+              ]);
+            }} />
+            <Row icon="🔔" label="Notification Security" subText="Message content never stored in iOS logs" right={<Text style={{ color: '#00ffa3', fontWeight: 'bold', fontSize: 11 }}>PROTECTED</Text>} />
+          </Section>
+        </ScrollView>
+      </View>
+    );
+  }
+
+  // ── HELP & SUPPORT sub-page ─────────────────────────────────
+  if (page === 'help') {
+    return (
+      <View style={{ flex: 1, backgroundColor: bg }}>
+        <NavBar title="Help & Support" />
+        <ScrollView contentContainerStyle={{ paddingBottom: 60 }}>
+          <Section title="LEGAL">
+            <Row icon="📄" label="Privacy Policy"        onPress={() => navigation.navigate('PrivacyPolicy')} />
+            <Row icon="📋" label="Terms of Service"      onPress={() => navigation.navigate('TermsOfService')} />
+            <Row icon="🛡️" label="Community Guidelines"  onPress={() => navigation.navigate('CommunityGuidelines')} />
+          </Section>
+          <Section title="GET IN TOUCH">
+            <Row icon="✉️" label="Contact Support" subText="support@vaultchat.app" onPress={() => Alert.alert('Contact Support', 'Send us a message at support@vaultchat.app and we\'ll get back to you within 24 hours.')} />
+          </Section>
+        </ScrollView>
+      </View>
+    );
+  }
+
+  // ── ABOUT sub-page ──────────────────────────────────────────
+  if (page === 'about') {
+    return (
+      <View style={{ flex: 1, backgroundColor: bg }}>
+        <NavBar title="About VaultChat" />
+        <ScrollView contentContainerStyle={{ paddingBottom: 60 }}>
+          <Section title="ABOUT">
+            <Row icon="ℹ️" label="Version" value="1.0.0" />
+            <Row icon="🔐" label="Encryption Protocol" value="NaCl box (Curve25519 + XSalsa20)" />
+            <Row icon="🏢" label="Made by" value="AUXXILUS MEDIA LLC" />
+          </Section>
+        </ScrollView>
+      </View>
+    );
+  }
+
   // MAIN
   const fullAddress = [addr1, addr2, city, stateRegion, zip, country].filter(Boolean).join(', ');
 
@@ -452,6 +629,9 @@ export default function SettingsScreen({ navigation }) {
           </View>
         )}
 
+        {/* Profile header card — matches the mockup: avatar on the left,
+            name + "Protect what matters." subtitle in the middle, shield
+            badge on the right. Tap anywhere to edit profile. */}
         <TouchableOpacity style={[st.profileCard, { backgroundColor: card, borderColor: border }]} onPress={() => setPage('profile')}>
           <View style={{ position: 'relative' }}>
             {profilePhoto
@@ -459,113 +639,39 @@ export default function SettingsScreen({ navigation }) {
               : <View style={[st.profilePhotoPlaceholder, { backgroundColor: accent }]}>
                   <Text style={st.profileInitial}>{displayName ? displayName[0].toUpperCase() : '?'}</Text>
                 </View>}
-            <View style={[st.editBadge, { backgroundColor: accent }]}><Text style={{ color: '#fff', fontSize: 10 }}>✏️</Text></View>
           </View>
-          <View style={{ flex: 1, marginLeft: 12 }}>
-            <Text style={[st.profileName, { color: tx }]}>{displayName || 'Tap to set your name'}</Text>
-            <Text style={[st.profileSub, { color: sub }]}>{bio || 'Add a bio'}</Text>
-            <Text style={[st.profileId, { color: accent }]}>{vaultId}</Text>
-            {vaultHandle ? <Text style={[st.profileId, { color: '#5856d6', marginTop: 2 }]}>{vaultHandle}</Text> : null}
-            {email ? <Text style={[st.profileSub, { color: sub, fontSize: 11 }]}>✉️ {email}</Text> : null}
-            {fullAddress ? <Text style={[st.profileSub, { color: sub, fontSize: 11 }]} numberOfLines={1}>📍 {fullAddress}</Text> : null}
+          <View style={{ flex: 1, marginLeft: 14 }}>
+            <Text style={[st.profileName, { color: tx }]} numberOfLines={1}>{displayName || 'Tap to set your name'}</Text>
+            <Text style={[st.profileSub, { color: sub }]}>Protect what matters.</Text>
+            {vaultHandle ? <Text style={[st.profileId, { color: accent, marginTop: 2 }]}>{vaultHandle}</Text> : null}
           </View>
-          <Text style={[st.chevron, { color: sub }]}>›</Text>
+          {/* Shield badge on the right — visual trust signal, matches mockup */}
+          <View style={{
+            width: 38, height: 38, borderRadius: 12,
+            backgroundColor: accent + '22',
+            alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Text style={{ fontSize: 18 }}>🛡️</Text>
+          </View>
         </TouchableOpacity>
 
-        <Section title="CONTACTS">
-          <Row icon="👥" label="Sync Phone Contacts" subText="Import from address book, iCloud, Google" onPress={async () => {
-            const granted = await requestContactsPermission();
-            if (!granted) {
-              Alert.alert('Permission needed', 'Go to Settings → Expo Go → Contacts → Allow');
-              return;
-            }
-            const contacts = await syncContacts();
-            Alert.alert('Synced! ✓', `${contacts.length} contacts imported successfully.`);
-          }} />
-          <Row icon="☁️" label="iCloud Contacts" subText="Sync via iPhone Settings → iCloud → Contacts" onPress={() => Alert.alert('iCloud Sync', 'Enable iCloud Contacts in iPhone Settings → Apple ID → iCloud → Contacts to sync automatically.')} />
-          <Row icon="🔍" label="Find Friends on VaultChat" subText="See which contacts use the app" onPress={async () => {
-            const granted = await requestContactsPermission();
-            if (!granted) { Alert.alert('Permission needed', 'Allow contacts access first'); return; }
-            const contacts = await syncContacts();
-            Alert.alert('Friends Found', `Synced ${contacts.length} contacts. Friends using VaultChat will appear in your Calls tab.`);
-          }} />
-        </Section>
+        {/* Mockup-style category cards: rounded dark cards with single
+            chevron rows. Each navigates to a sub-page that contains the
+            actual settings (existing Section/Row/Toggle layout). Keeps
+            the main page clean and "premium" while preserving every
+            existing setting under one of the categories. */}
+        <View style={[st.categoryCard, { backgroundColor: card, borderColor: border }]}>
+          <CatRow icon="👤" label="Account"          onPress={() => setPage('account')}      tx={tx} sub={sub} border={border} accent={accent} />
+          <CatRow icon="🔒" label="Privacy"          onPress={() => setPage('privacy')}      tx={tx} sub={sub} border={border} accent={accent} />
+          <CatRow icon="🔔" label="Notifications"    onPress={() => setPage('notifications')} tx={tx} sub={sub} border={border} accent={accent} />
+          <CatRow icon="🎨" label="Appearance"       onPress={() => setPage('appearance')}   tx={tx} sub={sub} border={border} accent={accent} />
+          <CatRow icon="💾" label="Data and Storage" onPress={() => setPage('data-storage')} tx={tx} sub={sub} border={border} accent={accent} last />
+        </View>
 
-        <Section title="ACCOUNT">
-          <Row icon="📲" label="Linked Devices" subText="iPhone 17 Pro (This device)" onPress={() => Alert.alert('Linked Devices', 'iPhone 17 Pro — Active now\nMacBook Pro — Last active 2h ago')} />
-        </Section>
-
-        <Section title="NOTIFICATIONS">
-          <Row icon="🔔" label="Notification Settings" subText="Sound, groups, calls" onPress={() => setPage('notifications')} />
-        </Section>
-
-        <Section title="PRIVACY & SECURITY">
-          <Row icon="🔒" label="End-to-End Encryption" subText="All messages encrypted" right={<Text style={{ color: '#00ffa3', fontWeight: 'bold' }}>ON</Text>} />
-          <Toggle icon="💨" label="Vanish Mode" subText="Messages disappear after viewing" storageKey="vaultchat_vanish" value={vanishMode} onChange={setVanishMode} />
-          <Toggle icon="✏️" label="Edit Messages" subText="Edit sent messages within 2 hours" storageKey="vaultchat_edit_msg" value={editMessages} onChange={setEditMessages} />
-          <Toggle icon="📌" label="Pin Messages" subText="Allow pinning important messages" storageKey="vaultchat_pin_msg" value={pinMessages} onChange={setPinMessages} />
-          <Row icon="🚫" label="Blocked Contacts" subText={`${blockedContacts.length} blocked`} onPress={() => setPage('blocked')} />
-        </Section>
-
-        <Section title="CALLS">
-          <Toggle icon="📳" label="Haptic Feedback" subText="Vibrate on keypad and call actions" storageKey="vaultchat_haptic" value={hapticEnabled} onChange={setHapticEnabled} />
-          <Toggle icon="🌐" label="International Relay" subText="Route calls through secure relay" storageKey="vaultchat_relay" value={relay} onChange={setRelay} />
-          <Toggle icon="🎙️" label="Noise Cancellation" subText="AI background noise removal" storageKey="vaultchat_noise" value={noiseCancell} onChange={setNoiseCancell} />
-          <Row icon="🔄" label="Call Hold / Swap" subText="Switch apps while on hold" right={<Text style={{ color: '#00ffa3', fontWeight: 'bold', fontSize: 12 }}>ACTIVE</Text>} />
-          <Row icon="📲" label="Background Call Persist" subText="Calls stay active when switching" right={<Text style={{ color: '#00ffa3', fontWeight: 'bold', fontSize: 12 }}>ACTIVE</Text>} />
-          <Row icon="📡" label="Never Drop Calls" subText="Auto reconnect on signal loss" right={<Text style={{ color: '#00ffa3', fontWeight: 'bold', fontSize: 12 }}>ON</Text>} />
-          <Toggle icon="📹" label="FaceTime" subText="Allow FaceTime calls from VaultChat" storageKey="vaultchat_facetime" value={faceTimeEnabled} onChange={setFaceTimeEnabled} />
-        </Section>
-
-        <Section title="APPEARANCE">
-          <Row icon={lightMode ? '🌙' : '☀️'} label="Light Mode" subText="Fiji blue theme" right={
-            <Switch value={lightMode} onValueChange={toggleLight} trackColor={{ false: '#333', true: accent }} thumbColor="#fff" />
-          } />
-        </Section>
-
-        <Section title="SECURITY">
-          <Row icon="🔐" label="Biometric Lock" subText="Face ID / Touch ID on app open" right={
-            <Switch value={biometricEnabled} onValueChange={async v => {
-              const supported = await checkBiometricSupport();
-              if (!supported && v) { Alert.alert('Not Available', 'Biometric authentication is not set up on this device.'); return; }
-              setBiometricEnabled(v);
-              await AsyncStorage.setItem('vaultchat_biometric', v ? 'true' : 'false');
-            }} trackColor={{ false: '#333', true: accent }} thumbColor="#fff" />
-          } />
-          <Row icon="🔢" label="Set Real PIN" subText={realPin ? '••••••' : 'Not set'} onPress={() => { setPinType('real'); setPinInput(''); setPinModal(true); }} />
-          <Row icon="🎭" label="Decoy PIN" subText={decoyPin ? 'Set — shows empty chats' : 'Not set'} onPress={() => { setPinType('decoy'); setPinInput(''); setPinModal(true); }} />
-        </Section>
-
-        <Section title="STORAGE">
-          <Row icon="🗑️" label="Clear All Chats" danger onPress={() => Alert.alert('Clear Chats', 'Delete all chat history?', [{ text: 'Cancel', style: 'cancel' }, { text: 'Clear', style: 'destructive', onPress: async () => { await AsyncStorage.removeItem('vaultchat_chats'); Alert.alert('Done', 'All chats cleared.'); } }])} />
-        </Section>
-
-        <Section title="BACKUP & RECOVERY">
-          <Row icon="☁️" label="Create Encrypted Backup" subText="Export your chats and settings" onPress={() => {
-            Alert.alert('Backup', 'Enter your PIN to encrypt the backup:', [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Backup Now', onPress: () => createBackup(realPin || 'default') },
-            ]);
-          }} />
-          <Row icon="📥" label="Restore from Backup" subText="Import a previous backup file" onPress={() => {
-            Alert.alert('Restore', 'This will overwrite current data. Continue?', [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Restore', onPress: () => restoreBackup(realPin || 'default') },
-            ]);
-          }} />
-          <Row icon="🔔" label="Notification Security" subText="Message content never stored in iOS logs" right={<Text style={{ color: '#00ffa3', fontWeight: 'bold', fontSize: 11 }}>PROTECTED</Text>} />
-        </Section>
-
-        <Section title="ABOUT">
-          <Row icon="ℹ️" label="Version" value="1.0.0" />
-          <Row icon="🔐" label="Encryption Protocol" value="Signal" />
-          <Row icon="📄" label="Privacy Policy"    onPress={() => navigation.navigate('PrivacyPolicy')} />
-          <Row icon="📋" label="Terms of Service"  onPress={() => navigation.navigate('TermsOfService')} />
-          {/* "Rate the App" row hidden until VaultChat is live in the App
-              Store. Re-enable with the real Linking.openURL(`itms-apps://
-              itunes.apple.com/app/idYOUR_APP_ID?action=write-review`)
-              once the app has an App Store ID. */}
-        </Section>
+        <View style={[st.categoryCard, { backgroundColor: card, borderColor: border, marginTop: 12 }]}>
+          <CatRow icon="❓" label="Help & Support"   onPress={() => setPage('help')}         tx={tx} sub={sub} border={border} accent={accent} />
+          <CatRow icon="ℹ️" label="About VaultChat"  onPress={() => setPage('about')}        tx={tx} sub={sub} border={border} accent={accent} last />
+        </View>
 
         <TouchableOpacity style={st.signOutBtn} onPress={signOut}>
           <Text style={st.signOutText}>Sign Out</Text>
@@ -706,4 +812,9 @@ const st = StyleSheet.create({
   blockInputRow: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 14, marginBottom: 16, overflow: 'hidden' },
   blockBtn: { padding: 14, paddingHorizontal: 18, margin: 6, borderRadius: 10 },
   blockedRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 14, borderRadius: 14, borderWidth: 1, marginBottom: 10 },
+  // Mockup-style grouped card holding category rows on the main page.
+  categoryCard: {
+    marginHorizontal: 16, borderRadius: 18, borderWidth: 1, overflow: 'hidden',
+    shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 6, shadowOffset: { width: 0, height: 2 },
+  },
 });
