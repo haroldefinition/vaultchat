@@ -3,6 +3,27 @@
 // Falls back silently if Realtime is not enabled on the table.
 import { supabase } from './supabase';
 
+// Supabase Realtime v2.x throws ("cannot add postgres_changes
+// callbacks ... after subscribe()") if .on() is called on a channel
+// that's already in a subscribed state. supabase.channel(name) returns
+// the EXISTING channel if one with that name already exists in the
+// client's cache — so a stale channel from a prior screen mount will
+// trip the guard on the next subscribe call. This helper finds any
+// channel with the same topic and tears it down first, guaranteeing
+// .channel() returns a fresh, unsubscribed instance every time.
+function freshChannel(name) {
+  try {
+    const channels = supabase.getChannels?.() || [];
+    for (const c of channels) {
+      // Channel topics in Supabase v2 are prefixed with "realtime:".
+      if (c?.topic === `realtime:${name}` || c?.topic === name) {
+        try { supabase.removeChannel(c); } catch {}
+      }
+    }
+  } catch {}
+  return supabase.channel(name);
+}
+
 /**
  * Subscribe to new messages in a 1:1 chat room.
  * @param {string}   roomId   — the chat room ID
@@ -11,8 +32,7 @@ import { supabase } from './supabase';
  * @returns cleanup function — call on component unmount
  */
 export function subscribeToRoom(roomId, onInsert, onUpdate) {
-  const channel = supabase
-    .channel(`room:${roomId}`)
+  const channel = freshChannel(`room:${roomId}`)
     .on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'messages', filter: `room_id=eq.${roomId}` },
@@ -36,8 +56,7 @@ export function subscribeToRoom(roomId, onInsert, onUpdate) {
  * @returns cleanup function
  */
 export function subscribeToGroup(groupId, onInsert, onUpdate) {
-  const channel = supabase
-    .channel(`group:${groupId}`)
+  const channel = freshChannel(`group:${groupId}`)
     .on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'group_messages', filter: `group_id=eq.${groupId}` },
@@ -78,8 +97,7 @@ export function broadcastTyping(roomId, userId, handle, isTyping) {
  * @returns cleanup function
  */
 export function subscribeToTyping(roomId, onTyping) {
-  const channel = supabase
-    .channel(`typing:${roomId}`)
+  const channel = freshChannel(`typing:${roomId}`)
     .on('broadcast', { event: 'typing' }, ({ payload }) => {
       if (payload) onTyping(payload);
     })
