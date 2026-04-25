@@ -122,9 +122,13 @@ export function PhotoStack({ keys, onLongPress }) {
     return () => panX.removeListener(id);
   }, [panX]);
 
+  // Rotation/tilt during swipe disabled — Harold wants the photo to
+  // travel cleanly left/right with no playing-card rotation. Kept the
+  // animated value initializer (used in transform array below) but
+  // anchor it to 0 so there's no visual tilt.
   const rotateCard = panX.interpolate({
     inputRange: [-CARD_W, 0, CARD_W],
-    outputRange: ['-16deg', '0deg', '16deg'],
+    outputRange: ['0deg', '0deg', '0deg'],
     extrapolate: 'clamp',
   });
 
@@ -178,23 +182,29 @@ export function PhotoStack({ keys, onLongPress }) {
     });
   }, [panX, panY]);
 
+  // PanResponder — pure horizontal swipe. Vertical drift removed
+  // entirely so the chat list's vertical scroll never fights the
+  // gesture, and the photo travels cleanly L/R without that
+  // "screen sliding up" feel. We also require the gesture to be
+  // strongly horizontal (dx > 2x dy) before claiming it, so a finger
+  // moving mostly vertically falls through to the FlatList.
   const pr = useRef(PanResponder.create({
-    onStartShouldSetPanResponder: () => !isAnimating.current,
+    onStartShouldSetPanResponder: () => false, // never claim taps; let TouchableOpacity handle them
     onMoveShouldSetPanResponder:  (_, g) =>
-      !isAnimating.current && Math.abs(g.dx) > 6 && Math.abs(g.dx) > Math.abs(g.dy),
+      !isAnimating.current && Math.abs(g.dx) > 8 && Math.abs(g.dx) > Math.abs(g.dy) * 2,
     onPanResponderGrant: () => {
       panX.setOffset(panXValue.current);
       panX.setValue(0);
     },
     onPanResponderMove: (_, g) => {
-      if (!isAnimating.current) { panX.setValue(g.dx); panY.setValue(g.dy * 0.25); }
+      // Horizontal-only — panY intentionally ignored.
+      if (!isAnimating.current) { panX.setValue(g.dx); }
     },
     onPanResponderRelease: (_, g) => {
       panX.flattenOffset(); panXValue.current = 0;
       const count = urisRef.current.length;
       if (count <= 1) {
         Animated.spring(panX, { toValue:0, useNativeDriver:false }).start();
-        Animated.spring(panY, { toValue:0, useNativeDriver:false }).start();
         return;
       }
       const left  = g.dx < -DECK_SWIPE || g.vx < -0.5;
@@ -203,7 +213,7 @@ export function PhotoStack({ keys, onLongPress }) {
         isAnimating.current = true;
         const dest = left ? -SW*1.5 : SW*1.5;
         Animated.timing(panX, { toValue:dest, duration:210, useNativeDriver:false }).start(() => {
-          panX.setValue(0); panY.setValue(0); panXValue.current = 0;
+          panX.setValue(0); panXValue.current = 0;
           const next = left
             ? (topIdxRef.current + 1) % count
             : (topIdxRef.current - 1 + count) % count;
@@ -212,13 +222,11 @@ export function PhotoStack({ keys, onLongPress }) {
         });
       } else {
         Animated.spring(panX, { toValue:0, friction:5, tension:50, useNativeDriver:false }).start();
-        Animated.spring(panY, { toValue:0, friction:5, tension:50, useNativeDriver:false }).start();
       }
     },
     onPanResponderTerminate: () => {
       panX.flattenOffset(); panXValue.current = 0;
       Animated.spring(panX, { toValue:0, useNativeDriver:false }).start();
-      Animated.spring(panY, { toValue:0, useNativeDriver:false }).start();
     },
   })).current;
 
@@ -244,7 +252,7 @@ export function PhotoStack({ keys, onLongPress }) {
           style={[
             s.card, s.cardTop,
             { borderWidth: StyleSheet.hairlineWidth, borderColor: accent, shadowColor: accent, shadowOpacity: 0.28, shadowRadius: 10 },
-            { transform:[{translateX:panX},{translateY:panY},{rotate:rotateCard}] },
+            { transform:[{translateX:panX}] },
           ]}
           {...pr.panHandlers}>
           <TouchableOpacity style={{flex:1}} onPress={() => { setFsStart(topIdx%count); setFsOpen(true); }} onLongPress={onLongPress} delayLongPress={500} activeOpacity={0.97}>

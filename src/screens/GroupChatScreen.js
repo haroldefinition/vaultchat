@@ -188,7 +188,14 @@ function Bubble({ item, currentUserId, colors, onFullScreen, onPlay, onLongPress
         onLongPress={onLongPress} delayLongPress={450}
         style={[g.msgWrapper, isMe ? g.right : g.left]}>
         {!isMe && <Text style={[g.senderHandle, { color: accent }]}>@{item.sender_handle || 'member'}</Text>}
-        <View style={[g.bubble, isMedia && g.mediaPad, { backgroundColor: isMe ? '#0057a8' : card }]}>
+        <View style={[
+          g.bubble,
+          isMedia && g.mediaPad,
+          { backgroundColor: isMe ? '#0057a8' : card },
+          // Media-only (no caption) → transparent so the photo's own
+          // accent border IS the visual frame. Same treatment as 1:1.
+          isMedia && !cap && { backgroundColor: 'transparent', shadowOpacity: 0, elevation: 0, padding: 0 },
+        ]}>
           {body()}
           <Text style={[g.msgTime, { color: isMe ? 'rgba(255,255,255,0.6)' : sub }]}>
             {showFull ? fullTimeStr : shortTimeStr}{item.edited ? '  ✎' : ''}

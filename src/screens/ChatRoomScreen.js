@@ -276,6 +276,13 @@ function Bubble({ item, myId, tx, sub, card, accent, bubbleOut, bubbleIn, bubble
               ? [s.myBubble,    { backgroundColor: bubbleOut }]
               : [s.theirBubble, { backgroundColor: bubbleIn  }],
             isMedia && s.mediaPad,
+            // Media-only bubbles (photo/video, no caption) get a
+            // transparent background — the photo's own accent border
+            // is the visual frame, the colored bubble was redundant
+            // and looked like an iMessage chat bubble around an iMessage
+            // photo. Caption messages keep the colored bubble so the
+            // text still has a tinted ground to sit on.
+            isMedia && !cap && { backgroundColor: 'transparent', shadowOpacity: 0, elevation: 0, padding: 0 },
           ]}
           onPress={() => onTap && onTap(item.id)}
           onLongPress={() => onLongPress && onLongPress(item)} delayLongPress={450} activeOpacity={0.88}>
