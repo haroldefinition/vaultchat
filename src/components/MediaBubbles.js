@@ -251,7 +251,9 @@ export function PhotoStack({ keys, onLongPress }) {
           {...pr.panHandlers}>
           <TouchableOpacity style={{flex:1}} onPress={() => { setFsStart(topIdx%count); setFsOpen(true); }} onLongPress={onLongPress} delayLongPress={500} activeOpacity={0.97}>
             <Image source={{uri:uris[topIdx%count]}} style={s.cardImg} resizeMode="cover"/>
-            <View style={s.cardHint}><Text style={s.cardHintTx}>Tap to expand  ·  swipe to browse</Text></View>
+            {/* Hint removed — the visible stack of photos behind the
+                top card now communicates "more photos here" on its own,
+                and the dots/arrows below cover the swipe affordance. */}
           </TouchableOpacity>
         </Animated.View>
       </View>
@@ -311,14 +313,19 @@ const s = StyleSheet.create({
   counterRow:  { flexDirection:'row', alignItems:'center', marginBottom:10 },
   counterTx:   { color:'#fff', fontSize:13, fontWeight:'700' },
   counterHint: { color:'rgba(255,255,255,0.45)', fontSize:11 },
-  deckArea:    { width:CARD_W+30, height:CARD_H+30, alignItems:'center', justifyContent:'center' },
+  // Wider/taller than the card itself so the bg cards' translate + rotate
+  // can extend past the top card without getting clipped by the parent.
+  deckArea:    { width:CARD_W+50, height:CARD_H+50, alignItems:'center', justifyContent:'center' },
   card:        { position:'absolute', width:CARD_W, height:CARD_H, borderRadius:18, overflow:'hidden', backgroundColor:'#111', shadowColor:'#000', shadowOffset:{width:0,height:6}, shadowOpacity:0.4, shadowRadius:12, elevation:8 },
   cardTop:     { zIndex:10 },
-  // iMessage-style stack: small downward + sideways offset on each
-  // background card with a tiny tilt. Reads as "more photos here"
-  // without the dramatic playing-card fan we had before.
-  cardBg1:     { transform:[{rotate:'1.5deg'},{scale:0.97},{translateY:6},{translateX:4}], zIndex:5, opacity:0.92 },
-  cardBg2:     { transform:[{rotate:'-1.5deg'},{scale:0.94},{translateY:12},{translateX:-4}], zIndex:1, opacity:0.78 },
+  // iMessage-style stack: keep the bg cards full size (no scale) so the
+  // offset actually reveals them, and push them DOWN-RIGHT under the
+  // top card so the stack reads as "more photos behind this one." A
+  // small opposing tilt on each card adds the playing-card depth.
+  // Larger offsets + full size + tilt = visible peek without the
+  // dramatic fan we had originally.
+  cardBg1:     { transform:[{translateX:10},{translateY:10},{rotate:'2deg'}], zIndex:5, opacity:0.95 },
+  cardBg2:     { transform:[{translateX:20},{translateY:20},{rotate:'4deg'}], zIndex:1, opacity:0.82 },
   cardImg:     { width:'100%', height:'100%' },
   cardHint:    { position:'absolute', bottom:0, left:0, right:0, backgroundColor:'rgba(0,0,0,0.42)', paddingVertical:7 },
   cardHintTx:  { color:'rgba(255,255,255,0.85)', fontSize:11, textAlign:'center', fontWeight:'500' },
