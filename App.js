@@ -155,7 +155,16 @@ function MainTabs() {
       <Tab.Screen name="Calls"    component={CallScreen}    options={{ tabBarIcon:({focused})=><Text style={{fontSize:26,opacity:focused?1:0.85}}>📞</Text> }}/>
       <Tab.Screen name="Groups"   component={GroupScreen}   options={{ tabBarIcon:({focused})=><Text style={{fontSize:26,opacity:focused?1:0.85}}>👥</Text> }}/>
       <Tab.Screen name="Discover" component={DiscoverScreen}options={{ tabBarIcon:({focused})=><Text style={{fontSize:26,opacity:focused?1:0.85}}>🔍</Text> }}/>
-      <Tab.Screen name="More"     component={MoreScreen}    options={{ tabBarIcon:({focused})=><Text style={{fontSize:26,opacity:focused?1:0.85}}>⋯</Text> }}/>
+      <Tab.Screen name="More"     component={MoreScreen}    options={{
+        // Same compact glyph as the other tab icons (fontSize 26), but
+        // tinted with the theme accent so it pops against the dark
+        // tab-bar background instead of being a near-invisible thin
+        // gray character. Tracks active/inactive via opacity like the
+        // emoji icons do.
+        tabBarIcon:({focused})=>(
+          <Text style={{ fontSize: 26, color: accent, opacity: focused ? 1 : 0.85 }}>⋯</Text>
+        ),
+      }}/>
     </Tab.Navigator>
   );
 }
