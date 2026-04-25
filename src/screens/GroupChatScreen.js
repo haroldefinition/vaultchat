@@ -27,6 +27,13 @@ import ContactEditModal from '../components/ContactEditModal';
 import PremiumModal from '../components/PremiumModal';
 import ReportMessageModal from '../components/ReportMessageModal';
 import { ResolvedPhotoStack, ResolvedVideoCarousel } from '../components/MediaBubbles';
+import VoiceNoteBubble from '../components/VoiceNoteBubble';
+import {
+  useAudioRecorder,
+  RecordingPresets,
+  AudioModule,
+  setAudioModeAsync,
+} from 'expo-audio';
 import { makeCallId } from '../services/placeCall';
 import { getMyDisplayName } from '../services/vaultHandle';
 
@@ -112,7 +119,7 @@ function Bubble({ item, currentUserId, colors, onFullScreen, onPlay, onLongPress
   const nlIdx = raw.indexOf('\n');
   const main  = nlIdx >= 0 ? raw.substring(0, nlIdx) : raw;
   const cap   = nlIdx >= 0 ? raw.substring(nlIdx + 1).trim() : '';
-  const isMedia = ['GALLERY:', 'LOCALIMG:', 'IMG:', 'VIDEOS:', 'LOCALVID:', 'VID:'].some(p => main.startsWith(p));
+  const isMedia = ['GALLERY:', 'LOCALIMG:', 'IMG:', 'VIDEOS:', 'LOCALVID:', 'VID:', 'VOICE:'].some(p => main.startsWith(p));
 
   // Split a message body into alternating plain-text and @mention spans
   // so we can style the mentions in the accent color without
@@ -147,6 +154,16 @@ function Bubble({ item, currentUserId, colors, onFullScreen, onPlay, onLongPress
     if (item.type === 'gif') return <Image source={{ uri: raw }} style={{ width: 200, height: 150, borderRadius: 12 }} resizeMode="contain" />;
     if (main.startsWith('GALLERY:')) return <><ResolvedPhotoStack keys={main.replace('GALLERY:', '').split('|')} onLongPress={onLongPress} />{cap ? <Text style={[g.cap, { color: isMe ? 'rgba(255,255,255,0.9)' : tx }]}>{cap}</Text> : null}</>;
     if (main.startsWith('LOCALIMG:') || main.startsWith('IMG:')) return <><SinglePhoto msgKey={main.replace('LOCALIMG:', '').replace('IMG:', '')} isLocal={main.startsWith('LOCALIMG:')} onOpen={onFullScreen} onLongPress={onLongPress} />{cap ? <Text style={[g.cap, { color: isMe ? 'rgba(255,255,255,0.9)' : tx }]}>{cap}</Text> : null}</>;
+    if (main.startsWith('VOICE:')) {
+      // Format: VOICE:<url>|<duration_sec>. Permissive parse — falls
+      // back to a player with 0 duration if the duration suffix is
+      // missing or malformed.
+      const rest = main.slice('VOICE:'.length);
+      const sep  = rest.lastIndexOf('|');
+      const url  = sep >= 0 ? rest.slice(0, sep) : rest;
+      const dur  = sep >= 0 ? parseFloat(rest.slice(sep + 1)) || 0 : 0;
+      return <><VoiceNoteBubble url={url} durationSec={dur} accent={accent} isMe={isMe} bgColor={'transparent'} />{cap ? <Text style={[g.cap, { color: isMe ? 'rgba(255,255,255,0.9)' : tx }]}>{cap}</Text> : null}</>;
+    }
     if (main.startsWith('VIDEOS:')) return <><ResolvedVideoCarousel content={main} onLongPress={onLongPress} />{cap ? <Text style={[g.cap, { color: isMe ? 'rgba(255,255,255,0.9)' : tx }]}>{cap}</Text> : null}</>;
     if (main.startsWith('LOCALVID:') || main.startsWith('VID:')) return <><VideoBubble uri={main.replace('LOCALVID:', '').replace('VID:', '')} onPlay={onPlay} onLongPress={onLongPress} />{cap ? <Text style={[g.cap, { color: isMe ? 'rgba(255,255,255,0.9)' : tx }]}>{cap}</Text> : null}</>;
     if (main.startsWith('FILE:')) {
@@ -250,6 +267,15 @@ export default function GroupChatScreen({ route, navigation }) {
   const [currentHandle, setCurrentHandle] = useState('');
   const [sending,       setSending]       = useState(false);
   const [stagedPhotos,  setStagedPhotos]  = useState([]);
+
+  // ── Voice notes (parity with 1:1 ChatRoomScreen) ───────────
+  // Same recorder lifecycle as the 1:1 chat: hook is mounted once,
+  // controlled imperatively from start/stop/cancel functions below.
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const [isRecording,        setIsRecording]        = useState(false);
+  const [recordingStartedAt, setRecordingStartedAt] = useState(0);
+  const [recordingElapsed,   setRecordingElapsed]   = useState(0);
+  const recordingTimerRef = useRef(null);
   const [stagedVideos,  setStagedVideos]  = useState([]);
   const [fullImgUri,    setFullImgUri]    = useState(null);
   const [vidUri,        setVidUri]        = useState(null);
@@ -659,6 +685,71 @@ export default function GroupChatScreen({ route, navigation }) {
     setStagedVideos([]); setInputText(''); setSending(false);
   }
 
+  // ── Voice notes (parity with 1:1 ChatRoomScreen) ───────────
+  // Same flow as ChatRoomScreen.startRecording / stopRecording /
+  // cancelRecording: prompt mic permission once, prepare + record,
+  // tick the timer for the recording overlay, stop + upload + post
+  // as VOICE:<url>|<seconds>. Cancel discards locally.
+  async function startRecording() {
+    try {
+      const perm = await AudioModule.requestRecordingPermissionsAsync();
+      if (!perm?.granted) {
+        Alert.alert('Microphone needed', 'Allow microphone access in Settings to send voice notes.');
+        return;
+      }
+      try { await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true }); } catch {}
+
+      await recorder.prepareToRecordAsync();
+      recorder.record();
+      const startedAt = Date.now();
+      setRecordingStartedAt(startedAt);
+      setRecordingElapsed(0);
+      setIsRecording(true);
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingElapsed(Math.floor((Date.now() - startedAt) / 1000));
+      }, 250);
+    } catch (e) {
+      Alert.alert('Recording failed', e?.message || 'Could not start the recorder.');
+      setIsRecording(false);
+      clearInterval(recordingTimerRef.current);
+    }
+  }
+
+  async function stopRecording() {
+    if (!isRecording) return;
+    setIsRecording(false);
+    clearInterval(recordingTimerRef.current);
+    try {
+      await recorder.stop();
+      const uri = recorder.uri;
+      const durSec = Math.max(1, Math.floor((Date.now() - recordingStartedAt) / 1000));
+      try { await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }); } catch {}
+      if (!uri) { Alert.alert('Recording empty', 'Nothing was captured. Try again.'); return; }
+
+      setSending(true);
+      const url = await uploadMedia(uri, 'voice');
+      if (!url) {
+        Alert.alert('Upload failed', 'Could not send the voice note. Check Metro logs.');
+        setSending(false);
+        return;
+      }
+      await postMsg(`VOICE:${url}|${durSec}`);
+      setSending(false);
+    } catch (e) {
+      Alert.alert('Recording failed', e?.message || 'Could not finalize the recording.');
+      setSending(false);
+    }
+  }
+
+  async function cancelRecording() {
+    if (!isRecording) return;
+    setIsRecording(false);
+    clearInterval(recordingTimerRef.current);
+    try { await recorder.stop(); } catch {}
+    try { await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }); } catch {}
+  }
+
   function pickAttach(type) { pendingRef.current = type; setAttachModal(false); }
 
   async function handleAttach(type) {
@@ -1028,6 +1119,34 @@ export default function GroupChatScreen({ route, navigation }) {
             );
           })()}
 
+          {isRecording ? (
+            // Recording-mode input bar — same UX as the 1:1 chat: red
+            // dot + live timer + Cancel + Send buttons. Replaces the
+            // normal input row only while a recording is in progress.
+            <View style={[g.inputBar, { backgroundColor: card, borderTopColor: border }]}>
+              <TouchableOpacity
+                style={[g.plusBtn, { backgroundColor: inputBg, borderColor: '#ff3b30' }]}
+                onPress={cancelRecording}
+                accessibilityLabel="Cancel recording">
+                <Text style={{ color: '#ff3b30', fontSize: 18, fontWeight: '700' }}>✕</Text>
+              </TouchableOpacity>
+              <View style={[g.input, { backgroundColor: inputBg, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14 }]}>
+                <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#ff3b30' }} />
+                <Text style={{ color: tx, fontWeight: '600' }}>
+                  Recording…  {Math.floor(recordingElapsed / 60)}:{(recordingElapsed % 60).toString().padStart(2, '0')}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[g.sendBtn, { backgroundColor: accent }]}
+                onPress={stopRecording}
+                accessibilityLabel="Send voice note"
+                disabled={sending}>
+                {sending
+                  ? <ActivityIndicator color="#fff" size="small" />
+                  : <Text style={{ color: '#fff', fontSize: 18 }}>➤</Text>}
+              </TouchableOpacity>
+            </View>
+          ) : (
           <View style={[g.inputBar, { backgroundColor: card, borderTopColor: border }]}>
           <TouchableOpacity style={[g.plusBtn, { backgroundColor: inputBg, borderColor: accent }]} onPress={() => setAttachModal(true)}>
             <Text style={[g.plusTx, { color: accent }]}>+</Text>
@@ -1052,12 +1171,25 @@ export default function GroupChatScreen({ route, navigation }) {
             }}
             onBlur={() => broadcastTyping(groupId, currentUserId, currentHandle || 'member', false)}
             multiline maxLength={2000} />
-          <TouchableOpacity
-            style={[g.sendBtn, { backgroundColor: inputText.trim() ? accent : inputBg }]}
-            onPress={() => sendText()} disabled={!inputText.trim() || sending}>
-            {sending ? <ActivityIndicator color="#fff" size="small" /> : <Text style={{ color: inputText.trim() ? '#000' : sub, fontSize: 18 }}>➤</Text>}
-          </TouchableOpacity>
+          {/* Empty input → mic button (records voice note); typing
+              swaps it back to the normal Send button. */}
+          {inputText.trim() ? (
+            <TouchableOpacity
+              style={[g.sendBtn, { backgroundColor: accent }]}
+              onPress={() => sendText()} disabled={sending}>
+              {sending ? <ActivityIndicator color="#fff" size="small" /> : <Text style={{ color: '#000', fontSize: 18 }}>➤</Text>}
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={[g.sendBtn, { backgroundColor: accent }]}
+              onPress={startRecording}
+              accessibilityLabel="Record voice note"
+              disabled={sending}>
+              <Text style={{ color: '#fff', fontSize: 18 }}>🎤</Text>
+            </TouchableOpacity>
+          )}
         </View>
+          )}
         </>
       )}
 
