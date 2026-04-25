@@ -28,6 +28,7 @@ import PremiumModal from '../components/PremiumModal';
 import ReportMessageModal from '../components/ReportMessageModal';
 import { ResolvedPhotoStack, ResolvedVideoCarousel } from '../components/MediaBubbles';
 import VoiceNoteBubble from '../components/VoiceNoteBubble';
+import ViewOncePhoto from '../components/ViewOncePhoto';
 import {
   useAudioRecorder,
   RecordingPresets,
@@ -120,7 +121,7 @@ function Bubble({ item, currentUserId, colors, onFullScreen, onPlay, onLongPress
   const nlIdx = raw.indexOf('\n');
   const main  = nlIdx >= 0 ? raw.substring(0, nlIdx) : raw;
   const cap   = nlIdx >= 0 ? raw.substring(nlIdx + 1).trim() : '';
-  const isMedia = ['GALLERY:', 'LOCALIMG:', 'IMG:', 'VIDEOS:', 'LOCALVID:', 'VID:', 'VOICE:'].some(p => main.startsWith(p));
+  const isMedia = ['GALLERY:', 'LOCALIMG:', 'IMG:', 'VIDEOS:', 'LOCALVID:', 'VID:', 'VOICE:', 'VONCE:'].some(p => main.startsWith(p));
 
   // Split a message body into alternating plain-text and @mention spans
   // so we can style the mentions in the accent color without
@@ -164,6 +165,25 @@ function Bubble({ item, currentUserId, colors, onFullScreen, onPlay, onLongPress
       const url  = sep >= 0 ? rest.slice(0, sep) : rest;
       const dur  = sep >= 0 ? parseFloat(rest.slice(sep + 1)) || 0 : 0;
       return <><VoiceNoteBubble url={url} durationSec={dur} accent={accent} isMe={isMe} bgColor={'transparent'} />{cap ? <Text style={[g.cap, { color: isMe ? 'rgba(255,255,255,0.9)' : tx }]}>{cap}</Text> : null}</>;
+    }
+    if (main.startsWith('VONCE:')) {
+      // Format: VONCE:<url>|<kind>  where kind is 'image' | 'video'
+      const rest = main.slice('VONCE:'.length);
+      const sep  = rest.lastIndexOf('|');
+      const url  = sep >= 0 ? rest.slice(0, sep) : rest;
+      const kind = sep >= 0 ? rest.slice(sep + 1) : 'image';
+      return <>
+        <ViewOncePhoto
+          messageId={item.id}
+          url={url}
+          kind={kind}
+          isMe={isMe}
+          accent={accent}
+          onOpenImage={onFullScreen}
+          onPlayVideo={onPlay}
+        />
+        {cap ? <Text style={[g.cap, { color: isMe ? 'rgba(255,255,255,0.9)' : tx }]}>{cap}</Text> : null}
+      </>;
     }
     if (main.startsWith('VIDEOS:')) return <><ResolvedVideoCarousel content={main} onLongPress={onLongPress} />{cap ? <Text style={[g.cap, { color: isMe ? 'rgba(255,255,255,0.9)' : tx }]}>{cap}</Text> : null}</>;
     if (main.startsWith('LOCALVID:') || main.startsWith('VID:')) return <><VideoBubble uri={main.replace('LOCALVID:', '').replace('VID:', '')} onPlay={onPlay} onLongPress={onLongPress} />{cap ? <Text style={[g.cap, { color: isMe ? 'rgba(255,255,255,0.9)' : tx }]}>{cap}</Text> : null}</>;
@@ -754,6 +774,29 @@ export default function GroupChatScreen({ route, navigation }) {
   function pickAttach(type) { pendingRef.current = type; setAttachModal(false); }
 
   async function handleAttach(type) {
+    if (type === 'vonce') {
+      // View-once flow — single photo or video, immediate post,
+      // no staging. Recipient gets a tap-to-reveal placeholder.
+      const p = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!p.granted) { Alert.alert('Permission needed'); return; }
+      const r = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images', 'videos'],
+        quality: 1, allowsMultipleSelection: false,
+      });
+      if (r.canceled || !r.assets?.[0]) return;
+      const asset = r.assets[0];
+      const isVideo = (asset.type || '').startsWith('video') || /\.(mp4|mov|m4v)$/i.test(asset.uri || '');
+      setSending(true);
+      const url = await uploadMedia(asset.uri, isVideo ? 'video' : 'image');
+      if (!url) {
+        Alert.alert('Upload failed', 'Could not send the view-once media. Check Metro logs.');
+        setSending(false);
+        return;
+      }
+      await postMsg(`VONCE:${url}|${isVideo ? 'video' : 'image'}`);
+      setSending(false);
+      return;
+    }
     if (type === 'photo') {
       const p = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!p.granted) { Alert.alert('Permission needed'); return; }
@@ -883,14 +926,15 @@ export default function GroupChatScreen({ route, navigation }) {
   const hasStaged = stagedPhotos.length > 0 || stagedVideos.length > 0;
 
   const ATTACHMENTS = [
-    { icon: '🖼️', label: 'Gallery',  type: 'photo'    },
-    { icon: '🎥', label: 'Video',    type: 'video'    },
-    { icon: '📸', label: 'Camera',   type: 'camera'   },
-    { icon: '📁', label: 'File',     type: 'file'     },
-    { icon: '🎭', label: 'GIF',      type: 'gif'      },
-    { icon: '😀', label: 'Emoji',    type: 'emoji'    },
-    { icon: '🔵', label: 'AirDrop',  type: 'airdrop'  },
-    { icon: '📍', label: 'Location', type: 'location' },
+    { icon: '🖼️', label: 'Gallery',   type: 'photo'    },
+    { icon: '🎥', label: 'Video',     type: 'video'    },
+    { icon: '📸', label: 'Camera',    type: 'camera'   },
+    { icon: '👁️', label: 'View Once', type: 'vonce'    },
+    { icon: '📁', label: 'File',      type: 'file'     },
+    { icon: '🎭', label: 'GIF',       type: 'gif'      },
+    { icon: '😀', label: 'Emoji',     type: 'emoji'    },
+    { icon: '🔵', label: 'AirDrop',   type: 'airdrop'  },
+    { icon: '📍', label: 'Location',  type: 'location' },
   ];
 
   const EMOJIS = [

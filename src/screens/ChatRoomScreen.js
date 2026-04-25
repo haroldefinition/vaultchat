@@ -29,6 +29,7 @@ import { enqueue, flushQueue } from '../services/messageQueue';
 import { markRoomAsRead, markDelivered, receiptIcon } from '../services/readReceipts';
 import { ResolvedPhotoStack, ResolvedVideoCarousel } from '../components/MediaBubbles';
 import VoiceNoteBubble from '../components/VoiceNoteBubble';
+import ViewOncePhoto from '../components/ViewOncePhoto';
 import {
   useAudioRecorder,
   RecordingPresets,
@@ -185,7 +186,7 @@ function Bubble({ item, myId, tx, sub, card, accent, bubbleOut, bubbleIn, bubble
   const cap     = nlIdx >= 0 ? raw.substring(nlIdx + 1).trim() : '';
   const isMedia = main.startsWith('GALLERY:') || main.startsWith('LOCALIMG:') || main.startsWith('IMG:')
                || main.startsWith('VIDEOS:')  || main.startsWith('LOCALVID:') || main.startsWith('VID:')
-               || main.startsWith('VOICE:');
+               || main.startsWith('VOICE:')   || main.startsWith('VONCE:');
 
   const timeStr = (() => {
     try { return new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
@@ -244,6 +245,25 @@ function Bubble({ item, myId, tx, sub, card, accent, bubbleOut, bubbleIn, bubble
       const dur  = sep >= 0 ? parseFloat(rest.slice(sep + 1)) || 0 : 0;
       return <>
         <VoiceNoteBubble url={url} durationSec={dur} accent={accent} isMe={me} bgColor={'transparent'} />
+        {cap ? <Text style={[s.cap, { color: me ? 'rgba(255,255,255,0.9)' : tx }]}>{cap}</Text> : null}
+      </>;
+    }
+    if (main.startsWith('VONCE:')) {
+      // Format: VONCE:<url>|<kind>  where kind is 'image' | 'video'
+      const rest = main.slice('VONCE:'.length);
+      const sep  = rest.lastIndexOf('|');
+      const url  = sep >= 0 ? rest.slice(0, sep) : rest;
+      const kind = sep >= 0 ? rest.slice(sep + 1) : 'image';
+      return <>
+        <ViewOncePhoto
+          messageId={item.id}
+          url={url}
+          kind={kind}
+          isMe={me}
+          accent={accent}
+          onOpenImage={onOpenImg}
+          onPlayVideo={onPlayVid}
+        />
         {cap ? <Text style={[s.cap, { color: me ? 'rgba(255,255,255,0.9)' : tx }]}>{cap}</Text> : null}
       </>;
     }
@@ -1186,6 +1206,31 @@ export default function ChatRoomScreen({ route, navigation }) {
   function pickAttach(type) { pendingAttach.current = type; setAttachModal(false); }
 
   async function handleAttachType(type) {
+    if (type === 'vonce') {
+      // View-once flow: pick ONE photo (or video), upload, post
+      // immediately as VONCE — bypasses staging since the whole point
+      // of view-once is a single shot the recipient can open exactly
+      // one time. Single-select keeps the UX a clean snap-and-send.
+      const p = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!p.granted) { Alert.alert('Permission needed'); return; }
+      const r = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images', 'videos'],
+        quality: 1, allowsMultipleSelection: false,
+      });
+      if (r.canceled || !r.assets?.[0]) return;
+      const asset = r.assets[0];
+      const isVideo = (asset.type || '').startsWith('video') || /\.(mp4|mov|m4v)$/i.test(asset.uri || '');
+      setSending(true);
+      const url = await uploadMedia(asset.uri, isVideo ? 'video' : 'image');
+      if (!url) {
+        Alert.alert('Upload failed', 'Could not send the view-once media. Check Metro logs.');
+        setSending(false);
+        return;
+      }
+      await postMsg(`VONCE:${url}|${isVideo ? 'video' : 'image'}`);
+      setSending(false);
+      return;
+    }
     if (type === 'photo') {
       const p = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!p.granted) { Alert.alert('Permission needed'); return; }
@@ -1256,14 +1301,15 @@ export default function ChatRoomScreen({ route, navigation }) {
   const hasStaged = stagedPhotos.length > 0 || stagedVideos.length > 0;
 
   const ATTACHMENTS = [
-    { icon: '🖼️', label: 'Gallery',  type: 'photo'    },
-    { icon: '🎥', label: 'Video',    type: 'video'    },
-    { icon: '📸', label: 'Camera',   type: 'camera'   },
-    { icon: '📁', label: 'File',     type: 'file'     },
-    { icon: '🎭', label: 'GIF',      type: 'gif'      },
-    { icon: '😀', label: 'Emoji',    type: 'emoji'    },
-    { icon: '🔵', label: 'AirDrop',  type: 'airdrop'  },
-    { icon: '📍', label: 'Location', type: 'location' },
+    { icon: '🖼️', label: 'Gallery',   type: 'photo'    },
+    { icon: '🎥', label: 'Video',     type: 'video'    },
+    { icon: '📸', label: 'Camera',    type: 'camera'   },
+    { icon: '👁️', label: 'View Once', type: 'vonce'    },
+    { icon: '📁', label: 'File',      type: 'file'     },
+    { icon: '🎭', label: 'GIF',       type: 'gif'      },
+    { icon: '😀', label: 'Emoji',     type: 'emoji'    },
+    { icon: '🔵', label: 'AirDrop',   type: 'airdrop'  },
+    { icon: '📍', label: 'Location',  type: 'location' },
   ];
 
   // Derive the currently-pinned message from the messages array.
