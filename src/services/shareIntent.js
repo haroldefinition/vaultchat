@@ -1,138 +1,108 @@
 // ============================================================
-//  VaultChat — iOS Share Extension handler (task #83)
+//  VaultChat — iOS Share Extension bridge (task #83)
 //  src/services/shareIntent.js
 //
-//  When a user picks VaultChat from another app's iOS share
-//  sheet (Photos, Safari, Mail, etc.), the system hands the
-//  shared content (URL / text / image / video / file) to our
-//  Share Extension target. The extension immediately re-opens
-//  the main app with the payload, which expo-share-intent
-//  delivers to JS via the useShareIntent hook below.
+//  expo-share-intent v6 exposes its API via React hook only
+//  (useShareIntent), so the integration has to be a component
+//  mounted inside the NavigationContainer rather than an
+//  imperative subscription. This file exports a single
+//  <ShareIntentBridge /> component that App.js drops into the
+//  tree once the navigation ref is ready.
 //
 //  Flow:
-//    1. App boot subscribes via initShareIntent(navigationRef)
-//    2. Incoming share → we navigate to a contact picker so the
-//       user chooses who to send it to
-//    3. After they pick, NewMessage opens with the shared
-//       content staged as a pending message / file / image
+//    1. useShareIntent fires when the iOS Share Extension hands
+//       us a payload (cold-launch OR live-runtime).
+//    2. We normalize the payload (text / url / image / video /
+//       file) and navigate to NewMessage with a `shared` route
+//       param so the user can pick a recipient.
+//    3. resetShareIntent clears the native pending payload so
+//       the same share doesn't re-fire on re-focus.
 //
-//  Native side (configured in app.json + a dev-client rebuild):
-//    - expo-share-intent's config plugin adds the Share Extension
-//      target to the iOS project, declares supported UTIs
-//      (images, videos, URLs, plain text), and wires the App
-//      Group entitlement so the extension can hand data back
-//      to the main app.
-//
-//  This service is JS-only and safe to import without the native
-//  module being present — if expo-share-intent isn't installed
-//  yet, initShareIntent is a no-op (logs once in dev) so the app
-//  still boots.
+//  Defensive: if expo-share-intent isn't installed the
+//  component renders null and is a no-op. The whole share-
+//  extension feature is best-effort — never breaks the app.
 // ============================================================
 
-let _shareIntentImpl = null;
+import React, { useEffect, useRef } from 'react';
+
+// Defensive import: if the package is missing the bridge stays a
+// no-op. Without this guard, removing the package from package.json
+// would crash the bundle at parse time.
+let useShareIntent = null;
 try {
-  // Defensive require — if the package isn't installed, we don't
-  // crash the whole app. The init function below becomes a no-op.
   // eslint-disable-next-line global-require
-  _shareIntentImpl = require('expo-share-intent');
+  useShareIntent = require('expo-share-intent').useShareIntent;
 } catch {
-  _shareIntentImpl = null;
+  useShareIntent = null;
 }
 
-let _bound = false;
-
-/**
- * Subscribe to incoming share-extension events. Pass a navigation
- * ref so we can route from outside the React tree. Safe to call
- * multiple times — second call is a no-op.
- */
-export function initShareIntent(navigationRef) {
-  if (_bound) return;
-  if (!_shareIntentImpl) {
-    if (__DEV__) console.log('[shareIntent] expo-share-intent not installed — share extension disabled');
-    return;
+// Normalize the package's ShareIntent shape into the same payload
+// schema NewMessageScreen expects: { type, text?, uri?, mimeType? }
+function normalize(intent) {
+  if (!intent) return null;
+  if (typeof intent.text === 'string' && intent.text.trim()) {
+    return { type: 'text', text: intent.text };
   }
-  if (!navigationRef) return;
-  _bound = true;
-
-  // Two events: cold-launch (app opened from share sheet while
-  // not running) and live-runtime (app already foregrounded).
-  // The package exposes them via getShareIntent() + an event
-  // emitter; both flow through the same handler.
-  try {
-    const { getShareIntent, addShareIntentListener } = _shareIntentImpl;
-    if (typeof getShareIntent === 'function') {
-      getShareIntent().then(payload => {
-        if (payload) handlePayload(navigationRef, payload);
-      }).catch(() => {});
-    }
-    if (typeof addShareIntentListener === 'function') {
-      addShareIntentListener(payload => {
-        if (payload) handlePayload(navigationRef, payload);
-      });
-    }
-  } catch (e) {
-    if (__DEV__) console.warn('[shareIntent] init error:', e?.message || e);
+  if (typeof intent.webUrl === 'string' && intent.webUrl.trim()) {
+    return { type: 'url', text: intent.webUrl };
   }
-}
-
-/**
- * Route a normalized share payload into the New Message flow.
- * The contact-picker step is delegated to NewMessage which
- * already supports a `shared` route param for staging incoming
- * content; the user picks a recipient and the content is sent
- * as a normal message via that screen's existing send paths.
- *
- * Payload shape (normalized across share types):
- *   { type: 'text' | 'url' | 'image' | 'video' | 'file',
- *     text?: string,           // for text and url
- *     uri?:  string,           // for image/video/file (file:// or content://)
- *     mimeType?: string }
- */
-function handlePayload(navigationRef, raw) {
-  const shared = normalize(raw);
-  if (!shared) return;
-
-  const tryNav = (attempt = 0) => {
-    if (!navigationRef?.isReady?.()) {
-      if (attempt < 12) setTimeout(() => tryNav(attempt + 1), 150);
-      return;
-    }
-    try {
-      navigationRef.navigate('NewMessage', { shared });
-    } catch (e) {
-      if (__DEV__) console.warn('[shareIntent] navigate error:', e?.message || e);
-    }
-  };
-  tryNav();
-}
-
-// expo-share-intent's payload shape varies across versions; this
-// shim flattens the common variants into the schema described
-// above. Returns null if the payload doesn't carry anything we
-// can act on.
-function normalize(raw) {
-  if (!raw) return null;
-  // Some versions: { text, weburl, files: [{path, mimeType}], ... }
-  if (typeof raw.text === 'string' && raw.text.trim()) {
-    return { type: 'text', text: raw.text };
-  }
-  if (typeof raw.weburl === 'string' && raw.weburl.trim()) {
-    return { type: 'url', text: raw.weburl };
-  }
-  if (Array.isArray(raw.files) && raw.files.length > 0) {
-    const f = raw.files[0];
+  if (Array.isArray(intent.files) && intent.files.length > 0) {
+    const f = intent.files[0];
     const mime = f.mimeType || f.type || '';
     let type = 'file';
     if (mime.startsWith('image/')) type = 'image';
     else if (mime.startsWith('video/')) type = 'video';
     return { type, uri: f.path || f.uri, mimeType: mime };
   }
-  // Newer payload shape may use { type, value }
-  if (raw.type && raw.value) {
-    return { type: raw.type, ...(raw.type === 'text' || raw.type === 'url'
-      ? { text: raw.value }
-      : { uri: raw.value }) };
-  }
   return null;
 }
+
+export function ShareIntentBridge({ navigationRef }) {
+  // Bail early when the native module isn't around — render null
+  // and skip the hook so we don't crash on undefined.
+  if (!useShareIntent) return null;
+
+  const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntent();
+  const consumedRef = useRef(false); // dedupe — same payload won't fire twice
+
+  useEffect(() => {
+    if (!hasShareIntent || !shareIntent) return;
+    if (consumedRef.current) return;
+
+    const payload = normalize(shareIntent);
+    if (!payload) {
+      // Nothing actionable in this payload — clear it and bail
+      try { resetShareIntent(true); } catch {}
+      return;
+    }
+    consumedRef.current = true;
+
+    // Wait for the navigation tree to be ready (cold launch races
+    // — the hook can fire before NavigationContainer has mounted).
+    const tryNav = (attempt = 0) => {
+      if (!navigationRef?.isReady?.()) {
+        if (attempt < 12) setTimeout(() => tryNav(attempt + 1), 150);
+        return;
+      }
+      try {
+        navigationRef.navigate('NewMessage', { shared: payload });
+      } catch (e) {
+        if (__DEV__) console.warn('[shareIntent] navigate failed:', e?.message || e);
+      }
+      // Clear the native-side pending payload so the next foreground
+      // doesn't replay this same share.
+      try { resetShareIntent(true); } catch {}
+      // Reset our dedupe guard so a new share later in the session
+      // can still flow through.
+      setTimeout(() => { consumedRef.current = false; }, 1500);
+    };
+    tryNav();
+  }, [hasShareIntent, shareIntent]);
+
+  return null;
+}
+
+// Legacy export kept for back-compat with the previous imperative
+// API — does nothing now that the bridge is a component, but
+// callers that import it won't fail at parse time.
+export function initShareIntent() {}
