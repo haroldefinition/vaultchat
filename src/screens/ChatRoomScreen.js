@@ -102,7 +102,7 @@ function VideoModal({ uri, visible, onClose }) {
 // ── Single lazy photo bubble ──────────────────────────────────
 // Handles both IMG:https://... (remote, always available) and
 // LOCALIMG:key (local AsyncStorage — only on sender's device/session).
-function SinglePhoto({ msgKey, isLocal, onOpen, onReply }) {
+function SinglePhoto({ msgKey, isLocal, onOpen, onReply, accent }) {
   const [uri,    setUri]    = useState(null);
   const [failed, setFailed] = useState(false);
 
@@ -137,10 +137,19 @@ function SinglePhoto({ msgKey, isLocal, onOpen, onReply }) {
       <ActivityIndicator size="small" color="#555" />
     </View>
   );
+  // Premium accent border + tinted shadow on the photo to match the
+  // mockup. The Image's borderRadius is bumped slightly inside the
+  // outer wrap so the inner photo sits cleanly within the border.
   return (
     <TouchableOpacity onPress={() => onOpen(uri)} onLongPress={onReply} delayLongPress={450} activeOpacity={0.88}>
-      <Image source={{ uri }} style={{ width: 220, height: 180, borderRadius: 14 }} resizeMode="cover" />
-      <Text style={{ fontSize: 10, color: 'rgba(255,255,255,0.6)', marginTop: 3 }}>Tap to expand</Text>
+      <View style={{
+        borderRadius: 16, overflow: 'hidden',
+        borderWidth: 1, borderColor: accent || 'rgba(255,255,255,0.2)',
+        shadowColor: accent || '#000', shadowOpacity: 0.45, shadowRadius: 12, shadowOffset: { width: 0, height: 4 },
+        elevation: 6,
+      }}>
+        <Image source={{ uri }} style={{ width: 220, height: 180 }} resizeMode="cover" />
+      </View>
     </TouchableOpacity>
   );
 }
@@ -212,7 +221,7 @@ function Bubble({ item, myId, tx, sub, card, accent, bubbleOut, bubbleIn, bubble
     if (main.startsWith('LOCALIMG:') || main.startsWith('IMG:')) {
       const key = main.replace('LOCALIMG:', '').replace('IMG:', '');
       return <>
-        <SinglePhoto msgKey={key} isLocal={main.startsWith('LOCALIMG:')} onOpen={onOpenImg} onReply={onReply} />
+        <SinglePhoto msgKey={key} isLocal={main.startsWith('LOCALIMG:')} onOpen={onOpenImg} onReply={onReply} accent={accent} />
         {cap ? <Text style={[s.cap, { color: me ? 'rgba(255,255,255,0.9)' : tx }]}>{cap}</Text> : null}
       </>;
     }

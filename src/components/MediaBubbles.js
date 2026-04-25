@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useTheme } from '../services/theme';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 const CARD_W     = Math.min(SW * 0.64, 255);
@@ -94,6 +95,11 @@ function FullScreenViewer({ uris, startIndex, visible, onClose }) {
 
 
 export function PhotoStack({ keys, onLongPress }) {
+  // useTheme so the photo card border picks up the accent color (violet
+  // in dark, Fiji blue in light) — gives the bubble the same premium
+  // outline as the mockup. No prop drilling needed since MediaBubbles
+  // is always mounted inside a ThemeProvider context.
+  const { accent } = useTheme();
   const [uris,    setUris]    = useState([]);
   const [loading, setLoading] = useState(true);
   const [topIdx,  setTopIdx]  = useState(0);
@@ -232,7 +238,16 @@ export function PhotoStack({ keys, onLongPress }) {
       <View style={s.deckArea}>
         {bg2 && <View style={[s.card,s.cardBg2]}><Image source={{uri:bg2}} style={s.cardImg} resizeMode="cover"/></View>}
         {bg1 && <View style={[s.card,s.cardBg1]}><Image source={{uri:bg1}} style={s.cardImg} resizeMode="cover"/></View>}
-        <Animated.View style={[s.card,s.cardTop,{transform:[{translateX:panX},{translateY:panY},{rotate:rotateCard}]}]} {...pr.panHandlers}>
+        <Animated.View
+          style={[
+            s.card, s.cardTop,
+            // Premium accent border + tinted shadow on the top photo card.
+            // shadowColor uses the theme accent so the glow reads as part
+            // of the color story (violet in dark, Fiji blue in light).
+            { borderWidth: 1, borderColor: accent, shadowColor: accent, shadowOpacity: 0.45, shadowRadius: 14 },
+            { transform:[{translateX:panX},{translateY:panY},{rotate:rotateCard}] },
+          ]}
+          {...pr.panHandlers}>
           <TouchableOpacity style={{flex:1}} onPress={() => { setFsStart(topIdx%count); setFsOpen(true); }} onLongPress={onLongPress} delayLongPress={500} activeOpacity={0.97}>
             <Image source={{uri:uris[topIdx%count]}} style={s.cardImg} resizeMode="cover"/>
             <View style={s.cardHint}><Text style={s.cardHintTx}>Tap to expand  ·  swipe to browse</Text></View>
