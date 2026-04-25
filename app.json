@@ -55,6 +55,18 @@
           "cameraPermission": "VaultChat uses the camera only to read QR codes when you're exchanging contacts."
         }
       ],
+      [
+        "expo-share-intent",
+        {
+          "iosActivationRules": {
+            "NSExtensionActivationSupportsText": true,
+            "NSExtensionActivationSupportsWebURLWithMaxCount": 1,
+            "NSExtensionActivationSupportsImageWithMaxCount": 6,
+            "NSExtensionActivationSupportsMovieWithMaxCount": 3,
+            "NSExtensionActivationSupportsFileWithMaxCount": 3
+          }
+        }
+      ],
       "expo-video",
       "expo-audio"
     ],

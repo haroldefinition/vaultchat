@@ -29,6 +29,7 @@ import ReportMessageModal from '../components/ReportMessageModal';
 import { ResolvedPhotoStack, ResolvedVideoCarousel } from '../components/MediaBubbles';
 import VoiceNoteBubble from '../components/VoiceNoteBubble';
 import ViewOncePhoto from '../components/ViewOncePhoto';
+import { summarizeMessages, summaryToText } from '../services/chatSummary';
 import {
   useAudioRecorder,
   RecordingPresets,
@@ -969,7 +970,17 @@ export default function GroupChatScreen({ route, navigation }) {
             ? <Image source={{ uri: groupPhoto }} style={{ width: '100%', height: '100%' }} />
             : <Text style={{ fontSize: 18 }}>👥</Text>}
         </TouchableOpacity>
-        <TouchableOpacity style={{ flex: 1 }} onPress={() => setInfoEditModal(true)}>
+        <TouchableOpacity
+          style={{ flex: 1 }}
+          onPress={() => setInfoEditModal(true)}
+          onLongPress={() => {
+            // On-device summary (task #91) — long-press the group
+            // name to see a stats + topics + highlight rundown.
+            longPressFeedback();
+            const summary = summarizeMessages(messages.slice(-50), { myUserId: currentUserId });
+            Alert.alert(`Summary of ${groupName || 'this group'}`, summaryToText(summary));
+          }}
+          delayLongPress={550}>
           <Text style={[g.hName, { color: tx }]} numberOfLines={1}>{groupName || 'Group'}</Text>
           <Text style={[g.hSub, { color: sub }]}>
             🔒  {groupMembers.length > 0

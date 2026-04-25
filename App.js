@@ -14,6 +14,7 @@ import { setupPushNotifications, addNotificationResponseListener, clearBadge } f
 import { flushQueue } from './src/services/messageQueue';
 import { subscribeToInviteUrls } from './src/services/inviteLink';
 import { findByHandle } from './src/services/vaultHandle';
+import { initShareIntent } from './src/services/shareIntent';
 import { isBiometricEnabled } from './src/services/biometric';
 import { connectSocket, disconnectSocket } from './src/services/socket';
 import { startCallListener, stopCallListener } from './src/services/callListener';
@@ -235,6 +236,13 @@ export default function App() {
         };
         tryNav();
       });
+
+      // Share extension wiring (task #83). When the user picks
+      // VaultChat from another app's iOS share sheet, the payload
+      // arrives here and we route it into NewMessage so they can
+      // pick a recipient. No-op if expo-share-intent isn't
+      // installed yet (defensive require in the service).
+      initShareIntent(navigationRef);
 
       // Bootstrap socket + global call listener for an authenticated user.
       // Safe to call multiple times — both services no-op if already set up.

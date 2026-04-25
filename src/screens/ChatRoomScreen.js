@@ -30,6 +30,7 @@ import { markRoomAsRead, markDelivered, receiptIcon } from '../services/readRece
 import { ResolvedPhotoStack, ResolvedVideoCarousel } from '../components/MediaBubbles';
 import VoiceNoteBubble from '../components/VoiceNoteBubble';
 import ViewOncePhoto from '../components/ViewOncePhoto';
+import { summarizeMessages, summaryToText } from '../services/chatSummary';
 import {
   useAudioRecorder,
   RecordingPresets,
@@ -1329,6 +1330,16 @@ export default function ChatRoomScreen({ route, navigation }) {
         <TouchableOpacity
           style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10 }}
           onPress={() => navigation.navigate('ContactView', { contact: contactData || { name: recipientName, phone: recipientPhone, photo: recipientPhoto } })}
+          onLongPress={() => {
+            // Long-press the chat header → on-device summary (task #91).
+            // Pure JS algorithmic summary — no model file, no network.
+            // Uses last 50 messages for the topic extractor's signal-
+            // to-noise sweet spot.
+            longPressFeedback();
+            const summary = summarizeMessages(messages.slice(-50), { myUserId: myId, peerName: recipientName || 'them' });
+            Alert.alert(`Summary of ${recipientName || 'this chat'}`, summaryToText(summary));
+          }}
+          delayLongPress={550}
           activeOpacity={0.7}>
           <View style={[s.hAvatar, { backgroundColor: accent }]}>
             {contactData?.photo

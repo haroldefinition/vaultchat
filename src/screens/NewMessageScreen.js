@@ -96,6 +96,29 @@ export default function NewMessageScreen({ navigation, route }) {
     }
   }, [route.params?.selectedContact]);
 
+  // Share-extension intake (task #83). When the user picks
+  // VaultChat from another app's iOS share sheet, App.js routes
+  // here with a `shared` payload. We pre-stage it so the user
+  // just has to pick a recipient and hit send. Text/URL go into
+  // the message field; images/videos/files go into their staging
+  // arrays so they ride the existing send paths.
+  useEffect(() => {
+    const sh = route.params?.shared;
+    if (!sh) return;
+    if ((sh.type === 'text' || sh.type === 'url') && sh.text) {
+      setMsg(prev => (prev ? prev + '\n' : '') + sh.text);
+    } else if (sh.type === 'image' && sh.uri) {
+      // Mirrors the photo-attach staging used elsewhere
+      const key = `img_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      AsyncStorage.setItem(key, sh.uri).catch(() => {});
+      setStagedPhotos(prev => [...prev, { uri: sh.uri, key }]);
+    } else if (sh.type === 'video' && sh.uri) {
+      setStagedVideos(prev => [...prev, { uri: sh.uri }]);
+    } else if (sh.type === 'file' && sh.uri) {
+      setStagedFile({ name: sh.uri.split('/').pop() || 'shared-file', uri: sh.uri });
+    }
+  }, [route.params?.shared]);
+
   // Fire attachment handler AFTER modal is fully dismissed (700ms — same as ChatRoomScreen)
   useEffect(() => {
     if (!attachModal && pendingAttach.current) {
