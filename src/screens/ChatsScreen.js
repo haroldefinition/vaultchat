@@ -11,6 +11,9 @@ import { useUnread } from '../services/unreadBadge';
 import { getMyHandle } from '../services/vaultHandle';
 import { taptic, longPressFeedback } from '../services/haptics';
 import { requestContactsPermission, syncContacts } from '../services/contacts';
+import { listFolders, subscribe as subscribeFolders } from '../services/folders';
+import { isPremiumUser } from '../services/adsService';
+import PremiumModal from '../components/PremiumModal';
 
 const CHATS_KEY = 'vaultchat_chats';
 
@@ -28,15 +31,36 @@ export default function ChatsScreen({ navigation }) {
   const [selected,     setSelected]     = useState(null);
   const [showArchived, setShowArchived] = useState(false);
 
+  // Chat folders (premium feature, task #82). selectedFolderId === null
+  // means "All" — the default tab. Folders array is loaded from
+  // src/services/folders.js and kept fresh via the subscribe() listener.
+  const [folders,           setFolders]           = useState([]);
+  const [selectedFolderId,  setSelectedFolderId]  = useState(null);
+  const [premium,           setPremium]           = useState(false);
+  const [premiumModalVis,   setPremiumModalVis]   = useState(false);
+
   // Track the currently-open Swipeable so we can close it when another
   // row is swiped. Without this, users can end up with multiple rows
   // stuck in their "open" state and the UI feels broken.
   const openSwipeRef = useRef(null);
 
+  // Refresh folder list + premium flag whenever we focus or the
+  // folders service signals a write (so creating a folder elsewhere
+  // updates the pill row immediately).
+  useEffect(() => {
+    const refreshFolders = () => listFolders().then(setFolders);
+    refreshFolders();
+    isPremiumUser().then(setPremium);
+    const unsubFolderWrites = subscribeFolders(refreshFolders);
+    return () => unsubFolderWrites();
+  }, []);
+
   useEffect(() => {
     const unsub = navigation.addListener('focus', () => {
       loadChats();
       clearUnread(); // clear badge when Chats tab is opened
+      listFolders().then(setFolders);
+      isPremiumUser().then(setPremium);
     });
     getMyHandle().then(h => { if (h) setMyHandle(h); });
     return unsub;
@@ -136,15 +160,42 @@ export default function ChatsScreen({ navigation }) {
     c.name?.toLowerCase().includes(search.toLowerCase()) ||
     c.phone?.includes(search);
 
+  // Folder filter — applied BEFORE the archived split so a folder
+  // can show its members from either pile. selectedFolderId === null
+  // means "All", which is the unfiltered view.
+  const folderChatIds = selectedFolderId
+    ? new Set((folders.find(f => f.id === selectedFolderId)?.chatIds) || [])
+    : null;
+  const inSelectedFolder = (c) => {
+    if (!folderChatIds) return true;
+    const id = c.id || c.roomId || c.handle;
+    return folderChatIds.has(id);
+  };
+
   const visible = chats
-    .filter(c => !c.archived && matchesSearch(c))
+    .filter(c => !c.archived && matchesSearch(c) && inSelectedFolder(c))
     .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
 
-  const archived = chats.filter(c => c.archived && matchesSearch(c));
+  const archived = chats.filter(c => c.archived && matchesSearch(c) && inSelectedFolder(c));
 
   // When the user taps the Archived footer, splice archived chats into
   // the list so they can still be swiped (un-archive, pin, etc.).
   const listData = showArchived ? [...visible, ...archived] : visible;
+
+  // ── Folder pill row helpers ──────────────────────────────────
+  function onFolderPillPress(folderId) {
+    // Premium gate — only the "All" tab is free; everything else
+    // requires premium. Show the upgrade modal on first paywalled tap.
+    if (folderId !== null && !premium) {
+      setPremiumModalVis(true);
+      return;
+    }
+    setSelectedFolderId(folderId);
+  }
+  function onManageFoldersPress() {
+    if (!premium) { setPremiumModalVis(true); return; }
+    navigation.navigate('Folders');
+  }
 
   // ── Better empty state ────────────────────────────────────────
   const EmptyState = () => {
@@ -220,6 +271,48 @@ export default function ChatsScreen({ navigation }) {
           onPress={() => { taptic(); navigation.navigate('NewMessage'); }}>
           <Text style={{ fontSize: 18 }}>✏️</Text>
         </TouchableOpacity>
+      </View>
+
+      {/* Folder pill row — Telegram-style. Always shows "All" + the
+          user's custom folders + a "+" pill that opens FoldersScreen.
+          Custom folders are gated behind premium (handled by
+          onFolderPillPress); the pills are visible either way so
+          non-premium users discover the upsell naturally. */}
+      <View style={[s.folderRow, { borderBottomColor: border }]}>
+        <FlatList
+          horizontal
+          data={[{ id: null, name: 'All', emoji: null }, ...folders, { id: '__manage', name: 'Manage', emoji: '⚙️' }]}
+          keyExtractor={f => f.id || 'all'}
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingHorizontal: 16, gap: 8, alignItems: 'center' }}
+          renderItem={({ item }) => {
+            if (item.id === '__manage') {
+              return (
+                <TouchableOpacity
+                  onPress={onManageFoldersPress}
+                  style={[s.folderPill, { backgroundColor: inputBg, borderColor: border }]}>
+                  <Text style={{ fontSize: 14 }}>⚙️</Text>
+                  <Text style={{ color: sub, fontSize: 13, fontWeight: '600' }}>Manage</Text>
+                  {!premium && <Text style={{ color: accent, fontSize: 11 }}>👑</Text>}
+                </TouchableOpacity>
+              );
+            }
+            const active = selectedFolderId === item.id;
+            return (
+              <TouchableOpacity
+                onPress={() => onFolderPillPress(item.id)}
+                style={[
+                  s.folderPill,
+                  { backgroundColor: active ? accent : inputBg, borderColor: active ? accent : border },
+                ]}>
+                {item.emoji ? <Text style={{ fontSize: 14 }}>{item.emoji}</Text> : null}
+                <Text style={{ color: active ? '#fff' : tx, fontSize: 13, fontWeight: '600' }}>
+                  {item.name}
+                </Text>
+              </TouchableOpacity>
+            );
+          }}
+        />
       </View>
 
       {/* Search bar */}
@@ -417,6 +510,16 @@ export default function ChatsScreen({ navigation }) {
         }}
         colors={{ bg, card, tx, sub, border, inputBg, accent }}
       />
+
+      {/* Premium upsell — fired by paywalled folder taps. On
+          successful subscribe, refresh the premium flag so the
+          gate stops bouncing the user. */}
+      <PremiumModal
+        visible={premiumModalVis}
+        onClose={() => setPremiumModalVis(false)}
+        onUpgraded={() => isPremiumUser().then(setPremium)}
+        colors={{ card, text: tx, muted: sub, border }}
+      />
     </View>
   );
 }
@@ -470,4 +573,13 @@ const s = StyleSheet.create({
   actionTitle:      { fontSize: 16, fontWeight: 'bold', padding: 16, textAlign: 'center' },
   actionBtn:        { padding: 16, borderBottomWidth: 1, alignItems: 'center' },
   actionText:       { fontSize: 16, fontWeight: '500' },
+  // Folder pill row (task #82). Compact horizontal bar between the
+  // header and the search input. Each pill is rounded with the
+  // accent color when active.
+  folderRow:        { paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth },
+  folderPill:       {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 12, paddingVertical: 7,
+    borderRadius: 18, borderWidth: 1,
+  },
 });

@@ -60,6 +60,7 @@ import ContactViewScreen   from './src/screens/ContactViewScreen';
 import ContactsScreen      from './src/screens/ContactsScreen';
 import IncomingCallScreen  from './src/screens/IncomingCallScreen';
 import QRContactScreen     from './src/screens/QRContactScreen';
+import FoldersScreen       from './src/screens/FoldersScreen';
 
 // ── Premium Modal (accessed everywhere) ──────────────────────
 import PremiumModal from './src/components/PremiumModal';
@@ -349,6 +350,7 @@ export default function App() {
               <Stack.Screen name="ContactView"   component={ContactViewScreen} />
               <Stack.Screen name="Contacts"      component={ContactsScreen} />
               <Stack.Screen name="QRContact"     component={QRContactScreen} options={{ animation:'slide_from_bottom' }} />
+              <Stack.Screen name="Folders"       component={FoldersScreen} />
               <Stack.Screen name="Premium"       component={({navigation}) => {
                 const [vis,setVis] = useState(true);
                 return <PremiumModal visible={vis} onClose={() => navigation.goBack()} onUpgraded={() => navigation.goBack()} />;
