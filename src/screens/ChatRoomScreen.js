@@ -28,6 +28,13 @@ import { subscribeToRoom, subscribeToTyping, broadcastTyping } from '../services
 import { enqueue, flushQueue } from '../services/messageQueue';
 import { markRoomAsRead, markDelivered, receiptIcon } from '../services/readReceipts';
 import { ResolvedPhotoStack, ResolvedVideoCarousel } from '../components/MediaBubbles';
+import VoiceNoteBubble from '../components/VoiceNoteBubble';
+import {
+  useAudioRecorder,
+  RecordingPresets,
+  AudioModule,
+  setAudioModeAsync,
+} from 'expo-audio';
 import {
   publishMyPublicKey,
   getPublicKey,
@@ -176,7 +183,8 @@ function Bubble({ item, myId, tx, sub, card, accent, bubbleOut, bubbleIn, bubble
   const main    = nlIdx >= 0 ? raw.substring(0, nlIdx) : raw;
   const cap     = nlIdx >= 0 ? raw.substring(nlIdx + 1).trim() : '';
   const isMedia = main.startsWith('GALLERY:') || main.startsWith('LOCALIMG:') || main.startsWith('IMG:')
-               || main.startsWith('VIDEOS:')  || main.startsWith('LOCALVID:') || main.startsWith('VID:');
+               || main.startsWith('VIDEOS:')  || main.startsWith('LOCALVID:') || main.startsWith('VID:')
+               || main.startsWith('VOICE:');
 
   const timeStr = (() => {
     try { return new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
@@ -222,6 +230,19 @@ function Bubble({ item, myId, tx, sub, card, accent, bubbleOut, bubbleIn, bubble
       const key = main.replace('LOCALIMG:', '').replace('IMG:', '');
       return <>
         <SinglePhoto msgKey={key} isLocal={main.startsWith('LOCALIMG:')} onOpen={onOpenImg} onReply={onReply} accent={accent} />
+        {cap ? <Text style={[s.cap, { color: me ? 'rgba(255,255,255,0.9)' : tx }]}>{cap}</Text> : null}
+      </>;
+    }
+    if (main.startsWith('VOICE:')) {
+      // Format: VOICE:<url>|<duration_sec>
+      // Permissive parse so a malformed payload still renders a player
+      // (it'll just show 0:00 and be silent on tap if the URL is bad).
+      const rest = main.slice('VOICE:'.length);
+      const sep  = rest.lastIndexOf('|');
+      const url  = sep >= 0 ? rest.slice(0, sep) : rest;
+      const dur  = sep >= 0 ? parseFloat(rest.slice(sep + 1)) || 0 : 0;
+      return <>
+        <VoiceNoteBubble url={url} durationSec={dur} accent={accent} isMe={me} bgColor={'transparent'} />
         {cap ? <Text style={[s.cap, { color: me ? 'rgba(255,255,255,0.9)' : tx }]}>{cap}</Text> : null}
       </>;
     }
@@ -321,6 +342,17 @@ export default function ChatRoomScreen({ route, navigation }) {
   const [messages,     setMessages]     = useState([]);
   const [text,         setText]         = useState('');
   const [sending,      setSending]      = useState(false);
+
+  // ── Voice notes (task #69) ─────────────────────────────────
+  // useAudioRecorder returns a recorder object that lives across renders.
+  // We control it imperatively (record / stop) and read recorder.uri once
+  // the recording is finalized. RecordingPresets.HIGH_QUALITY uses .m4a
+  // / AAC encoding which is universally compatible.
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const [isRecording,        setIsRecording]        = useState(false);
+  const [recordingStartedAt, setRecordingStartedAt] = useState(0);
+  const [recordingElapsed,   setRecordingElapsed]   = useState(0);
+  const recordingTimerRef = useRef(null);
   const [myId,         setMyId]         = useState('');
   const [myHandle,     setMyHandle]     = useState('');
   const [replyTo,      setReplyTo]      = useState(null);
@@ -1074,6 +1106,80 @@ export default function ChatRoomScreen({ route, navigation }) {
     setStagedVideos([]); setText(''); setSending(false);
   }
 
+  // ── Voice notes (task #69) ─────────────────────────────────
+  // startRecording prompts for mic permission (first time), prepares the
+  // recorder, kicks it off, and starts a tick timer driving the elapsed
+  // counter shown in the recording overlay. stopRecording uploads the
+  // resulting .m4a, builds a VOICE:<url>|<seconds> payload, and posts
+  // it through the normal postMsg path so it goes through encryption,
+  // realtime fan-out, and read-receipt accounting like any other
+  // message. cancelRecording discards locally — never uploaded.
+  async function startRecording() {
+    try {
+      const perm = await AudioModule.requestRecordingPermissionsAsync();
+      if (!perm?.granted) {
+        Alert.alert('Microphone needed', 'Allow microphone access in Settings to send voice notes.');
+        return;
+      }
+      // Some platforms need an explicit "switch to record mode" before the
+      // recorder can grab the mic — does nothing if already in that mode.
+      try { await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true }); } catch {}
+
+      await recorder.prepareToRecordAsync();
+      recorder.record();
+      const startedAt = Date.now();
+      setRecordingStartedAt(startedAt);
+      setRecordingElapsed(0);
+      setIsRecording(true);
+
+      // Live timer for the recording UI (1s tick).
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingElapsed(Math.floor((Date.now() - startedAt) / 1000));
+      }, 250);
+    } catch (e) {
+      Alert.alert('Recording failed', e?.message || 'Could not start the recorder.');
+      setIsRecording(false);
+      clearInterval(recordingTimerRef.current);
+    }
+  }
+
+  async function stopRecording() {
+    if (!isRecording) return;
+    setIsRecording(false);
+    clearInterval(recordingTimerRef.current);
+    try {
+      await recorder.stop();
+      const uri = recorder.uri;
+      const durSec = Math.max(1, Math.floor((Date.now() - recordingStartedAt) / 1000));
+      // Pop back to listening mode so playback works at full volume.
+      try { await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }); } catch {}
+      if (!uri) { Alert.alert('Recording empty', 'Nothing was captured. Try again.'); return; }
+
+      setSending(true);
+      const url = await uploadMedia(uri, 'voice');
+      if (!url) {
+        Alert.alert('Upload failed', 'Could not send the voice note. Check your connection and try again.');
+        setSending(false);
+        return;
+      }
+      await postMsg(`VOICE:${url}|${durSec}`);
+      setSending(false);
+    } catch (e) {
+      Alert.alert('Recording failed', e?.message || 'Could not finalize the recording.');
+      setSending(false);
+    }
+  }
+
+  async function cancelRecording() {
+    if (!isRecording) return;
+    setIsRecording(false);
+    clearInterval(recordingTimerRef.current);
+    try { await recorder.stop(); } catch {}
+    try { await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }); } catch {}
+    // Intentionally don't upload — discarded.
+  }
+
   function pickAttach(type) { pendingAttach.current = type; setAttachModal(false); }
 
   async function handleAttachType(type) {
@@ -1419,6 +1525,35 @@ export default function ChatRoomScreen({ route, navigation }) {
 
       {/* Normal input bar */}
       {!hasStaged && (
+        isRecording ? (
+          // Recording-mode input bar — replaces the normal one for the
+          // duration of the recording. Shows a pulsing red dot, the live
+          // elapsed-seconds counter, a Cancel button (discard, no upload),
+          // and a Send button (stops + uploads + posts as VOICE: message).
+          <View style={[s.inputBar, { backgroundColor: card, borderTopColor: border }]}>
+            <TouchableOpacity
+              style={[s.plusBtn, { backgroundColor: inputBg, borderColor: '#ff3b30' }]}
+              onPress={cancelRecording}
+              accessibilityLabel="Cancel recording">
+              <Text style={{ color: '#ff3b30', fontSize: 18, fontWeight: '700' }}>✕</Text>
+            </TouchableOpacity>
+            <View style={[s.input, { backgroundColor: inputBg, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14 }]}>
+              <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#ff3b30' }} />
+              <Text style={{ color: tx, fontWeight: '600' }}>
+                Recording…  {Math.floor(recordingElapsed / 60)}:{(recordingElapsed % 60).toString().padStart(2, '0')}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={[s.sendBtn, { backgroundColor: accent }]}
+              onPress={stopRecording}
+              accessibilityLabel="Send voice note"
+              disabled={sending}>
+              {sending
+                ? <ActivityIndicator color="#fff" size="small" />
+                : <Text style={{ color: '#fff', fontSize: 18 }}>➤</Text>}
+            </TouchableOpacity>
+          </View>
+        ) : (
         <View style={[s.inputBar, { backgroundColor: card, borderTopColor: border }]}>
           <TouchableOpacity style={[s.plusBtn, { backgroundColor: inputBg, borderColor: accent }]}
             onPress={() => setAttachModal(true)}>
@@ -1435,26 +1570,40 @@ export default function ChatRoomScreen({ route, navigation }) {
             onBlur={() => broadcastTyping(roomId, myId, myHandle || 'them', false)}
             multiline
           />
-          <TouchableOpacity
-            style={[s.sendBtn, { backgroundColor: text.trim() ? accent : inputBg }]}
-            onPress={() => sendText()}
-            onLongPress={() => {
-              if (!text.trim()) return;
-              longPressFeedback();
-              // Default picker to 1 hour from now if the current default is in the past.
-              if (scheduledAt.getTime() <= Date.now()) {
-                setScheduledAt(new Date(Date.now() + 60 * 60 * 1000));
-              }
-              setSchedulePickerStep('date');
-              setScheduleMode(true);
-            }}
-            delayLongPress={450}
-            disabled={!text.trim() || sending || encryptionStatus === 'resolving'}>
-            {sending
-              ? <ActivityIndicator color="#fff" size="small" />
-              : <Text style={{ color: text.trim() ? '#000' : sub, fontSize: 18 }}>➤</Text>}
-          </TouchableOpacity>
+          {/* When the input is empty, show a microphone that starts a
+              voice-note recording. As soon as the user types anything,
+              this swaps back to the normal Send/Schedule button so we
+              don't lose the existing send + scheduled-message flow. */}
+          {text.trim() ? (
+            <TouchableOpacity
+              style={[s.sendBtn, { backgroundColor: accent }]}
+              onPress={() => sendText()}
+              onLongPress={() => {
+                if (!text.trim()) return;
+                longPressFeedback();
+                if (scheduledAt.getTime() <= Date.now()) {
+                  setScheduledAt(new Date(Date.now() + 60 * 60 * 1000));
+                }
+                setSchedulePickerStep('date');
+                setScheduleMode(true);
+              }}
+              delayLongPress={450}
+              disabled={sending || encryptionStatus === 'resolving'}>
+              {sending
+                ? <ActivityIndicator color="#fff" size="small" />
+                : <Text style={{ color: '#000', fontSize: 18 }}>➤</Text>}
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={[s.sendBtn, { backgroundColor: accent }]}
+              onPress={startRecording}
+              accessibilityLabel="Record voice note"
+              disabled={sending || encryptionStatus === 'resolving'}>
+              <Text style={{ color: '#fff', fontSize: 18 }}>🎤</Text>
+            </TouchableOpacity>
+          )}
         </View>
+        )
       )}
 
       {/* Viewer modals */}

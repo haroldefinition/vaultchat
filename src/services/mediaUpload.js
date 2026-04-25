@@ -22,16 +22,26 @@ const BINARY_CONTENT = 0;
 export async function uploadMedia(uri, type) {
   try {
     const rawExt  = uri.split('.').pop()?.toLowerCase().split('?')[0] || '';
-    const ext     = rawExt || (type === 'video' ? 'mp4' : type === 'file' ? 'bin' : 'jpg');
-    const folder  = type === 'video' ? 'videos' : type === 'file' ? 'files' : 'images';
+    const ext     = rawExt || (
+      type === 'video' ? 'mp4' :
+      type === 'voice' ? 'm4a' :
+      type === 'file'  ? 'bin' : 'jpg'
+    );
+    const folder  = (
+      type === 'video' ? 'videos' :
+      type === 'voice' ? 'voice'  :
+      type === 'file'  ? 'files'  : 'images'
+    );
     const fname   = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
     const path    = `${folder}/${fname}`;
 
     const mime = type === 'video'
       ? (ext === 'mov' ? 'video/quicktime' : 'video/mp4')
-      : type === 'file'
-        ? 'application/octet-stream'
-        : (['png', 'gif', 'webp'].includes(ext) ? `image/${ext}` : 'image/jpeg');
+      : type === 'voice'
+        ? (ext === 'caf' ? 'audio/x-caf' : ext === 'mp3' ? 'audio/mpeg' : 'audio/m4a')
+        : type === 'file'
+          ? 'application/octet-stream'
+          : (['png', 'gif', 'webp'].includes(ext) ? `image/${ext}` : 'image/jpeg');
 
     // Get auth token — use session JWT if available, anon key as fallback
     let token = SUPABASE_ANON_KEY;
