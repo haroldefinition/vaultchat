@@ -15,9 +15,9 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Animated, Vibration } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { authenticateWithBiometric, checkBiometricSupport } from '../services/biometric';
 import { useTheme } from '../services/theme';
+import { getPin, PIN_KEY_REAL, PIN_KEY_DECOY } from '../services/securePinStore';
 
 export default function BiometricLockScreen({ onUnlock }) {
   const { bg, card, tx, sub, border, inputBg, accent } = useTheme();
@@ -33,8 +33,11 @@ export default function BiometricLockScreen({ onUnlock }) {
   }, []);
 
   async function loadPins() {
-    const rPin = await AsyncStorage.getItem('vaultchat_real_pin');
-    const dPin = await AsyncStorage.getItem('vaultchat_decoy_pin');
+    // Security audit fix #121 — PINs now come from Keychain via
+    // securePinStore, not plaintext AsyncStorage. The first call also
+    // auto-migrates any existing AsyncStorage values into Keychain.
+    const rPin = await getPin(PIN_KEY_REAL);
+    const dPin = await getPin(PIN_KEY_DECOY);
     if (rPin) setRealPin(rPin);
     if (dPin) setDecoyPin(dPin);
     const supported = await checkBiometricSupport();

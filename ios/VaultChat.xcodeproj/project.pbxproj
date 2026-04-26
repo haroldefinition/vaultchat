@@ -7,29 +7,64 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		08C3F8BC0C5D895180C7B21D /* libPods-VaultChat.a in Frameworks */ = {isa = PBXBuildFile; fileRef = DB9C7547A690DA090DE5994E /* libPods-VaultChat.a */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
+		1971E792C841B7F2D6D9262E /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 37EDF69A9CB94695BAE38971 /* PrivacyInfo.xcprivacy */; };
+		2C03F4E95F2EFA240CB2B9B2 /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6911841B7A41E1439B931ED1 /* ExpoModulesProvider.swift */; };
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
-		74133E303AA825242D2043EE /* libPods-VaultChat.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 77DA7FA90150A1DC32F8B57F /* libPods-VaultChat.a */; };
-		AE0C9D52D0A6E5EB99D7498F /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8BDD5DA93A5ED78D6896CC6 /* ExpoModulesProvider.swift */; };
+		4009583BB1104959B271B6C3 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 37EDF69A9CB94695BAE38971 /* PrivacyInfo.xcprivacy */; };
+		4EB941B70BCE492FA8C92DBE /* ShareExtensionPreprocessor.js in Resources */ = {isa = PBXBuildFile; fileRef = 325E2966394D473B8074F539 /* ShareExtensionPreprocessor.js */; };
+		8687901E65B04E5880D81A11 /* ShareExtension.appex in Copy Files */ = {isa = PBXBuildFile; fileRef = 6C2C316142174E48A7AE0E21 /* ShareExtension.appex */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
-		E6BE1B2FABBBC95C6A989D95 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 073AA8ED4F62F1A3682638C8 /* PrivacyInfo.xcprivacy */; };
+		E17EEB3B2D394AD99249056C /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8E4ADACD7F7480B9E1C1628 /* ShareViewController.swift */; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
+		F6BF231200634B5FAF859458 /* MainInterface.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = FB5FF19D01D943F697218ADA /* MainInterface.storyboard */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		C0C70192F3344C09B6340D70 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AB77A00169EC4A9495993506;
+			remoteInfo = ShareExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		5AF3BFC2603C488AB156C02C /* Copy Files */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				8687901E65B04E5880D81A11 /* ShareExtension.appex in Copy Files */,
+			);
+			name = "Copy Files";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
-		073AA8ED4F62F1A3682638C8 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; name = PrivacyInfo.xcprivacy; path = VaultChat/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		13B07F961A680F5B00A75B9A /* VaultChat.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VaultChat.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = VaultChat/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = VaultChat/Info.plist; sourceTree = "<group>"; };
-		60090DDB15D5A23D58D0236E /* Pods-VaultChat.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-VaultChat.debug.xcconfig"; path = "Target Support Files/Pods-VaultChat/Pods-VaultChat.debug.xcconfig"; sourceTree = "<group>"; };
-		77DA7FA90150A1DC32F8B57F /* libPods-VaultChat.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-VaultChat.a"; sourceTree = BUILT_PRODUCTS_DIR; };
-		A8BDD5DA93A5ED78D6896CC6 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-VaultChat/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
+		325E2966394D473B8074F539 /* ShareExtensionPreprocessor.js */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = ShareExtensionPreprocessor.js; path = ShareExtensionPreprocessor.js; sourceTree = "<group>"; };
+		37EDF69A9CB94695BAE38971 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = PrivacyInfo.xcprivacy; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		4B7F9C710779D2381E091C16 /* Pods-VaultChat.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-VaultChat.debug.xcconfig"; path = "Target Support Files/Pods-VaultChat/Pods-VaultChat.debug.xcconfig"; sourceTree = "<group>"; };
+		6911841B7A41E1439B931ED1 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-VaultChat/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
+		6C2C316142174E48A7AE0E21 /* ShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = undefined; name = ShareExtension.appex; path = ShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		8AFF636BDA1B4E6682428F0A /* ShareExtension-Info.plist */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = text.plist.xml; name = "ShareExtension-Info.plist"; path = "ShareExtension-Info.plist"; sourceTree = "<group>"; };
+		998A871839FA5A7AE759B2FF /* Pods-VaultChat.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-VaultChat.release.xcconfig"; path = "Target Support Files/Pods-VaultChat/Pods-VaultChat.release.xcconfig"; sourceTree = "<group>"; };
+		9FBEC16DF4A84B3E82C30267 /* ShareExtension.entitlements */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = ShareExtension.entitlements; path = ShareExtension.entitlements; sourceTree = "<group>"; };
+		A8E4ADACD7F7480B9E1C1628 /* ShareViewController.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = ShareViewController.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = VaultChat/SplashScreen.storyboard; sourceTree = "<group>"; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
-		D8E80521F4A18E359E6CC35A /* Pods-VaultChat.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-VaultChat.release.xcconfig"; path = "Target Support Files/Pods-VaultChat/Pods-VaultChat.release.xcconfig"; sourceTree = "<group>"; };
+		DB9C7547A690DA090DE5994E /* libPods-VaultChat.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-VaultChat.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = VaultChat/AppDelegate.swift; sourceTree = "<group>"; };
 		F11748442D0722820044C1D9 /* VaultChat-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "VaultChat-Bridging-Header.h"; path = "VaultChat/VaultChat-Bridging-Header.h"; sourceTree = "<group>"; };
+		FB5FF19D01D943F697218ADA /* MainInterface.storyboard */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = MainInterface.storyboard; path = MainInterface.storyboard; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -37,7 +72,14 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				74133E303AA825242D2043EE /* libPods-VaultChat.a in Frameworks */,
+				08C3F8BC0C5D895180C7B21D /* libPods-VaultChat.a in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BC77364BEB134921A9AC3513 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -53,36 +95,35 @@
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */,
-				073AA8ED4F62F1A3682638C8 /* PrivacyInfo.xcprivacy */,
 			);
 			name = VaultChat;
 			sourceTree = "<group>";
 		};
-		171F427E0E86464ABCE1E4A6 /* ExpoModulesProviders */ = {
+		28896D28BAA1F52DF205BACC /* ExpoModulesProviders */ = {
 			isa = PBXGroup;
 			children = (
-				BC058CDEABCAE47BF5BE6EE6 /* VaultChat */,
+				8F32AF8E36F0ECD39BEF2BC8 /* VaultChat */,
 			);
 			name = ExpoModulesProviders;
-			sourceTree = "<group>";
-		};
-		1CF3878BD84A710CFC348413 /* Pods */ = {
-			isa = PBXGroup;
-			children = (
-				60090DDB15D5A23D58D0236E /* Pods-VaultChat.debug.xcconfig */,
-				D8E80521F4A18E359E6CC35A /* Pods-VaultChat.release.xcconfig */,
-			);
-			name = Pods;
-			path = Pods;
 			sourceTree = "<group>";
 		};
 		2D16E6871FA4F8E400B85C8A /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
 				ED297162215061F000B7C4FE /* JavaScriptCore.framework */,
-				77DA7FA90150A1DC32F8B57F /* libPods-VaultChat.a */,
+				DB9C7547A690DA090DE5994E /* libPods-VaultChat.a */,
 			);
 			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		5F9CF65CE9D1506449058DC8 /* Pods */ = {
+			isa = PBXGroup;
+			children = (
+				4B7F9C710779D2381E091C16 /* Pods-VaultChat.debug.xcconfig */,
+				998A871839FA5A7AE759B2FF /* Pods-VaultChat.release.xcconfig */,
+			);
+			name = Pods;
+			path = Pods;
 			sourceTree = "<group>";
 		};
 		832341AE1AAA6A7D00B99B32 /* Libraries */ = {
@@ -99,8 +140,9 @@
 				832341AE1AAA6A7D00B99B32 /* Libraries */,
 				83CBBA001A601CBA00E9B192 /* Products */,
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
-				1CF3878BD84A710CFC348413 /* Pods */,
-				171F427E0E86464ABCE1E4A6 /* ExpoModulesProviders */,
+				CE7E90D06525442E81F215EA /* ShareExtension */,
+				5F9CF65CE9D1506449058DC8 /* Pods */,
+				28896D28BAA1F52DF205BACC /* ExpoModulesProviders */,
 			);
 			indentWidth = 2;
 			sourceTree = "<group>";
@@ -111,8 +153,17 @@
 			isa = PBXGroup;
 			children = (
 				13B07F961A680F5B00A75B9A /* VaultChat.app */,
+				6C2C316142174E48A7AE0E21 /* ShareExtension.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		8F32AF8E36F0ECD39BEF2BC8 /* VaultChat */ = {
+			isa = PBXGroup;
+			children = (
+				6911841B7A41E1439B931ED1 /* ExpoModulesProvider.swift */,
+			);
+			name = VaultChat;
 			sourceTree = "<group>";
 		};
 		BB2F792B24A3F905000567C9 /* Supporting */ = {
@@ -124,12 +175,18 @@
 			path = VaultChat/Supporting;
 			sourceTree = "<group>";
 		};
-		BC058CDEABCAE47BF5BE6EE6 /* VaultChat */ = {
+		CE7E90D06525442E81F215EA /* ShareExtension */ = {
 			isa = PBXGroup;
 			children = (
-				A8BDD5DA93A5ED78D6896CC6 /* ExpoModulesProvider.swift */,
+				A8E4ADACD7F7480B9E1C1628 /* ShareViewController.swift */,
+				FB5FF19D01D943F697218ADA /* MainInterface.storyboard */,
+				325E2966394D473B8074F539 /* ShareExtensionPreprocessor.js */,
+				37EDF69A9CB94695BAE38971 /* PrivacyInfo.xcprivacy */,
+				8AFF636BDA1B4E6682428F0A /* ShareExtension-Info.plist */,
+				9FBEC16DF4A84B3E82C30267 /* ShareExtension.entitlements */,
 			);
-			name = VaultChat;
+			name = ShareExtension;
+			path = ShareExtension;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -140,22 +197,41 @@
 			buildConfigurationList = 13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "VaultChat" */;
 			buildPhases = (
 				08A4A3CD28434E44B6B9DE2E /* [CP] Check Pods Manifest.lock */,
-				3B2FD030012BBD432459532D /* [Expo] Configure project */,
+				6D5C301E2D86FB15AFF7C8F4 /* [Expo] Configure project */,
 				13B07F871A680F5B00A75B9A /* Sources */,
 				13B07F8C1A680F5B00A75B9A /* Frameworks */,
 				13B07F8E1A680F5B00A75B9A /* Resources */,
 				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
 				800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */,
-				F02A92BA3CA26E34785A1F73 /* [CP] Embed Pods Frameworks */,
+				5AF3BFC2603C488AB156C02C /* Copy Files */,
+				CE18FADF09E984AA4D208544 /* [CP] Embed Pods Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				28FE68A1B81D43FE88A9A5C1 /* PBXTargetDependency */,
 			);
 			name = VaultChat;
 			productName = VaultChat;
 			productReference = 13B07F961A680F5B00A75B9A /* VaultChat.app */;
 			productType = "com.apple.product-type.application";
+		};
+		AB77A00169EC4A9495993506 /* ShareExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 99EF6F5AE9AE4C238CA1AE09 /* Build configuration list for PBXNativeTarget "ShareExtension" */;
+			buildPhases = (
+				C3F1D3EECAF34827A0FBC4CC /* Sources */,
+				4BD1DD479FF34D67B855CC3E /* Resources */,
+				BC77364BEB134921A9AC3513 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ShareExtension;
+			productName = ShareExtension;
+			productReference = 6C2C316142174E48A7AE0E21 /* ShareExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -184,6 +260,7 @@
 			projectRoot = "";
 			targets = (
 				13B07F861A680F5B00A75B9A /* VaultChat */,
+				AB77A00169EC4A9495993506 /* ShareExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -196,7 +273,17 @@
 				BB2F792D24A3F905000567C9 /* Expo.plist in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */,
-				E6BE1B2FABBBC95C6A989D95 /* PrivacyInfo.xcprivacy in Resources */,
+				1971E792C841B7F2D6D9262E /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4BD1DD479FF34D67B855CC3E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F6BF231200634B5FAF859458 /* MainInterface.storyboard in Resources */,
+				4EB941B70BCE492FA8C92DBE /* ShareExtensionPreprocessor.js in Resources */,
+				4009583BB1104959B271B6C3 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -242,7 +329,7 @@
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
 			showEnvVarsInLog = 0;
 		};
-		3B2FD030012BBD432459532D /* [Expo] Configure project */ = {
+		6D5C301E2D86FB15AFF7C8F4 /* [Expo] Configure project */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
@@ -310,7 +397,7 @@
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-VaultChat/Pods-VaultChat-resources.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
-		F02A92BA3CA26E34785A1F73 /* [CP] Embed Pods Frameworks */ = {
+		CE18FADF09E984AA4D208544 /* [CP] Embed Pods Frameworks */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -342,16 +429,32 @@
 			buildActionMask = 2147483647;
 			files = (
 				F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */,
-				AE0C9D52D0A6E5EB99D7498F /* ExpoModulesProvider.swift in Sources */,
+				2C03F4E95F2EFA240CB2B9B2 /* ExpoModulesProvider.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C3F1D3EECAF34827A0FBC4CC /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E17EEB3B2D394AD99249056C /* ShareViewController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		28FE68A1B81D43FE88A9A5C1 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = AB77A00169EC4A9495993506 /* ShareExtension */;
+			targetProxy = C0C70192F3344C09B6340D70 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
 		13B07F941A680F5B00A75B9A /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 60090DDB15D5A23D58D0236E /* Pods-VaultChat.debug.xcconfig */;
+			baseConfigurationReference = 4B7F9C710779D2381E091C16 /* Pods-VaultChat.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
@@ -387,7 +490,7 @@
 		};
 		13B07F951A680F5B00A75B9A /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = D8E80521F4A18E359E6CC35A /* Pods-VaultChat.release.xcconfig */;
+			baseConfigurationReference = 998A871839FA5A7AE759B2FF /* Pods-VaultChat.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
@@ -414,6 +517,35 @@
 				VERSIONING_SYSTEM = "apple-generic";
 			};
 			name = Release;
+		};
+		447D9D77E5614C418847E214 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "ShareExtension/ShareExtension-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_DEBUG";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.chatvault.vaultchat.share-extension";
+				PRODUCT_NAME = ShareExtension;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
 		};
 		83CBBA201A601CBA00E9B192 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -533,6 +665,31 @@
 			};
 			name = Release;
 		};
+		AFC39A101A744B66BE4D2FD7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "ShareExtension/ShareExtension-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.chatvault.vaultchat.share-extension";
+				PRODUCT_NAME = ShareExtension;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -550,6 +707,15 @@
 			buildConfigurations = (
 				83CBBA201A601CBA00E9B192 /* Debug */,
 				83CBBA211A601CBA00E9B192 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		99EF6F5AE9AE4C238CA1AE09 /* Build configuration list for PBXNativeTarget "ShareExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				447D9D77E5614C418847E214 /* Debug */,
+				AFC39A101A744B66BE4D2FD7 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

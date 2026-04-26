@@ -8,6 +8,8 @@ import { requestContactsPermission, syncContacts, findFriendsOnVaultChat } from 
 import { checkBiometricSupport } from '../services/biometric';
 import { generateHandle, getMyHandle, saveHandle } from '../services/vaultHandle';
 import { shareMyInvite } from '../services/inviteLink';
+import { hasVaultPin, setVaultPin, clearVaultPin } from '../services/vault';
+import { getPin, setPin, clearPin, PIN_KEY_REAL, PIN_KEY_DECOY } from '../services/securePinStore';
 import { createBackup, restoreBackup } from '../services/backup';
 import { placeCall } from '../services/placeCall';
 import { hangup as callPeerHangup, getState as callPeerGetState, _internal as callPeerInternal, subscribe as callPeerSubscribe } from '../services/callPeer';
@@ -57,6 +59,10 @@ export default function SettingsScreen({ navigation }) {
   const [decoyPin, setDecoyPin] = useState('');
   const [pinModal, setPinModal] = useState(false);
   const [pinType, setPinType] = useState('real');
+  // Vault PIN — separate from real/decoy. When set, the user can
+  // long-press the Chats title to enter the vault and reveal
+  // chats they've moved into it. See src/services/vault.js.
+  const [vaultPinSet, setVaultPinSet] = useState(false);
   const [pinInput, setPinInput] = useState('');
   const [devCallState, setDevCallState] = useState('idle');
   const [devSocketConnected, setDevSocketConnected] = useState(false);
@@ -116,10 +122,13 @@ export default function SettingsScreen({ navigation }) {
     }
     const bio = await AsyncStorage.getItem('vaultchat_biometric');
     setBiometricEnabled(bio === 'true');
-    const rp = await AsyncStorage.getItem('vaultchat_real_pin');
-    const dp = await AsyncStorage.getItem('vaultchat_decoy_pin');
+    // Security audit fix #121 — PINs read from Keychain via securePinStore.
+    // First call also auto-migrates any pre-existing AsyncStorage PINs.
+    const rp = await getPin(PIN_KEY_REAL);
+    const dp = await getPin(PIN_KEY_DECOY);
     if (rp) setRealPin(rp);
     if (dp) setDecoyPin(dp);
+    setVaultPinSet(await hasVaultPin());
     if (d.vaultchat_facetime !== null) setFaceTimeEnabled(JSON.parse(d.vaultchat_facetime ?? 'true'));
   }
 
@@ -553,6 +562,53 @@ export default function SettingsScreen({ navigation }) {
             } />
             <Row icon="🔢" label="Set Real PIN" subText={realPin ? '••••••' : 'Not set'} onPress={() => { setPinType('real'); setPinInput(''); setPinModal(true); }} />
             <Row icon="🎭" label="Decoy PIN" subText={decoyPin ? 'Set — shows empty chats' : 'Not set'} onPress={() => { setPinType('decoy'); setPinInput(''); setPinModal(true); }} />
+            <Row
+              icon="🛡️"
+              label="Vault PIN"
+              subText={vaultPinSet ? 'Set — long-press Chats title to unlock' : 'Not set'}
+              onPress={() => { setPinType('vault'); setPinInput(''); setPinModal(true); }}
+            />
+            <Row
+              icon="🚫"
+              label="Blocked Users"
+              subText="Manage who can't message or call you"
+              onPress={() => navigation.navigate('BlockedUsers')}
+            />
+          </Section>
+          {/* SECURITY — remote sign-out (security audit fix #127). */}
+          <Section title="SECURITY">
+            <Row
+              icon="🚪"
+              label="Sign Out Everywhere"
+              subText="Force-sign-out of every device including this one"
+              onPress={async () => {
+                Alert.alert(
+                  'Sign out everywhere?',
+                  'This will sign you out of VaultChat on every device — phones, tablets, etc. Use this if a device was lost or stolen. You\'ll need to sign back in on each device you still use.',
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                      text: 'Sign Out Everywhere',
+                      style: 'destructive',
+                      onPress: async () => {
+                        try {
+                          const { signOutAllDevices } = require('../services/sessionGuard');
+                          const r = await signOutAllDevices();
+                          if (r.ok) {
+                            await AsyncStorage.clear();
+                            Alert.alert('Signed out', 'You have been signed out of all devices.');
+                          } else {
+                            Alert.alert('Sign out failed', r.error || 'Please try again.');
+                          }
+                        } catch (e) {
+                          Alert.alert('Sign out failed', e?.message || 'Please try again.');
+                        }
+                      },
+                    },
+                  ],
+                );
+              }}
+            />
           </Section>
           {/* DANGER ZONE — required for App Store compliance (5.1.1(v)).
               Account deletion has to be initiable from within the app.
@@ -575,6 +631,12 @@ export default function SettingsScreen({ navigation }) {
             <Row icon={lightMode ? '🌙' : '☀️'} label="Light Mode" subText={lightMode ? 'Fiji blue accent' : 'Violet accent'} right={
               <Switch value={lightMode} onValueChange={toggleLight} trackColor={{ false: '#333', true: accent }} thumbColor="#fff" />
             } />
+            <Row
+              icon="🎨"
+              label="Theme & Icon"
+              subText="Custom accents and app icons (Premium)"
+              onPress={() => navigation.navigate('ThemePicker')}
+            />
           </Section>
         </ScrollView>
       </View>
@@ -805,12 +867,16 @@ export default function SettingsScreen({ navigation }) {
             activeOpacity={1}
             style={{ width: '85%', borderRadius: 20, backgroundColor: card, borderWidth: 1, borderColor: border, padding: 22, alignItems: 'center' }}>
             <Text style={{ color: tx, fontSize: 18, fontWeight: '700', marginBottom: 4 }}>
-              {pinType === 'real' ? 'Set Real PIN' : 'Set Decoy PIN'}
+              {pinType === 'real'  ? 'Set Real PIN'
+              : pinType === 'decoy' ? 'Set Decoy PIN'
+              :                       'Set Vault PIN'}
             </Text>
             <Text style={{ color: sub, fontSize: 12, textAlign: 'center', marginBottom: 16 }}>
               {pinType === 'real'
                 ? 'Your primary unlock PIN. Required to open the app after backgrounding.'
-                : 'A decoy PIN that unlocks into a hidden/empty chat list — useful if someone coerces you to open the app.'}
+                : pinType === 'decoy'
+                  ? 'A decoy PIN that unlocks into a hidden/empty chat list — useful if someone coerces you to open the app.'
+                  : 'Reveals chats you\'ve moved to your vault. Long-press the Chats title and enter this PIN to unlock the vault view.'}
             </Text>
             {/* 6-dot indicator */}
             <View style={{ flexDirection: 'row', gap: 14, marginBottom: 20 }}>
@@ -842,13 +908,27 @@ export default function SettingsScreen({ navigation }) {
                             setPinInput(p => p.slice(0, -1));
                           } else if (isOk) {
                             if (!canSubmit) return;
-                            const key = pinType === 'real' ? 'vaultchat_real_pin' : 'vaultchat_decoy_pin';
-                            await AsyncStorage.setItem(key, pinInput);
-                            if (pinType === 'real') setRealPin(pinInput);
-                            else                    setDecoyPin(pinInput);
+                            // Vault PIN goes through the vault service so the
+                            // unlock state + vaulted-id list stay in sync. Real
+                            // and decoy stay on direct AsyncStorage so
+                            // BiometricLockScreen's existing reads keep working.
+                            if (pinType === 'vault') {
+                              await setVaultPin(pinInput);
+                              setVaultPinSet(true);
+                            } else {
+                              // Security audit fix #121 — real & decoy PINs
+                              // now persist to Keychain via securePinStore.
+                              const key = pinType === 'real' ? PIN_KEY_REAL : PIN_KEY_DECOY;
+                              await setPin(key, pinInput);
+                              if (pinType === 'real') setRealPin(pinInput);
+                              else                    setDecoyPin(pinInput);
+                            }
                             setPinModal(false);
                             setPinInput('');
-                            Alert.alert('PIN saved', pinType === 'real' ? 'Your real PIN is set.' : 'Your decoy PIN is set.');
+                            Alert.alert('PIN saved',
+                              pinType === 'real'  ? 'Your real PIN is set.'
+                            : pinType === 'decoy' ? 'Your decoy PIN is set.'
+                            :                       'Your vault PIN is set. Long-press the Chats title to unlock.');
                           } else if (pinInput.length < 6) {
                             setPinInput(p => p + d);
                           }
@@ -867,13 +947,22 @@ export default function SettingsScreen({ navigation }) {
               ))}
             </View>
             {/* Clear existing PIN */}
-            {((pinType === 'real' && realPin) || (pinType === 'decoy' && decoyPin)) && (
+            {((pinType === 'real' && realPin) || (pinType === 'decoy' && decoyPin) || (pinType === 'vault' && vaultPinSet)) && (
               <TouchableOpacity
                 onPress={async () => {
-                  const key = pinType === 'real' ? 'vaultchat_real_pin' : 'vaultchat_decoy_pin';
-                  await AsyncStorage.removeItem(key);
-                  if (pinType === 'real') setRealPin('');
-                  else                    setDecoyPin('');
+                  if (pinType === 'vault') {
+                    // clearVaultPin also wipes the vaulted-id list — without
+                    // a PIN there's no vault, so the chats inside come back
+                    // out into the main list.
+                    await clearVaultPin();
+                    setVaultPinSet(false);
+                  } else {
+                    // Security audit fix #121 — clear from Keychain.
+                    const key = pinType === 'real' ? PIN_KEY_REAL : PIN_KEY_DECOY;
+                    await clearPin(key);
+                    if (pinType === 'real') setRealPin('');
+                    else                    setDecoyPin('');
+                  }
                   setPinModal(false);
                   setPinInput('');
                 }}>

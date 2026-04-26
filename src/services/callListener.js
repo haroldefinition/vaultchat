@@ -22,6 +22,7 @@ import { getSocket } from './socket';
 import * as callPeer from './callPeer';
 import * as roomCall from './roomCall';
 import { getMyDisplayName } from './vaultHandle';
+import { isBlockedSync } from './blocks';
 import {
   setupCallKit,
   displayIncomingCall,
@@ -131,6 +132,15 @@ function _onIncoming(payload) {
   const { callId, roomId, callerId, callerName, type } = payload || {};
   if (!callId || !callerId) return;
 
+  // Drop calls from blocked users on the client side too — defense in
+  // depth in case the server-side filter missed (e.g., the block was
+  // added after the server's blocked_users cache last refreshed).
+  if (isBlockedSync(callerId)) {
+    if (__DEV__) console.log('[callListener] dropping call from blocked user', callerId);
+    try { callPeer.declineIncoming(_myUserId, callerId); } catch {}
+    return;
+  }
+
   // Stage the invite in callPeer so accept()/declineIncoming() know the IDs.
   callPeer.handleIncomingInvite({ callId, roomId, callerId, type });
 
@@ -175,6 +185,12 @@ function _onRoomIncoming(payload) {
     type, existingParticipants,
   } = payload || {};
   if (!callId || !inviterId) return;
+
+  // Same drop-from-blocked check as 1:1 calls (above).
+  if (isBlockedSync(inviterId)) {
+    if (__DEV__) console.log('[callListener] dropping conference invite from blocked user', inviterId);
+    return;
+  }
 
   // Stage in roomCall so accept() knows the IDs.
   roomCall.handleIncomingInvite({

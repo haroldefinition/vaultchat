@@ -19,18 +19,23 @@ export const ICE_SERVERS = [
   { urls: 'turn:a.relay.metered.ca:443',     username: 'openrelayproject', credential: 'openrelayproject' },
 ];
 
-// Adaptive bitrate profiles — matched to real-world rural signal conditions
+// Adaptive bitrate profiles — matched to real-world signal conditions.
+// FHD (1080p @ 5 Mbps) is the new ceiling for 5G / strong-Wi-Fi calls
+// (task #120 — "crystal clear" video). Lower tiers stay where they were
+// so weak / rural signals still degrade gracefully via the same map.
 export const QUALITY_PROFILES = {
-  HD:  { label: 'HD',  maxBitrate: 1200000, width: 1280, height: 720,  frameRate: 30, audioKbps: 128 },
-  SD:  { label: 'SD',  maxBitrate: 500000,  width: 640,  height: 480,  frameRate: 24, audioKbps: 64  },
-  Low: { label: 'Low', maxBitrate: 200000,  width: 426,  height: 240,  frameRate: 15, audioKbps: 32  },
+  FHD: { label: 'HD+', maxBitrate: 5000000, width: 1920, height: 1080, frameRate: 30, audioKbps: 128 },
+  HD:  { label: 'HD',  maxBitrate: 2500000, width: 1280, height: 720,  frameRate: 30, audioKbps: 128 },
+  SD:  { label: 'SD',  maxBitrate: 800000,  width: 640,  height: 480,  frameRate: 24, audioKbps: 64  },
+  Low: { label: 'Low', maxBitrate: 250000,  width: 426,  height: 240,  frameRate: 15, audioKbps: 32  },
   Min: { label: 'Min', maxBitrate: 60000,   width: 176,  height: 144,  frameRate: 8,  audioKbps: 16  },
 };
 
-// Map signal bars (0–4) to quality profile
-// Even 0 bars (countryside edge) gets Min quality rather than dropping
+// Map signal bars (0–4) to quality profile.
+// 4 bars on Wi-Fi / 5G earns the new FHD tier; 3 bars stays HD so we don't
+// promise 1080p on a connection that can't sustain it (would just thrash).
 export function profileForSignal(bars) {
-  if (bars >= 4) return QUALITY_PROFILES.HD;
+  if (bars >= 4) return QUALITY_PROFILES.FHD;
   if (bars === 3) return QUALITY_PROFILES.HD;
   if (bars === 2) return QUALITY_PROFILES.SD;
   if (bars === 1) return QUALITY_PROFILES.Low;
@@ -161,4 +166,44 @@ export async function applyAdaptation(pc, quality) {
 export function autoAdapt(pc, netQ) {
   if (!pc || !netQ) return () => {};
   return netQ.subscribe(({ quality }) => { applyAdaptation(pc, quality); });
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Video sender baseline (task #120)
+// ───────────────────────────────────────────────────────────────────────────
+//
+// Apply once after the PC is connected and the video sender exists. Sets a
+// generous 5 Mbps cap so 1080p has room to breathe on Wi-Fi / 5G, and pins
+// `degradationPreference` to 'maintain-resolution' so when bandwidth dips
+// the encoder drops framerate (30 → 20fps) instead of dropping resolution
+// (1080p → 480p). Most users prefer "sharp but slightly choppy" over
+// "smooth but pixelated" on a video call. The networkQuality auto-adapt
+// path can still LOWER the bitrate at runtime — this function only sets
+// the ceiling.
+export const VIDEO_MAX_BITRATE = 5_000_000; // 5 Mbps — caps 1080p ceiling
+export const VIDEO_MIN_BITRATE = 300_000;   // floor below which we'd rather drop
+export const VIDEO_MAX_FRAMERATE = 30;
+
+export async function applyVideoBaseline(pc) {
+  if (!pc || typeof pc.getSenders !== 'function') return;
+  const senders = pc.getSenders();
+  for (const sender of senders) {
+    if (!sender?.track || sender.track.kind !== 'video') continue;
+    try {
+      const params = sender.getParameters() || {};
+      if (!params.encodings || !params.encodings.length) params.encodings = [{}];
+      params.encodings[0].maxBitrate    = VIDEO_MAX_BITRATE;
+      params.encodings[0].minBitrate    = VIDEO_MIN_BITRATE;
+      params.encodings[0].maxFramerate  = VIDEO_MAX_FRAMERATE;
+      params.encodings[0].priority         = 'high';
+      params.encodings[0].networkPriority  = 'high';
+      // 'maintain-resolution' = sacrifice fps before dropping resolution.
+      // The other options ('balanced', 'maintain-framerate') would drop
+      // pixels first, which is the opposite of what we want here.
+      params.degradationPreference = 'maintain-resolution';
+      await sender.setParameters(params);
+    } catch (e) {
+      if (__DEV__) console.warn('applyVideoBaseline error:', e?.message || e);
+    }
+  }
 }

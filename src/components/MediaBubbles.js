@@ -8,9 +8,20 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../services/theme';
 
 const { width: SW, height: SH } = Dimensions.get('window');
-const CARD_W     = Math.min(SW * 0.64, 255);
-const CARD_H     = CARD_W;
-const DECK_SWIPE = CARD_W * 0.22;
+// Bumped from 0.64 → 0.78 so photos read at a natural "look-at-this"
+// size instead of a thumbnail, matching the iMessage feel. Cap at 320px
+// so the bubble stays sane on iPad / landscape.
+const CARD_W     = Math.min(SW * 0.78, 320);
+// Card height tracks the top photo's natural aspect ratio (loaded
+// async via Image.getSize). Default to a square until we know.
+const CARD_HMAX = CARD_W * 1.4;   // very tall photos clamp here
+const CARD_HMIN = CARD_W * 0.6;   // very wide photos floor here
+// Swipe sensitivity — tightened for a flickier feel. Was 0.22 / 0.5;
+// now triggers a card change with less drag distance OR a quicker
+// flick. dx threshold is also lower so the responder claims the
+// gesture sooner (see PanResponder below).
+const DECK_SWIPE = CARD_W * 0.14;
+const SWIPE_VX   = 0.3;
 const FS_SWIPE   = SW * 0.08;
 
 function FullScreenViewer({ uris, startIndex, visible, onClose }) {
@@ -105,6 +116,10 @@ export function PhotoStack({ keys, onLongPress }) {
   const [topIdx,  setTopIdx]  = useState(0);
   const [fsOpen,  setFsOpen]  = useState(false);
   const [fsStart, setFsStart] = useState(0);
+  // Per-uri natural pixel dimensions, populated lazily as photos are
+  // resolved. Keyed by uri so the card height for each photo respects
+  // its own aspect ratio rather than being forced into a square.
+  const [dims,    setDims]    = useState({}); // { uri: { w, h } }
 
   const topIdxRef   = useRef(0);
   const urisRef     = useRef([]);
@@ -151,10 +166,30 @@ export function PhotoStack({ keys, onLongPress }) {
         urisRef.current = valid;
         setUris(valid);
         setLoading(false);
+        // Fire-and-forget natural size lookup per photo. Image.getSize
+        // is async so we don't await it inside the resolver — the cards
+        // start as squares and reflow to natural aspect once the
+        // dimensions land. Failures are silent (square fallback).
+        valid.forEach(u => {
+          Image.getSize(
+            u,
+            (w, h) => { if (!cancelled) setDims(d => ({ ...d, [u]: { w, h } })); },
+            () => {},
+          );
+        });
       }
     })();
     return () => { cancelled = true; };
   }, [keys.join(',')]);
+
+  // Compute card height for a given uri's natural aspect ratio, clamped
+  // so very tall (portrait) or very wide (panorama) photos stay legible.
+  function heightFor(uri) {
+    const d = dims[uri];
+    if (!d || !d.w) return CARD_W;
+    const h = (d.h / d.w) * CARD_W;
+    return Math.max(CARD_HMIN, Math.min(CARD_HMAX, h));
+  }
 
   const advance = useCallback(() => {
     if (isAnimating.current) return;
@@ -182,16 +217,16 @@ export function PhotoStack({ keys, onLongPress }) {
     });
   }, [panX, panY]);
 
-  // PanResponder — pure horizontal swipe. Vertical drift removed
-  // entirely so the chat list's vertical scroll never fights the
-  // gesture, and the photo travels cleanly L/R without that
-  // "screen sliding up" feel. We also require the gesture to be
-  // strongly horizontal (dx > 2x dy) before claiming it, so a finger
-  // moving mostly vertically falls through to the FlatList.
+  // PanResponder — flicky horizontal swipe. Tightened thresholds so a
+  // quick finger flick (any meaningful velocity) advances even with
+  // tiny drag distance. Still requires the gesture to be strongly
+  // horizontal (dx > 1.5x dy) so vertical pans fall through to the
+  // FlatList. Animation duration is shorter so the card "snaps"
+  // through the screen rather than gliding.
   const pr = useRef(PanResponder.create({
-    onStartShouldSetPanResponder: () => false, // never claim taps; let TouchableOpacity handle them
+    onStartShouldSetPanResponder: () => false, // never claim taps
     onMoveShouldSetPanResponder:  (_, g) =>
-      !isAnimating.current && Math.abs(g.dx) > 8 && Math.abs(g.dx) > Math.abs(g.dy) * 2,
+      !isAnimating.current && Math.abs(g.dx) > 4 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
     onPanResponderGrant: () => {
       panX.setOffset(panXValue.current);
       panX.setValue(0);
@@ -207,12 +242,12 @@ export function PhotoStack({ keys, onLongPress }) {
         Animated.spring(panX, { toValue:0, useNativeDriver:false }).start();
         return;
       }
-      const left  = g.dx < -DECK_SWIPE || g.vx < -0.5;
-      const right = g.dx >  DECK_SWIPE || g.vx >  0.5;
+      const left  = g.dx < -DECK_SWIPE || g.vx < -SWIPE_VX;
+      const right = g.dx >  DECK_SWIPE || g.vx >  SWIPE_VX;
       if (left || right) {
         isAnimating.current = true;
         const dest = left ? -SW*1.5 : SW*1.5;
-        Animated.timing(panX, { toValue:dest, duration:210, useNativeDriver:false }).start(() => {
+        Animated.timing(panX, { toValue:dest, duration:160, useNativeDriver:false }).start(() => {
           panX.setValue(0); panXValue.current = 0;
           const next = left
             ? (topIdxRef.current + 1) % count
@@ -221,7 +256,7 @@ export function PhotoStack({ keys, onLongPress }) {
           isAnimating.current = false;
         });
       } else {
-        Animated.spring(panX, { toValue:0, friction:5, tension:50, useNativeDriver:false }).start();
+        Animated.spring(panX, { toValue:0, friction:6, tension:80, useNativeDriver:false }).start();
       }
     },
     onPanResponderTerminate: () => {
@@ -243,20 +278,27 @@ export function PhotoStack({ keys, onLongPress }) {
   // which has full swipe-to-browse, pinch-to-zoom, and a counter.
   // No in-bubble counter row, no dots, no arrow nav — keeps the
   // bubble visually clean like iMessage's photo stack.
+  // Card height tracks the TOP photo's natural aspect ratio so the
+  // bubble doesn't crop landscape/portrait photos into squares. Bg
+  // cards inherit the same height — they're decorative anyway, and
+  // a uniform stack reads cleaner than mismatched heights.
+  const topUri = uris[topIdx % count];
+  const cardH  = heightFor(topUri);
   return (
     <View style={s.root}>
-      <View style={s.deckArea}>
-        {bg2 && <View style={[s.card,s.cardBg2]}><Image source={{uri:bg2}} style={s.cardImg} resizeMode="cover"/></View>}
-        {bg1 && <View style={[s.card,s.cardBg1]}><Image source={{uri:bg1}} style={s.cardImg} resizeMode="cover"/></View>}
+      <View style={[s.deckArea, { width: CARD_W + 50, height: cardH + 50 }]}>
+        {bg2 && <View style={[s.card,s.cardBg2,{ height: cardH }]}><Image source={{uri:bg2}} style={s.cardImg} resizeMode="cover"/></View>}
+        {bg1 && <View style={[s.card,s.cardBg1,{ height: cardH }]}><Image source={{uri:bg1}} style={s.cardImg} resizeMode="cover"/></View>}
         <Animated.View
           style={[
             s.card, s.cardTop,
+            { height: cardH },
             { borderWidth: StyleSheet.hairlineWidth, borderColor: accent, shadowColor: accent, shadowOpacity: 0.28, shadowRadius: 10 },
             { transform:[{translateX:panX}] },
           ]}
           {...pr.panHandlers}>
           <TouchableOpacity style={{flex:1}} onPress={() => { setFsStart(topIdx%count); setFsOpen(true); }} onLongPress={onLongPress} delayLongPress={500} activeOpacity={0.97}>
-            <Image source={{uri:uris[topIdx%count]}} style={s.cardImg} resizeMode="cover"/>
+            <Image source={{uri:topUri}} style={s.cardImg} resizeMode="cover"/>
           </TouchableOpacity>
         </Animated.View>
       </View>
@@ -299,15 +341,15 @@ export function ResolvedVideoCarousel({ content, onLongPress }) {
 }
 
 const s = StyleSheet.create({
-  placeholder: { width:CARD_W, height:CARD_H, borderRadius:18, backgroundColor:'#1a1a2e', alignItems:'center', justifyContent:'center' },
+  placeholder: { width:CARD_W, height:CARD_W, borderRadius:18, backgroundColor:'#1a1a2e', alignItems:'center', justifyContent:'center' },
   root:        { alignItems:'center', paddingBottom:4 },
   counterRow:  { flexDirection:'row', alignItems:'center', marginBottom:10 },
   counterTx:   { color:'#fff', fontSize:13, fontWeight:'700' },
   counterHint: { color:'rgba(255,255,255,0.45)', fontSize:11 },
   // Wider/taller than the card itself so the bg cards' translate + rotate
   // can extend past the top card without getting clipped by the parent.
-  deckArea:    { width:CARD_W+50, height:CARD_H+50, alignItems:'center', justifyContent:'center' },
-  card:        { position:'absolute', width:CARD_W, height:CARD_H, borderRadius:18, overflow:'hidden', backgroundColor:'#111', shadowColor:'#000', shadowOffset:{width:0,height:6}, shadowOpacity:0.4, shadowRadius:12, elevation:8 },
+  deckArea:    { width:CARD_W+50, height:CARD_W+50, alignItems:'center', justifyContent:'center' },
+  card:        { position:'absolute', width:CARD_W, height:CARD_W, borderRadius:18, overflow:'hidden', backgroundColor:'#111', shadowColor:'#000', shadowOffset:{width:0,height:6}, shadowOpacity:0.4, shadowRadius:12, elevation:8 },
   cardTop:     { zIndex:10 },
   // iMessage-style stack: keep the bg cards full size (no scale) so the
   // offset actually reveals them, and push them DOWN-RIGHT under the
@@ -328,7 +370,7 @@ const s = StyleSheet.create({
   dotActive:   { backgroundColor:'#fff', width:8, height:8, borderRadius:4 },
   dotMore:     { color:'rgba(255,255,255,0.5)', fontSize:11 },
   vcRoot:      { width:CARD_W, borderRadius:16, overflow:'hidden', backgroundColor:'#080808' },
-  vcVideo:     { width:CARD_W, height:CARD_H },
+  vcVideo:     { width:CARD_W, height:CARD_W },
   vcNav:       { flexDirection:'row', alignItems:'center', justifyContent:'space-between', paddingHorizontal:10, paddingVertical:10, backgroundColor:'rgba(0,0,0,0.7)' },
   vcBtn:       { width:38, height:38, borderRadius:19, backgroundColor:'rgba(255,255,255,0.15)', alignItems:'center', justifyContent:'center' },
   vcArrow:     { color:'#fff', fontSize:24, fontWeight:'700', lineHeight:28 },

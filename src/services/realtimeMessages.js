@@ -2,6 +2,23 @@
 // Replaces setInterval polling with push-based WebSocket updates.
 // Falls back silently if Realtime is not enabled on the table.
 import { supabase } from './supabase';
+import { isBlockedSync } from './blocks';
+
+// Wrap an onInsert handler so messages from blocked users are silently
+// dropped on the client side. Server-side enforcement is the primary
+// gate (server.js drops `message:send` from banned users) but per-user
+// blocks travel through Supabase Realtime which can race the server's
+// blocked_users cache. This is the belt-and-suspenders client filter.
+function _filterByBlocks(onInsert, getSenderId = (row) => row?.sender_id) {
+  if (!onInsert) return onInsert;
+  return (row) => {
+    try {
+      const sid = getSenderId(row);
+      if (sid && isBlockedSync(sid)) return; // drop silently
+    } catch {}
+    onInsert(row);
+  };
+}
 
 // Supabase Realtime v2.x throws ("cannot add postgres_changes
 // callbacks ... after subscribe()") if .on() is called on a channel
@@ -32,11 +49,12 @@ export function freshChannel(name) {
  * @returns cleanup function — call on component unmount
  */
 export function subscribeToRoom(roomId, onInsert, onUpdate) {
+  const filteredInsert = _filterByBlocks(onInsert);
   const channel = freshChannel(`room:${roomId}`)
     .on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'messages', filter: `room_id=eq.${roomId}` },
-      payload => { if (payload.new) onInsert(payload.new); }
+      payload => { if (payload.new) filteredInsert(payload.new); }
     )
     .on(
       'postgres_changes',
@@ -56,11 +74,12 @@ export function subscribeToRoom(roomId, onInsert, onUpdate) {
  * @returns cleanup function
  */
 export function subscribeToGroup(groupId, onInsert, onUpdate) {
+  const filteredInsert = _filterByBlocks(onInsert);
   const channel = freshChannel(`group:${groupId}`)
     .on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'group_messages', filter: `group_id=eq.${groupId}` },
-      payload => { if (payload.new) onInsert(payload.new); }
+      payload => { if (payload.new) filteredInsert(payload.new); }
     )
     .on(
       'postgres_changes',

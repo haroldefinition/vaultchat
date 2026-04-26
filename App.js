@@ -62,6 +62,8 @@ import ContactsScreen      from './src/screens/ContactsScreen';
 import IncomingCallScreen  from './src/screens/IncomingCallScreen';
 import QRContactScreen     from './src/screens/QRContactScreen';
 import FoldersScreen       from './src/screens/FoldersScreen';
+import BlockedUsersScreen  from './src/screens/BlockedUsersScreen';
+import ThemePickerScreen   from './src/screens/ThemePickerScreen';
 
 // ── Premium Modal (accessed everywhere) ──────────────────────
 import PremiumModal from './src/components/PremiumModal';
@@ -249,6 +251,56 @@ export default function App() {
         connectSocket(userId);
         // Give the socket a tick to connect before wiring the listener.
         setTimeout(() => startCallListener({ myUserId: userId, navigationRef }), 200);
+        // PushKit (task #103) — registers the device for VoIP pushes
+        // so cold-killed iOS apps still ring CallKit on incoming calls.
+        // No-ops on Android and in Expo Go.
+        try { require('./src/services/voipPushService').startVoipPush({ myUserId: userId }); } catch {}
+        // IAP (task #92) — tie purchases to this user, init StoreKit,
+        // pull premium status from server. All best-effort: no-op
+        // gracefully when react-native-iap isn't compiled in.
+        try {
+          const iap = require('./src/services/iapService');
+          iap.setUserId(userId);
+          iap.initIAP().then(() => iap.syncPremiumFromServer()).catch(() => {});
+        } catch {}
+        // Hydrate the per-user block list (task #94). Re-hydrate on every
+        // sign-in because the cached list is keyed per-app, not per-user.
+        try { require('./src/services/blocks').hydrateBlocks(); } catch {}
+        // Device integrity check (security audit fix #128). Warns once
+        // if the device appears jailbroken/rooted — VaultChat's privacy
+        // guarantees rely on OS sandboxing that those devices break.
+        try { require('./src/services/deviceIntegrity').maybeWarnAboutDeviceIntegrity(); } catch {}
+        // Session guard (security audit fix #127). Tracks app activity
+        // and force-signs-out the local device after IDLE_TIMEOUT_MS
+        // (7 days) of inactivity — backstop for stolen/lost devices.
+        try {
+          require('./src/services/sessionGuard').startSessionGuard({
+            onSignedOut: () => { setIsLoggedIn(false); },
+          });
+        } catch {}
+        // Listen for an account suspension push from the server. The server
+        // emits this immediately before disconnecting a banned socket — we
+        // surface a clear, modal alert so the user knows why they were
+        // kicked instead of staring at a silent reconnect loop.
+        setTimeout(() => {
+          try {
+            const sock = require('./src/services/socket').getSocket?.();
+            if (!sock || sock.__suspendedBound) return;
+            sock.__suspendedBound = true;
+            sock.on('account:suspended', (info) => {
+              const reason = info?.reason
+                ? `\n\nReason: ${info.reason}`
+                : '';
+              try {
+                require('react-native').Alert.alert(
+                  'Account suspended',
+                  `Your VaultChat account has been suspended for violating the Community Guidelines.${reason}\n\nIf you believe this is a mistake, contact support@vaultchat.app.`,
+                  [{ text: 'OK' }],
+                );
+              } catch {}
+            });
+          } catch {}
+        }, 300);
       };
 
       // Check auth
@@ -284,6 +336,7 @@ export default function App() {
           } else {
             stopCallListener();
             disconnectSocket();
+            try { require('./src/services/voipPushService').stopVoipPush(); } catch {}
           }
         });
       } catch {
@@ -362,6 +415,8 @@ export default function App() {
               <Stack.Screen name="Contacts"      component={ContactsScreen} />
               <Stack.Screen name="QRContact"     component={QRContactScreen} options={{ animation:'slide_from_bottom' }} />
               <Stack.Screen name="Folders"       component={FoldersScreen} />
+              <Stack.Screen name="BlockedUsers"  component={BlockedUsersScreen} />
+              <Stack.Screen name="ThemePicker"   component={ThemePickerScreen} />
               <Stack.Screen name="Premium"       component={({navigation}) => {
                 const [vis,setVis] = useState(true);
                 return <PremiumModal visible={vis} onClose={() => navigation.goBack()} onUpgraded={() => navigation.goBack()} />;

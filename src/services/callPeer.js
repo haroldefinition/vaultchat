@@ -42,6 +42,7 @@ import {
   getRTCConfig,
   enableOpusFec,
   applyOpusBaseline,
+  applyVideoBaseline,
   autoAdapt,
 } from './callQuality';
 import netQ from './networkQuality';
@@ -332,10 +333,18 @@ export function setMute(muted, myUserId, track = 'audio') {
 // ── Internals ───────────────────────────────────────────────
 
 async function _openLocalMedia(type) {
-  const constraints = {
-    audio: true,
-    video: type === 'video' ? { facingMode: 'user' } : false,
-  };
+  // Request 1080p as the upper bound (task #120). iOS will silently
+  // downgrade to whatever the camera actually supports — modern iPhones
+  // (12 and newer) deliver true 1920x1080 from the front camera; older
+  // devices fall back to 720p without breaking the call.
+  // `min` constraints are kept conservative so we never fail outright.
+  const videoConstraints = type === 'video' ? {
+    facingMode: 'user',
+    width:     { min: 640,  ideal: 1920, max: 1920 },
+    height:    { min: 480,  ideal: 1080, max: 1080 },
+    frameRate: { min: 15,   ideal: 30,   max: 30   },
+  } : false;
+  const constraints = { audio: true, video: videoConstraints };
   _localStream = await mediaDevices.getUserMedia(constraints);
   emit('localStream', _localStream);
 }
@@ -369,6 +378,10 @@ async function _createPeerConnection() {
         emit('state', { state: _state, callId: _callId, peerUserId: _peerUserId });
         // Start bitrate adaptation + quality classifier now that media is flowing.
         applyOpusBaseline(_pc).catch(() => {});
+        // Video baseline (task #120): 5 Mbps cap + maintain-resolution so
+        // the encoder drops fps before it drops pixels when bandwidth dips.
+        // No-op for voice-only calls (no video sender to configure).
+        applyVideoBaseline(_pc).catch(() => {});
         netQ.start(_pc);
         _stopAutoAdapt = autoAdapt(_pc, netQ);
       }

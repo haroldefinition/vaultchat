@@ -6,6 +6,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import ContactEditModal from '../components/ContactEditModal';
+import PremiumModal from '../components/PremiumModal';
 import { useTheme } from '../services/theme';
 import { taptic, longPressFeedback } from '../services/haptics';
 
@@ -23,19 +24,56 @@ function generateRoomId(name, ts) {
   return `${a}-${b.slice(0,4)}-4${b.slice(1,4)}-a${a.slice(0,3)}-${b}${a.slice(0,4)}`;
 }
 
+// ── Group size limits (task #92, premium gate) ───────────────
+// Free accounts cap out at 8 group members. Premium unlocks 256.
+// The cap is enforced both here (when adding from the manage UI)
+// and on the server eventually — for now it's a soft client-side
+// gate so paying users get more headroom.
+const FREE_GROUP_MAX    = 8;
+const PREMIUM_GROUP_MAX = 256;
+
 // ── Manage Members Modal ──────────────────────────────────────
-function ManageMembersModal({ visible, group, onClose, onSave, accent, bg, card, tx, sub, border, inputBg }) {
+function ManageMembersModal({ visible, group, onClose, onSave, accent, bg, card, tx, sub, border, inputBg, onUpsell }) {
   const [members,   setMembers]   = useState(group?.members || []);
   const [newMember, setNewMember] = useState('');
+  const [premium,   setPremium]   = useState(false);
 
   useEffect(() => {
     if (group) setMembers(group.members || []);
   }, [group]);
 
+  // Re-pull premium flag whenever the modal becomes visible so an
+  // upgrade in the parent screen takes effect without remount.
+  useEffect(() => {
+    if (!visible) return;
+    try {
+      require('../services/iapService').isPremium().then(setPremium);
+    } catch {}
+  }, [visible]);
+
   function add() {
     const name = newMember.trim();
     if (!name) return;
     if (members.includes(name)) { Alert.alert('Already added'); return; }
+    const cap = premium ? PREMIUM_GROUP_MAX : FREE_GROUP_MAX;
+    if (members.length >= cap) {
+      if (!premium) {
+        // Hit the free cap — open the paywall. The parent passes
+        // onUpsell, which fires PremiumModal in the parent so the
+        // user doesn't have to leave the screen.
+        Alert.alert(
+          'Group full',
+          `Free groups can have up to ${FREE_GROUP_MAX} members. Upgrade to Premium for groups up to ${PREMIUM_GROUP_MAX}.`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'See Premium', onPress: () => onUpsell && onUpsell() },
+          ],
+        );
+      } else {
+        Alert.alert('Group full', `Premium groups can have up to ${PREMIUM_GROUP_MAX} members.`);
+      }
+      return;
+    }
     setMembers(prev => [...prev, name]);
     setNewMember('');
   }
@@ -122,6 +160,7 @@ export default function GroupScreen({ navigation }) {
   const [groupDesc,   setGroupDesc]   = useState('');
   const [groupSearch, setGroupSearch] = useState('');
   const [refreshing,  setRefreshing]  = useState(false);
+  const [premiumModalVis, setPremiumModalVis] = useState(false);
 
   useEffect(() => {
     loadGroups();
@@ -351,7 +390,15 @@ export default function GroupScreen({ navigation }) {
         group={selectedGroup}
         onClose={() => setMembersModal(false)}
         onSave={handleSaveMembers}
+        onUpsell={() => { setMembersModal(false); setTimeout(() => setPremiumModalVis(true), 250); }}
         accent={accent} bg={bg} card={card} tx={tx} sub={sub} border={border} inputBg={inputBg}
+      />
+      {/* Premium upsell — fired when free user hits the 8-member group cap. */}
+      <PremiumModal
+        visible={premiumModalVis}
+        onClose={() => setPremiumModalVis(false)}
+        onUpgraded={() => setPremiumModalVis(false)}
+        colors={{ card, text: tx, muted: sub, border }}
       />
       {/* Group info edit modal */}
       <ContactEditModal

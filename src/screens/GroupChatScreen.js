@@ -23,6 +23,7 @@ import SwipeableRow   from '../components/SwipeableRow';
 import ZoomableImage  from '../components/ZoomableImage';
 import ReactionPicker from '../components/ReactionPicker';
 import ReactionBar    from '../components/ReactionBar';
+import PinnedMessagePreview from '../components/PinnedMessagePreview';
 import ContactEditModal from '../components/ContactEditModal';
 import PremiumModal from '../components/PremiumModal';
 import ReportMessageModal from '../components/ReportMessageModal';
@@ -1009,17 +1010,12 @@ export default function GroupChatScreen({ route, navigation }) {
         </TouchableOpacity>
       </View>
 
-      {/* Pinned message banner — tap to scroll to it, long-press or ✕ to unpin */}
+      {/* Pinned message banner — uses PinnedMessagePreview which renders
+          actual photo/video thumbnails for media messages instead of the
+          old generic "📷 Photo" / "🎥 Video" text labels. */}
       {pinnedMsgId && (() => {
         const pinned = messages.find(m => m.id === pinnedMsgId);
         if (!pinned) return null;
-        const preview = (() => {
-          const raw = pinned.text || '';
-          if (pinned.type === 'image' || raw.startsWith('IMG:') || raw.startsWith('LOCALIMG:')) return '📷 Photo';
-          if (pinned.type === 'gallery' || raw.startsWith('GALLERY:')) return '🖼️ Gallery';
-          if (pinned.type === 'video' || raw.startsWith('VID:') || raw.startsWith('LOCALVID:')) return '🎥 Video';
-          return raw.substring(0, 60);
-        })();
         return (
           <TouchableOpacity
             style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8, backgroundColor: card, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: border }}
@@ -1028,13 +1024,9 @@ export default function GroupChatScreen({ route, navigation }) {
               if (idx >= 0) flatRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.5 });
             }}
             onLongPress={() => togglePin(pinned)}>
-            <Text style={{ fontSize: 14 }}>📌</Text>
-            <View style={{ flex: 1, marginLeft: 8 }}>
-              <Text style={{ fontSize: 11, color: accent, fontWeight: '700', marginBottom: 1 }}>Pinned Message</Text>
-              <Text style={{ fontSize: 13, color: tx }} numberOfLines={1}>{preview}</Text>
-            </View>
+            <PinnedMessagePreview content={pinned.text || pinned.content || ''} accent={accent} tx={tx} sub={sub} />
             <TouchableOpacity onPress={() => togglePin(pinned)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Text style={{ color: sub, fontSize: 14 }}>✕</Text>
+              <Text style={{ color: sub, fontSize: 14, marginLeft: 8 }}>✕</Text>
             </TouchableOpacity>
           </TouchableOpacity>
         );
@@ -1258,6 +1250,14 @@ export default function GroupChatScreen({ route, navigation }) {
         visible={!!pickerMsg}
         onClose={() => setPickerMsg(null)}
         onReact={emoji => { if (pickerMsg) toggleGroupReaction(pickerMsg.id, emoji); }}
+        onReply={() => {
+          if (!pickerMsg) return;
+          setReplyingTo({
+            id:     pickerMsg.id,
+            text:   pickerMsg.text || pickerMsg.content || '',
+            sender: pickerMsg.sender_handle || 'them',
+          });
+        }}
         onMore={() => { if (pickerMsg) { setSelectedMsg(pickerMsg); setMsgMenuVis(true); } }}
         myReaction={(reactions[pickerMsg?.id] || []).find(r => r.user_id === currentUserId)?.emoji || null}
         card={card}

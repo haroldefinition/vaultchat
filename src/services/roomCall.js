@@ -61,6 +61,7 @@ import {
   getRTCConfig,
   enableOpusFec,
   applyOpusBaseline,
+  applyVideoBaseline,
 } from './callQuality';
 import { setupAudioSession, releaseAudioSession } from './audioSession';
 
@@ -634,6 +635,9 @@ function _attachPcListeners(pc, userId) {
         // Pin Opus baseline per pc. (Skipping autoAdapt in mesh v1 —
         // mesh bitrate tuning with multiple pcs is its own rabbit hole.)
         applyOpusBaseline(pc).catch(() => {});
+        // Video baseline (task #120) — same 5 Mbps cap +
+        // maintain-resolution as 1:1 calls. No-op for voice mesh calls.
+        applyVideoBaseline(pc).catch(() => {});
       }
     } else if (s === 'failed' || s === 'closed') {
       if (peer.state !== 'failed') {
@@ -659,10 +663,18 @@ function _attachPcListeners(pc, userId) {
 
 async function _openLocalMedia(type) {
   if (_localStream) return; // bootstrap path already supplied the stream
-  const constraints = {
-    audio: true,
-    video: type === 'video' ? { facingMode: 'user' } : false,
-  };
+  // Mirror callPeer's 1080p constraints (task #120). For conference
+  // calls, every peer encodes to every other peer at this resolution
+  // — the bandwidth math is the same per-stream, and the video
+  // baseline below pins the per-sender bitrate cap so a 4-person
+  // call doesn't blow up the uplink.
+  const videoConstraints = type === 'video' ? {
+    facingMode: 'user',
+    width:     { min: 640,  ideal: 1920, max: 1920 },
+    height:    { min: 480,  ideal: 1080, max: 1080 },
+    frameRate: { min: 15,   ideal: 30,   max: 30   },
+  } : false;
+  const constraints = { audio: true, video: videoConstraints };
   _localStream = await mediaDevices.getUserMedia(constraints);
   emit('localStream', _localStream);
 }

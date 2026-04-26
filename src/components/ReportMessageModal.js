@@ -24,6 +24,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../services/theme';
+import { blockUser, isBlockedSync } from '../services/blocks';
 
 let supabase = null;
 try { supabase = require('../services/supabase').supabase; } catch (e) {}
@@ -101,6 +102,14 @@ export default function ReportMessageModal({
   const [consent, setConsent]         = useState(false);  // default OFF
   const [submitting, setSubmitting]   = useState(false);
   const [confirmation, setConfirmation] = useState(false);
+  // Block-with-report toggle (task #94). Default ON because the user
+  // is already opening the report flow — they almost certainly don't
+  // want to keep hearing from this person. Unidirectional block stored
+  // in `blocked_users` (per-user, not a platform ban).
+  const targetUserId = reportedUserId || message?.sender_id || null;
+  const [alsoBlock, setAlsoBlock] = useState(
+    targetUserId ? !isBlockedSync(targetUserId) : false,
+  );
 
   const reset = () => {
     setReasonId(null);
@@ -173,6 +182,23 @@ export default function ReportMessageModal({
         await AsyncStorage.setItem('vaultchat_pending_reports', JSON.stringify(queue));
         delivered = true;  // queued for retry; still acknowledge to user
       } catch (e) { console.warn('report local queue failed:', e); }
+    }
+
+    // 4. Optionally block the reported user. We do this AFTER the
+    // report attempt so the report payload always carries our prior
+    // (un-blocked) state — it'd be confusing to the moderator to see
+    // a blocked relationship pre-existing the report. Block insert
+    // is best-effort; we never let it fail the report flow.
+    if (alsoBlock && targetUserId) {
+      try {
+        await blockUser(targetUserId, {
+          reason: `Reported for ${reasonId}`,
+          // sourceReportId would require Supabase to return the inserted
+          // row's id — we skip the round-trip and leave it null. The
+          // moderator dashboard can still join via reported_user_id.
+          sourceReportId: null,
+        });
+      } catch (e) { console.warn('block-with-report failed:', e); }
     }
 
     setSubmitting(false);
@@ -314,6 +340,30 @@ export default function ReportMessageModal({
                 </Text>
               </View>
             </TouchableOpacity>
+
+            {/* Block-with-report toggle. Hidden when there's no target
+                user we can block (e.g., a system-message report). */}
+            {targetUserId ? (
+              <TouchableOpacity
+                style={[s.consentRow, { borderColor: border, backgroundColor: inputBg }]}
+                onPress={() => setAlsoBlock(b => !b)}
+                activeOpacity={0.85}
+              >
+                <View style={[s.checkbox, { borderColor: alsoBlock ? '#ff4444' : border, backgroundColor: alsoBlock ? '#ff4444' : 'transparent' }]}>
+                  {alsoBlock ? <Text style={s.checkmark}>✓</Text> : null}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[s.consentTitle, { color: tx }]}>
+                    Also block {reportedUserName || 'this user'}
+                  </Text>
+                  <Text style={[s.consentText, { color: sub }]}>
+                    They won’t be able to send you messages or call you.
+                    They aren’t notified. You can unblock anytime in
+                    Settings → Privacy → Blocked Users.
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            ) : null}
 
             {reasonId === 'csam' ? (
               <View style={[s.csamBanner, { borderColor: '#ff4444' }]}>

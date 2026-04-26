@@ -19,6 +19,7 @@ import SwipeableRow    from '../components/SwipeableRow';
 import ZoomableImage   from '../components/ZoomableImage';
 import ReactionPicker from '../components/ReactionPicker';
 import ReactionBar    from '../components/ReactionBar';
+import PinnedMessagePreview from '../components/PinnedMessagePreview';
 import ReportMessageModal from '../components/ReportMessageModal';
 import { supabase } from '../services/supabase';
 import { placeCall } from '../services/placeCall';
@@ -112,7 +113,12 @@ function VideoModal({ uri, visible, onClose }) {
 // ── Single lazy photo bubble ──────────────────────────────────
 // Handles both IMG:https://... (remote, always available) and
 // LOCALIMG:key (local AsyncStorage — only on sender's device/session).
-function SinglePhoto({ msgKey, isLocal, onOpen, onReply, accent }) {
+// Long-press routes through onLongPress (opens the picker — quick emoji
+// react row + "More" → Pin/Reply/Edit/Delete) so media bubbles get the
+// same action surface as text bubbles. Earlier code wired this to a
+// reply-only callback, which hid Pin and React behind a feature you
+// couldn't see.
+function SinglePhoto({ msgKey, isLocal, onOpen, onLongPress, accent }) {
   const [uri,    setUri]    = useState(null);
   const [failed, setFailed] = useState(false);
 
@@ -151,7 +157,7 @@ function SinglePhoto({ msgKey, isLocal, onOpen, onReply, accent }) {
   // mockup. The Image's borderRadius is bumped slightly inside the
   // outer wrap so the inner photo sits cleanly within the border.
   return (
-    <TouchableOpacity onPress={() => onOpen(uri)} onLongPress={onReply} delayLongPress={450} activeOpacity={0.88}>
+    <TouchableOpacity onPress={() => onOpen(uri)} onLongPress={onLongPress} delayLongPress={450} activeOpacity={0.88}>
       <View style={{
         borderRadius: 16, overflow: 'hidden',
         borderWidth: 1, borderColor: accent || 'rgba(255,255,255,0.2)',
@@ -165,11 +171,13 @@ function SinglePhoto({ msgKey, isLocal, onOpen, onReply, accent }) {
 }
 
 // ── Video bubble ──────────────────────────────────────────────
-function VideoBubble({ uri, onPlay, onReply }) {
+// Long-press routes through onLongPress for the same reason as
+// SinglePhoto above — unifies the action surface across media.
+function VideoBubble({ uri, onPlay, onLongPress }) {
   return (
     <TouchableOpacity
       style={{ width: 220, height: 130, borderRadius: 14, backgroundColor: '#111', alignItems: 'center', justifyContent: 'center', gap: 8 }}
-      onPress={() => onPlay(uri)} onLongPress={onReply} delayLongPress={450}>
+      onPress={() => onPlay(uri)} onLongPress={onLongPress} delayLongPress={450}>
       <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' }}>
         <Text style={{ fontSize: 26, marginLeft: 4, color: '#fff' }}>▶</Text>
       </View>
@@ -225,14 +233,14 @@ function Bubble({ item, myId, tx, sub, card, accent, bubbleOut, bubbleIn, bubble
     if (main.startsWith('GALLERY:')) {
       const keys = main.replace('GALLERY:', '').split('|');
       return <>
-        <ResolvedPhotoStack keys={keys} onLongPress={onReply} />
+        <ResolvedPhotoStack keys={keys} onLongPress={() => onLongPress && onLongPress(item)} />
         {cap ? <Text style={[s.cap, { color: me ? 'rgba(255,255,255,0.9)' : tx }]}>{cap}</Text> : null}
       </>;
     }
     if (main.startsWith('LOCALIMG:') || main.startsWith('IMG:')) {
       const key = main.replace('LOCALIMG:', '').replace('IMG:', '');
       return <>
-        <SinglePhoto msgKey={key} isLocal={main.startsWith('LOCALIMG:')} onOpen={onOpenImg} onReply={onReply} accent={accent} />
+        <SinglePhoto msgKey={key} isLocal={main.startsWith('LOCALIMG:')} onOpen={onOpenImg} onLongPress={() => onLongPress && onLongPress(item)} accent={accent} />
         {cap ? <Text style={[s.cap, { color: me ? 'rgba(255,255,255,0.9)' : tx }]}>{cap}</Text> : null}
       </>;
     }
@@ -270,14 +278,14 @@ function Bubble({ item, myId, tx, sub, card, accent, bubbleOut, bubbleIn, bubble
     }
     if (main.startsWith('VIDEOS:')) {
       return <>
-        <ResolvedVideoCarousel content={main} onLongPress={onReply} />
+        <ResolvedVideoCarousel content={main} onLongPress={() => onLongPress && onLongPress(item)} />
         {cap ? <Text style={[s.cap, { color: me ? 'rgba(255,255,255,0.9)' : tx }]}>{cap}</Text> : null}
       </>;
     }
     if (main.startsWith('LOCALVID:') || main.startsWith('VID:')) {
       const uri = main.replace('LOCALVID:', '').replace('VID:', '');
       return <>
-        <VideoBubble uri={uri} onPlay={onPlayVid} onReply={onReply} />
+        <VideoBubble uri={uri} onPlay={onPlayVid} onLongPress={() => onLongPress && onLongPress(item)} />
         {cap ? <Text style={[s.cap, { color: me ? 'rgba(255,255,255,0.9)' : tx }]}>{cap}</Text> : null}
       </>;
     }
@@ -297,7 +305,7 @@ function Bubble({ item, myId, tx, sub, card, accent, bubbleOut, bubbleIn, bubble
               }
             } catch { try { await Linking.openURL(url); } catch {} }
           }}
-          onLongPress={onReply} delayLongPress={450}>
+          onLongPress={() => onLongPress && onLongPress(item)} delayLongPress={450}>
           <Text style={{ fontSize: 26 }}>📄</Text>
           <View>
             <Text style={[s.msgTx, { color: me ? '#fff' : tx }]}>{fname}</Text>
@@ -1397,22 +1405,12 @@ export default function ChatRoomScreen({ route, navigation }) {
         </View>
       )}
 
-      {/* Pinned message banner */}
+      {/* Pinned message banner — uses PinnedMessagePreview which renders
+          actual photo/video thumbnails for media messages instead of
+          generic "📷 Photo" text labels. */}
       {pinnedMsgId && (() => {
         const pinned = messages.find(m => m.id === pinnedMsgId);
         if (!pinned) return null;
-        const preview = (() => {
-          const raw = pinned.content || '';
-          if (raw.startsWith('REPLY:')) {
-            const ci = raw.indexOf(':', 6);
-            const qLen = parseInt(raw.substring(6, ci)) || 0;
-            return raw.substring(ci + 1 + qLen, ci + 1 + qLen + 60) || '↩ Reply';
-          }
-          if (raw.startsWith('IMG:') || raw.startsWith('LOCALIMG:')) return '📷 Photo';
-          if (raw.startsWith('GALLERY:')) return '🖼️ Gallery';
-          if (raw.startsWith('VID:') || raw.startsWith('LOCALVID:')) return '🎥 Video';
-          return raw.substring(0, 60);
-        })();
         return (
           <TouchableOpacity
             style={[s.pinBanner, { backgroundColor: card, borderBottomColor: border }]}
@@ -1422,13 +1420,9 @@ export default function ChatRoomScreen({ route, navigation }) {
               if (idx >= 0) listRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.5 });
             }}
             onLongPress={() => togglePin(pinned)}>
-            <Text style={{ fontSize: 14 }}>📌</Text>
-            <View style={{ flex: 1, marginLeft: 8 }}>
-              <Text style={{ fontSize: 11, color: accent, fontWeight: '700', marginBottom: 1 }}>Pinned Message</Text>
-              <Text style={{ fontSize: 13, color: tx }} numberOfLines={1}>{preview}</Text>
-            </View>
+            <PinnedMessagePreview content={pinned.content || ''} accent={accent} tx={tx} sub={sub} />
             <TouchableOpacity onPress={() => togglePin(pinned)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Text style={{ color: sub, fontSize: 14 }}>✕</Text>
+              <Text style={{ color: sub, fontSize: 14, marginLeft: 8 }}>✕</Text>
             </TouchableOpacity>
           </TouchableOpacity>
         );
@@ -1765,6 +1759,7 @@ export default function ChatRoomScreen({ route, navigation }) {
         visible={!!pickerMsg}
         onClose={() => setPickerMsg(null)}
         onReact={emoji => { if (pickerMsg) toggleReaction(pickerMsg.id, emoji); }}
+        onReply={() => { if (pickerMsg) setReplyTo(pickerMsg); }}
         onMore={() => { if (pickerMsg) { setMenuMsg(pickerMsg); setMenuVis(true); } }}
         myReaction={(reactions[pickerMsg?.id] || []).find(r => r.user_id === myId)?.emoji || null}
         card={card}

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  TextInput, Modal, Image, Alert, RefreshControl,
+  TextInput, Modal, Image, Alert, RefreshControl, AppState,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Swipeable } from 'react-native-gesture-handler';
@@ -14,6 +14,16 @@ import { requestContactsPermission, syncContacts } from '../services/contacts';
 import { listFolders, subscribe as subscribeFolders } from '../services/folders';
 import { isPremiumUser } from '../services/adsService';
 import PremiumModal from '../components/PremiumModal';
+import {
+  subscribe as subscribeVault,
+  isUnlocked as isVaultUnlocked,
+  unlock as unlockVault,
+  lock as lockVault,
+  hasVaultPin,
+  listVaultedIds,
+  addToVault,
+  removeFromVault,
+} from '../services/vault';
 
 const CHATS_KEY = 'vaultchat_chats';
 
@@ -39,6 +49,18 @@ export default function ChatsScreen({ navigation }) {
   const [premium,           setPremium]           = useState(false);
   const [premiumModalVis,   setPremiumModalVis]   = useState(false);
 
+  // Vault mode (task #84). When unlocked the chat list FLIPS to show
+  // ONLY vaulted chats; when locked, vaulted chats are filtered OUT
+  // entirely so they don't appear at all. Long-pressing the "Chats"
+  // title opens the vault PIN prompt. The vault re-locks on app
+  // background. vaultedIds is kept in local state so filter changes
+  // are instant — listVaultedIds() reads from AsyncStorage.
+  const [vaultUnlocked, setVaultUnlocked] = useState(false);
+  const [vaultedIds,    setVaultedIds]    = useState([]);
+  const [vaultPinModal, setVaultPinModal] = useState(false);
+  const [vaultPinInput, setVaultPinInput] = useState('');
+  const [vaultPinError, setVaultPinError] = useState('');
+
   // Track the currently-open Swipeable so we can close it when another
   // row is swiped. Without this, users can end up with multiple rows
   // stuck in their "open" state and the UI feels broken.
@@ -61,10 +83,36 @@ export default function ChatsScreen({ navigation }) {
       clearUnread(); // clear badge when Chats tab is opened
       listFolders().then(setFolders);
       isPremiumUser().then(setPremium);
+      listVaultedIds().then(setVaultedIds);
     });
     getMyHandle().then(h => { if (h) setMyHandle(h); });
     return unsub;
   }, [navigation]);
+
+  // Vault subscription — fires whenever the vault locks/unlocks or the
+  // vaulted-id list changes. Re-pull the id list each time so adding a
+  // chat to the vault from the long-press menu refreshes the filter
+  // immediately without waiting for a focus event.
+  useEffect(() => {
+    setVaultUnlocked(isVaultUnlocked());
+    listVaultedIds().then(setVaultedIds);
+    const unsub = subscribeVault(() => {
+      setVaultUnlocked(isVaultUnlocked());
+      listVaultedIds().then(setVaultedIds);
+    });
+    return unsub;
+  }, []);
+
+  // Auto-relock the vault when the app goes to background or inactive.
+  // This is a hard requirement of the feature — vaulted chats should
+  // never be visible without an explicit unlock from the current
+  // foreground session.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') lockVault();
+    });
+    return () => sub.remove();
+  }, []);
 
   async function loadChats() {
     const saved = await AsyncStorage.getItem(CHATS_KEY);
@@ -145,6 +193,68 @@ export default function ChatsScreen({ navigation }) {
     setActionModal(false);
   }
 
+  // ── Vault: move chat in/out of vault ────────────────────────
+  // Always available from the long-press action sheet on a row, even
+  // if no Vault PIN has been set yet — in that case we redirect the
+  // user to Settings to set one. Once vaulted, the chat disappears
+  // from the normal list immediately (vault is locked by default).
+  async function toggleVaultForSelected() {
+    if (!selected) return;
+    setActionModal(false);
+    const id = chatId(selected);
+    if (vaultedSet.has(id)) {
+      await removeFromVault(id);
+      await listVaultedIds().then(setVaultedIds);
+      return;
+    }
+    // Adding to vault: require that a Vault PIN has been set first,
+    // otherwise the chat would be hidden behind nothing and only
+    // recoverable by reinstall — bad UX.
+    const has = await hasVaultPin();
+    if (!has) {
+      Alert.alert(
+        'Set a Vault PIN first',
+        'Open Settings → Privacy → Vault PIN to choose a PIN before moving chats into your vault.',
+        [{ text: 'OK' }],
+      );
+      return;
+    }
+    await addToVault(id);
+    await listVaultedIds().then(setVaultedIds);
+  }
+
+  // ── Vault: PIN prompt triggered by long-pressing the title ──
+  async function onTitleLongPress() {
+    longPressFeedback();
+    // Already unlocked → tapping should LOCK back to normal view.
+    if (vaultUnlocked) {
+      lockVault();
+      return;
+    }
+    const has = await hasVaultPin();
+    if (!has) {
+      // Don't reveal the existence of the vault feature with an alert
+      // — silently no-op if no PIN is set. Users who know about the
+      // feature will set one in Settings; everyone else sees nothing.
+      return;
+    }
+    setVaultPinInput('');
+    setVaultPinError('');
+    setVaultPinModal(true);
+  }
+
+  async function submitVaultPin() {
+    const ok = await unlockVault(vaultPinInput);
+    if (ok) {
+      setVaultPinModal(false);
+      setVaultPinInput('');
+      setVaultPinError('');
+    } else {
+      setVaultPinError('Wrong PIN');
+      setVaultPinInput('');
+    }
+  }
+
   async function deleteChat() {
     Alert.alert('Delete Chat', `Delete chat with ${selected.name || 'this contact'}?`, [
       { text: 'Cancel', style: 'cancel' },
@@ -172,11 +282,20 @@ export default function ChatsScreen({ navigation }) {
     return folderChatIds.has(id);
   };
 
+  // Vault filter — the inverse of selectedFolderId. When the vault is
+  // LOCKED (default), vaulted chats are hidden entirely; when UNLOCKED,
+  // ONLY vaulted chats are shown (no normal chats, no archived bucket).
+  const vaultedSet = new Set(vaultedIds);
+  const chatId = (c) => c.id || c.roomId || c.handle;
+  const matchesVaultMode = (c) => vaultUnlocked
+    ? vaultedSet.has(chatId(c))
+    : !vaultedSet.has(chatId(c));
+
   const visible = chats
-    .filter(c => !c.archived && matchesSearch(c) && inSelectedFolder(c))
+    .filter(c => !c.archived && matchesSearch(c) && inSelectedFolder(c) && matchesVaultMode(c))
     .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
 
-  const archived = chats.filter(c => c.archived && matchesSearch(c) && inSelectedFolder(c));
+  const archived = chats.filter(c => c.archived && matchesSearch(c) && inSelectedFolder(c) && matchesVaultMode(c));
 
   // When the user taps the Archived footer, splice archived chats into
   // the list so they can still be swiped (un-archive, pin, etc.).
@@ -256,10 +375,12 @@ export default function ChatsScreen({ navigation }) {
     <View style={[s.container, { backgroundColor: bg }]}>
       {/* Header */}
       <View style={[s.header, { borderBottomColor: border }]}>
-        <View>
-          <Text style={[s.title, { color: accent }]}>Chats</Text>
+        <TouchableOpacity onLongPress={onTitleLongPress} delayLongPress={500} activeOpacity={1}>
+          <Text style={[s.title, { color: vaultUnlocked ? '#10B981' : accent }]}>
+            {vaultUnlocked ? '🛡️ Vault' : 'Chats'}
+          </Text>
           {myHandle ? <Text style={[s.handle, { color: '#5856d6' }]}>{myHandle}</Text> : null}
-        </View>
+        </TouchableOpacity>
         <TouchableOpacity
           style={[s.iconBtn, { backgroundColor: accent + '22', borderColor: accent + '55' }]}
           onPress={() => { taptic(); navigation.navigate('Contacts'); }}>
@@ -481,6 +602,11 @@ export default function ChatsScreen({ navigation }) {
                 {selected?.markedUnread ? '● Mark as Read' : '● Mark as Unread'}
               </Text>
             </TouchableOpacity>
+            <TouchableOpacity style={[s.actionBtn, { borderBottomColor: border }]} onPress={toggleVaultForSelected}>
+              <Text style={[s.actionText, { color: tx }]}>
+                {selected && vaultedSet.has(chatId(selected)) ? '🛡️ Remove from Vault' : '🛡️ Move to Vault'}
+              </Text>
+            </TouchableOpacity>
             <TouchableOpacity style={s.actionBtn} onPress={deleteChat}>
               <Text style={[s.actionText, { color: '#ff4444' }]}>🗑️ Delete Chat</Text>
             </TouchableOpacity>
@@ -510,6 +636,48 @@ export default function ChatsScreen({ navigation }) {
         }}
         colors={{ bg, card, tx, sub, border, inputBg, accent }}
       />
+
+      {/* Vault PIN prompt — appears when the user long-presses the
+          "Chats" title. Hidden gesture by design so the existence of
+          the vault feature isn't obvious to a snooper. Returning to
+          the normal list happens by long-pressing the title again
+          (which calls lockVault). */}
+      <Modal visible={vaultPinModal} transparent animationType="fade">
+        <TouchableOpacity style={s.overlay} activeOpacity={1} onPress={() => setVaultPinModal(false)}>
+          <View style={[s.actionBox, { backgroundColor: card, borderColor: border }]}>
+            <Text style={[s.actionTitle, { color: tx }]}>Enter Vault PIN</Text>
+            <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
+              <TextInput
+                style={{
+                  borderWidth: 1, borderColor: border, borderRadius: 10,
+                  paddingHorizontal: 12, paddingVertical: 10,
+                  color: tx, backgroundColor: inputBg,
+                  fontSize: 18, textAlign: 'center', letterSpacing: 8,
+                }}
+                value={vaultPinInput}
+                onChangeText={(t) => { setVaultPinInput(t); setVaultPinError(''); }}
+                placeholder="••••"
+                placeholderTextColor={sub}
+                keyboardType="number-pad"
+                secureTextEntry
+                maxLength={8}
+                autoFocus
+              />
+              {vaultPinError ? (
+                <Text style={{ color: '#ff4444', textAlign: 'center', marginTop: 8 }}>{vaultPinError}</Text>
+              ) : null}
+            </View>
+            <TouchableOpacity
+              style={[s.actionBtn, { borderBottomColor: border, borderTopWidth: 1, borderTopColor: border }]}
+              onPress={submitVaultPin}>
+              <Text style={[s.actionText, { color: accent, fontWeight: '700' }]}>Unlock</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={s.actionBtn} onPress={() => setVaultPinModal(false)}>
+              <Text style={[s.actionText, { color: sub }]}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {/* Premium upsell — fired by paywalled folder taps. On
           successful subscribe, refresh the premium flag so the

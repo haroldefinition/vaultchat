@@ -367,11 +367,10 @@ export default function CallScreen({ navigation }) {
                 ? `+1 ${dialInput.slice(0,3)}${dialInput.length > 3 ? ' ' : ''}${dialInput.slice(3,6)}${dialInput.length > 6 ? ' ' : ''}${dialInput.slice(6)}`
                 : 'Enter number'}
             </Text>
-            {dialInput.length > 0 && (
-              <TouchableOpacity onPress={deleteDigit} style={s.deleteBtn}>
-                <Text style={{ color: sub, fontSize: 22 }}>⌫</Text>
-              </TouchableOpacity>
-            )}
+            {/* The ⌫ button used to live here, but it was easy to miss in
+                the display box. Moved to flank the green Call button below
+                so it's discoverable in the same finger-zone you already
+                used to dial. iPhone Phone-app style. */}
           </View>
           <View style={s.keypadGrid}>
             {[
@@ -390,12 +389,30 @@ export default function CallScreen({ navigation }) {
               </View>
             ))}
           </View>
+          {/* Three-column row centered on the green Call button:
+                [spacer] [📞 Call] [⌫ Delete]
+              The ⌫ button only appears once you've entered at least one
+              digit — same conditional as before, just relocated to a
+              spot that's actually visible. iPhone Phone-app style. */}
           <View style={s.callBtnRow}>
+            <View style={s.dialSideSlot} />
             <TouchableOpacity
               style={[s.greenCallBtn, { opacity: dialInput.length >= 10 ? 1 : 0.4 }]}
               onPress={() => makeCall('', dialInput, 'voice')} disabled={dialInput.length < 10}>
               <Text style={s.greenCallIcon}>📞</Text>
             </TouchableOpacity>
+            <View style={s.dialSideSlot}>
+              {dialInput.length > 0 && (
+                <TouchableOpacity
+                  onPress={deleteDigit}
+                  onLongPress={() => setDialInput('')}
+                  delayLongPress={500}
+                  style={s.dialDeleteBtn}
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+                  <Text style={[s.dialDeleteIcon, { color: tx }]}>⌫</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
           <TouchableOpacity
             style={[s.facetimeCallBtn, { opacity: dialInput.length >= 10 ? 1 : 0.4 }]}
@@ -582,8 +599,17 @@ const s = StyleSheet.create({
   dialKey:          { width: 76, height: 76, borderRadius: 38, borderWidth: 1, alignItems: 'center', justifyContent: 'center', gap: 2 },
   dialDigit:        { fontSize: 28, fontWeight: '400' },
   dialSub:          { fontSize: 10 },
-  callBtnRow:       { marginTop: 24, alignItems: 'center' },
-  greenCallBtn:     { width: 70, height: 70, borderRadius: 35, backgroundColor: '#34C759', alignItems: 'center', justifyContent: 'center' },
+  callBtnRow:       {
+    marginTop: 24, flexDirection: 'row',
+    alignItems: 'center', justifyContent: 'center',
+    paddingHorizontal: 32,
+  },
+  // Equal-width side slots so the green Call button stays optically
+  // centered whether the ⌫ delete button is visible or not.
+  dialSideSlot:     { width: 70, alignItems: 'center', justifyContent: 'center' },
+  dialDeleteBtn:    { width: 56, height: 56, alignItems: 'center', justifyContent: 'center' },
+  dialDeleteIcon:   { fontSize: 26, fontWeight: '500' },
+  greenCallBtn:     { width: 70, height: 70, borderRadius: 35, backgroundColor: '#34C759', alignItems: 'center', justifyContent: 'center', marginHorizontal: 32 },
   greenCallIcon:    { fontSize: 30 },
   facetimeCallBtn:  { marginTop: 16, paddingHorizontal: 28, paddingVertical: 14, backgroundColor: '#1a73e8', borderRadius: 30, alignItems: 'center' },
   infoBtn:         { width: 32, height: 32, borderRadius: 16, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },

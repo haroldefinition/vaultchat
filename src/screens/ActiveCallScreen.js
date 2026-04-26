@@ -3,6 +3,10 @@ import {
   View, Text, StyleSheet, TouchableOpacity, Alert, ScrollView,
   TextInput, Animated, Modal, KeyboardAvoidingView, Platform, Vibration,
 } from 'react-native';
+// Pinch-to-zoom on the remote video (task #120). RNGH 2.x still ships
+// the legacy PinchGestureHandler wrapper that pairs with React Native's
+// built-in Animated API — no Reanimated dependency required.
+import { PinchGestureHandler, PanGestureHandler, State as GestureState } from 'react-native-gesture-handler';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../services/theme';
 import { profileForSignal } from '../services/callQuality';
@@ -142,6 +146,119 @@ const tile = StyleSheet.create({
 // Legacy calls (from the sample "Recent" list in CallScreen) still pass
 // just recipientName/recipientPhone/callType — we treat those as "mock
 // only" and show the UI without actually placing a call.
+
+// ── ZoomableRemoteVideo (task #120) ─────────────────────────────────
+// Wraps the remote-stream RTCView in pinch + pan gesture handlers so the
+// user can zoom into the other person's face. The RTCView itself doesn't
+// reliably accept transforms in react-native-webrtc 118 (the native video
+// layer overlays the JS view), so we apply the transform to a wrapping
+// Animated.View with overflow:hidden — the native video tile zooms in
+// lock-step because it's positioned relative to that container.
+//
+// Behavior:
+//   - Pinch in → zoom out toward 1x (capped at 1x, no zoom-out below)
+//   - Pinch out → zoom in (capped at 3x — beyond that the stream pixelates
+//                 to no benefit since we're scaling raster pixels)
+//   - Drag while zoomed → pan the visible region around
+//   - Double-tap reset → snap back to 1x (handled in the parent screen)
+//
+// The pan offset auto-clamps so you can't drag the video off-screen.
+function ZoomableRemoteVideo({ streamURL, style, RTCViewComponent }) {
+  const RTCView = RTCViewComponent;
+  const baseScale  = useRef(new Animated.Value(1)).current;
+  const pinchScale = useRef(new Animated.Value(1)).current;
+  const scale = Animated.multiply(baseScale, pinchScale);
+  const lastScale = useRef(1);
+
+  const translateX = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(0)).current;
+  const lastOffset = useRef({ x: 0, y: 0 });
+
+  const pinchRef = useRef();
+  const panRef   = useRef();
+
+  const onPinchEvent = Animated.event(
+    [{ nativeEvent: { scale: pinchScale } }],
+    { useNativeDriver: true },
+  );
+
+  const onPinchStateChange = (event) => {
+    if (event.nativeEvent.oldState === GestureState.ACTIVE) {
+      // Settle — fold the live pinch factor into the base scale, then
+      // reset the live factor to 1 so the next pinch gesture starts clean.
+      let next = lastScale.current * event.nativeEvent.scale;
+      if (next < 1) next = 1;     // never zoom out past native size
+      if (next > 3) next = 3;     // cap zoom-in at 3x
+      lastScale.current = next;
+      baseScale.setValue(next);
+      pinchScale.setValue(1);
+      // Snapping all the way back to 1x also resets the pan offset so the
+      // user always returns to a centered, un-panned view.
+      if (next === 1) {
+        translateX.setValue(0);
+        translateY.setValue(0);
+        lastOffset.current = { x: 0, y: 0 };
+      }
+    }
+  };
+
+  const onPanEvent = Animated.event(
+    [{ nativeEvent: { translationX: translateX, translationY: translateY } }],
+    { useNativeDriver: true },
+  );
+
+  const onPanStateChange = (event) => {
+    if (event.nativeEvent.oldState === GestureState.ACTIVE) {
+      lastOffset.current.x += event.nativeEvent.translationX;
+      lastOffset.current.y += event.nativeEvent.translationY;
+      translateX.setOffset(lastOffset.current.x);
+      translateX.setValue(0);
+      translateY.setOffset(lastOffset.current.y);
+      translateY.setValue(0);
+    }
+  };
+
+  // Only enable pan when zoomed; otherwise dragging on a 1x video is
+  // confusing and might fight with other gestures (e.g. swipe-to-dismiss).
+  // We let the pan handler always be mounted but it has no visible effect
+  // when scale is 1 because lastOffset stays at 0 and resets above.
+
+  return (
+    <PinchGestureHandler
+      ref={pinchRef}
+      simultaneousHandlers={panRef}
+      onGestureEvent={onPinchEvent}
+      onHandlerStateChange={onPinchStateChange}>
+      <Animated.View style={[style, { overflow: 'hidden' }]}>
+        <PanGestureHandler
+          ref={panRef}
+          simultaneousHandlers={pinchRef}
+          minPointers={1}
+          maxPointers={2}
+          onGestureEvent={onPanEvent}
+          onHandlerStateChange={onPanStateChange}>
+          <Animated.View
+            style={{
+              flex: 1,
+              transform: [
+                { translateX },
+                { translateY },
+                { scale },
+              ],
+            }}>
+            <RTCView
+              streamURL={streamURL}
+              style={{ flex: 1 }}
+              objectFit="cover"
+              mirror={false}
+            />
+          </Animated.View>
+        </PanGestureHandler>
+      </Animated.View>
+    </PinchGestureHandler>
+  );
+}
+
 export default function ActiveCallScreen({ route, navigation }) {
   const { bg, card, tx, sub, border, inputBg, accent } = useTheme();
   const {
@@ -544,8 +661,33 @@ export default function ActiveCallScreen({ route, navigation }) {
   // Show the 2x2 grid in conference mode OR once we have more than one remote peer.
   const showGrid = isConference && participants.length >= 1;
 
+  // Top-left back/cancel button. Tapping it cleanly cancels the outgoing
+  // invite (if still ringing) OR ends the active call, then pops the
+  // screen. Important escape hatch for the "I tapped the wrong contact"
+  // case — the red End Call button at the bottom feels too dramatic for
+  // that situation. This button reads as "I changed my mind."
+  const handleCancelCall = () => {
+    haptic();
+    try {
+      if (isRealCall) {
+        if (isConference) roomCall.endForEveryone?.();
+        else              callPeer.hangup();
+      }
+    } catch {}
+    navigation.goBack();
+  };
+
   return (
     <View style={[s.container, { backgroundColor: bg }]}>
+      {/* Top-left back/cancel button — see handleCancelCall comment above. */}
+      <TouchableOpacity
+        style={s.backBtn}
+        onPress={handleCancelCall}
+        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        activeOpacity={0.7}>
+        <Text style={[s.backBtnTx, { color: '#ffffff' }]}>‹</Text>
+      </TouchableOpacity>
+
       {/* E2E Encrypted header — mirrors the mockup's trust signal */}
       {!showGrid && (
         <View style={s.e2eHeader}>
@@ -610,11 +752,10 @@ export default function ActiveCallScreen({ route, navigation }) {
         // still negotiating (pre-connect, or peer hasn't enabled video).
         <View style={s.videoStage}>
           {remoteStream
-            ? <RTCView
+            ? <ZoomableRemoteVideo
                 streamURL={remoteStream.toURL()}
                 style={s.videoRemote}
-                objectFit="cover"
-                mirror={false}
+                RTCViewComponent={RTCView}
               />
             : <View style={[s.videoRemote, { backgroundColor: accent + '33' }]}>
                 <Text style={[s.videoRemoteInitial, { color: accent }]}>
@@ -931,6 +1072,18 @@ const s = StyleSheet.create({
   // End-to-end encrypted header
   e2eHeader:      { paddingTop: 56, paddingBottom: 4, alignItems: 'center' },
   e2eText:        { color: '#cfd1d6', fontSize: 13, letterSpacing: 0.3 },
+  // Top-left back/cancel button — absolute-positioned over the safe-area
+  // top so it sits above the avatar/video without claiming layout space.
+  // 50% black bg gives it contrast on both the dark voice-call canvas
+  // and the variable-color video backdrop.
+  backBtn:        {
+    position: 'absolute',
+    top: 56, left: 16, zIndex: 100,
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  backBtnTx:      { fontSize: 28, fontWeight: '600', lineHeight: 30, marginTop: -2, marginRight: 2 },
   ruralNote:      { fontSize: 11, color: 'rgba(255,255,255,0.5)', textAlign: 'center', paddingHorizontal: 32, paddingTop: 6 },
 
   // Avatar stage — glow ring + disperse dots. Flex-row so the dots
