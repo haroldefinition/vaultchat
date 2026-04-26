@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity,
   KeyboardAvoidingView, Platform, Image, Modal, Alert, ActivityIndicator,
@@ -374,6 +375,11 @@ function Bubble({ item, myId, tx, sub, card, accent, bubbleOut, bubbleIn, bubble
 export default function ChatRoomScreen({ route, navigation }) {
   const { bg, card, tx, sub, border, inputBg, accent,
           bubbleOut, bubbleIn, bubbleOutTx, bubbleInTx } = useTheme();
+  // Safe-area insets — used to pad the long-press action sheet so
+  // its bottom row clears the iPhone home-indicator + any custom
+  // gestures area, instead of being hardcoded to 34px (which
+  // could under-clear on Dynamic Island devices).
+  const insets = useSafeAreaInsets();
   const { roomId, recipientPhone, recipientName, recipientPhoto, pendingMessage } = route.params || {};
 
   const [messages,     setMessages]     = useState([]);
@@ -2027,7 +2033,15 @@ export default function ChatRoomScreen({ route, navigation }) {
 
       <Modal visible={menuVis} transparent animationType="fade" onRequestClose={() => setMenuVis(false)}>
         <TouchableOpacity style={s.menuOverlay} activeOpacity={1} onPress={() => setMenuVis(false)}>
-          <View style={[s.msgMenu, { backgroundColor: card }]}>
+          {/* maxHeight cap + ScrollView so the menu never overflows on
+              short screens (iPhone SE, landscape). paddingBottom uses
+              the safe-area inset so the bottom row always clears the
+              home indicator instead of relying on a hardcoded 34px. */}
+          <View style={[s.msgMenu, { backgroundColor: card, maxHeight: '85%', paddingBottom: Math.max(insets.bottom, 12) }]}>
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              bounces={false}
+              contentContainerStyle={{ flexGrow: 1 }}>
             <Text style={[s.menuPreview, { color: sub }]} numberOfLines={2}>
               {(() => {
                 const raw = menuMsg?.content || '';
@@ -2084,6 +2098,7 @@ export default function ChatRoomScreen({ route, navigation }) {
             <TouchableOpacity style={[s.menuCancel, { borderTopColor: border }]} onPress={() => setMenuVis(false)}>
               <Text style={[s.menuCancelTx, { color: sub }]}>Cancel</Text>
             </TouchableOpacity>
+            </ScrollView>
           </View>
         </TouchableOpacity>
       </Modal>
@@ -2196,7 +2211,7 @@ const s = StyleSheet.create({
   pinBanner:  { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8, borderBottomWidth: 1 },
   fsWrap:      { flex: 1, backgroundColor: 'rgba(0,0,0,0.97)', alignItems: 'center', justifyContent: 'center' },
   menuOverlay:  { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
-  msgMenu:      { borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 34 },
+  msgMenu:      { borderTopLeftRadius: 20, borderTopRightRadius: 20 },
   menuPreview:  { fontSize: 13, textAlign: 'center', paddingHorizontal: 20, paddingVertical: 14, opacity: 0.7 },
   menuOpt:      { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderTopWidth: StyleSheet.hairlineWidth, gap: 14 },
   menuIcon:     { fontSize: 18, width: 28, textAlign: 'center' },

@@ -5,6 +5,7 @@ import {
   ActivityIndicator, ScrollView, Vibration, Share,
 } from 'react-native';
 import { VideoView, useVideoPlayer } from 'expo-video';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../services/theme';
 import { supabase } from '../services/supabase';
 import { subscribeToGroup, subscribeToTyping, broadcastTyping, freshChannel } from '../services/realtimeMessages';
@@ -290,6 +291,9 @@ export default function GroupChatScreen({ route, navigation }) {
   const { groupId, groupName: initialGroupName } = route.params || {};
   const colors = useTheme();
   const { bg, card, tx, sub, border, inputBg, accent } = colors;
+  // Safe-area insets — used for the long-press menu so its bottom
+  // row clears the home indicator on every device geometry.
+  const insets = useSafeAreaInsets();
 
   // ── Group identity (#75) — loaded from AsyncStorage on mount ─
   // Keep these in state so live edits (name/photo/description via the
@@ -1545,7 +1549,15 @@ export default function GroupChatScreen({ route, navigation }) {
       {/* Long-press message menu */}
       <Modal visible={msgMenuVis} transparent animationType="fade" onRequestClose={() => setMsgMenuVis(false)}>
         <TouchableOpacity style={g.menuOverlay} activeOpacity={1} onPress={() => setMsgMenuVis(false)}>
-          <View style={[g.msgMenu, { backgroundColor: card }]}>
+          {/* maxHeight + ScrollView so the menu scrolls when option
+              count or screen size would otherwise clip the bottom
+              row. paddingBottom uses the safe-area inset so it
+              clears the home indicator on every device. */}
+          <View style={[g.msgMenu, { backgroundColor: card, maxHeight: '85%', paddingBottom: Math.max(insets.bottom, 12) }]}>
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              bounces={false}
+              contentContainerStyle={{ flexGrow: 1 }}>
             <Text style={[g.menuPreview, { color: sub }]} numberOfLines={2}>{selectedMsg?.text?.substring(0, 80)}</Text>
             <TouchableOpacity style={[g.menuOpt, { borderTopColor: border }]}
               onPress={() => { setReplyingTo({ id: selectedMsg.id, text: selectedMsg.text, sender: selectedMsg.sender_handle || 'them' }); setMsgMenuVis(false); }}>
@@ -1586,6 +1598,7 @@ export default function GroupChatScreen({ route, navigation }) {
             <TouchableOpacity style={[g.menuCancel, { borderTopColor: border }]} onPress={() => setMsgMenuVis(false)}>
               <Text style={[g.menuCancelTx, { color: sub }]}>Cancel</Text>
             </TouchableOpacity>
+            </ScrollView>
           </View>
         </TouchableOpacity>
       </Modal>
@@ -1797,7 +1810,7 @@ const g = StyleSheet.create({
   input:          { flex: 1, borderRadius: 20, paddingHorizontal: 14, paddingTop: 10, paddingBottom: 10, fontSize: 15, maxHeight: 100 },
   sendBtn:        { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   menuOverlay:    { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
-  msgMenu:        { borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 34 },
+  msgMenu:        { borderTopLeftRadius: 20, borderTopRightRadius: 20 },
   menuPreview:    { fontSize: 13, textAlign: 'center', paddingHorizontal: 20, paddingVertical: 14, opacity: 0.7 },
   menuOpt:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderTopWidth: StyleSheet.hairlineWidth, gap: 14 },
   menuOptIcon:    { fontSize: 18, width: 28, textAlign: 'center' },

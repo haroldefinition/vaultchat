@@ -85,11 +85,14 @@ const s = StyleSheet.create({
   overlay:    { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', alignItems: 'center', justifyContent: 'center' },
   picker:     {
     flexDirection: 'row',
+    flexWrap: 'wrap',          // wrap on narrow screens so chips never run off-edge
     alignItems: 'center',
-    borderRadius: 40,
+    justifyContent: 'center',
+    borderRadius: 28,
     paddingVertical: 10,
-    paddingHorizontal: 8,
+    paddingHorizontal: 12,
     gap: 4,
+    maxWidth: '92%',           // leave breathing room from screen edges
     shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 12, shadowOffset: { width: 0, height: 4 },
     elevation: 8,
   },
