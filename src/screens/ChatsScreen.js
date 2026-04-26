@@ -15,6 +15,13 @@ import { listFolders, subscribe as subscribeFolders } from '../services/folders'
 import { isPremiumUser } from '../services/adsService';
 import PremiumModal from '../components/PremiumModal';
 import PremiumCrown from '../components/PremiumCrown';
+import { supabase } from '../services/supabase';
+import {
+  pullChatPrefs,
+  readCachedPrefs,
+  setChatPref,
+  migrateLocalPrefsToServer,
+} from '../services/chatPrefsSync';
 import {
   subscribe as subscribeVault,
   isUnlocked as isVaultUnlocked,
@@ -115,9 +122,52 @@ export default function ChatsScreen({ navigation }) {
     return () => sub.remove();
   }, []);
 
+  // Phase OO: cross-device sync for pin/archive/folder/hide-alerts.
+  // We OVERLAY the server-backed pref map onto the locally-stored
+  // chat objects (which still own name/lastMessage/time/etc). This
+  // means a chat's pin state is the same on every install of the
+  // user's account — no more "lost my pins on reinstall" complaints.
   async function loadChats() {
     const saved = await AsyncStorage.getItem(CHATS_KEY);
-    if (saved) setChats(JSON.parse(saved));
+    let chatsLocal = saved ? JSON.parse(saved) : [];
+    // Apply the cached prefs map for first paint, then refresh from
+    // the server in the background.
+    try {
+      const cachedPrefs = await readCachedPrefs();
+      if (cachedPrefs) chatsLocal = applyPrefsMap(chatsLocal, cachedPrefs);
+    } catch {}
+    setChats(chatsLocal);
+    // Background server pull (non-blocking).
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const myId = session?.user?.id;
+        if (!myId) return;
+        // One-time legacy upload — idempotent on repeat.
+        migrateLocalPrefsToServer(myId).catch(() => {});
+        const fresh = await pullChatPrefs(myId);
+        setChats(prev => applyPrefsMap(prev, fresh));
+      } catch {}
+    })();
+  }
+
+  function applyPrefsMap(list, prefs) {
+    if (!prefs || !Array.isArray(list)) return list;
+    return list
+      .map(c => {
+        const key = c.roomId || c.id;
+        const p = key && prefs[key];
+        if (!p) return c;
+        return {
+          ...c,
+          pinned:       !!p.pinned,
+          archived:     !!p.archived,
+          hideAlerts:   !!p.hideAlerts,
+          markedUnread: !!p.markedUnread,
+          folderId:     p.folderId || null,
+        };
+      })
+      .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
   }
 
   async function onRefresh() {
@@ -129,6 +179,19 @@ export default function ChatsScreen({ navigation }) {
   async function saveChats(updated) {
     setChats(updated);
     await AsyncStorage.setItem(CHATS_KEY, JSON.stringify(updated));
+  }
+
+  // Phase OO helper: thin wrapper around setChatPref that resolves
+  // the current user_id and silently no-ops when there's no auth
+  // session (e.g. during sign-in/out transitions).
+  async function syncPrefForRoom(roomId, patch) {
+    if (!roomId) return;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const myId = session?.user?.id;
+      if (!myId) return;
+      await setChatPref(myId, roomId, patch);
+    } catch {}
   }
 
   // ── Direct-item helpers used by swipe actions ───────────────
@@ -165,6 +228,10 @@ export default function ChatsScreen({ navigation }) {
       .map(c => sameChat(c, item) ? { ...c, pinned: !c.pinned } : c)
       .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
     await saveChats(updated);
+    // Phase OO: push the new pin state to user_chat_prefs so the
+    // user's other devices get the same pinned chat after their next
+    // pull (or via realtime in a future iteration).
+    syncPrefForRoom(item.roomId || item.id, { pinned: !item.pinned }).catch(() => {});
     openSwipeRef.current?.close?.();
   }
 
@@ -174,6 +241,7 @@ export default function ChatsScreen({ navigation }) {
       sameChat(c, item) ? { ...c, archived: !c.archived } : c
     );
     await saveChats(updated);
+    syncPrefForRoom(item.roomId || item.id, { archived: !item.archived }).catch(() => {});
     openSwipeRef.current?.close?.();
   }
 
@@ -208,6 +276,7 @@ export default function ChatsScreen({ navigation }) {
       .map(c => c.id === selected.id ? { ...c, pinned: !c.pinned } : c)
       .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
     await saveChats(updated);
+    syncPrefForRoom(selected?.roomId || selected?.id, { pinned: !selected?.pinned }).catch(() => {});
     setActionModal(false);
   }
 
@@ -216,6 +285,7 @@ export default function ChatsScreen({ navigation }) {
       c.id === selected.id ? { ...c, archived: !c.archived } : c
     );
     await saveChats(updated);
+    syncPrefForRoom(selected?.roomId || selected?.id, { archived: !selected?.archived }).catch(() => {});
     setActionModal(false);
   }
 

@@ -47,10 +47,16 @@ import {
 } from '../services/keyExchange';
 import {
   encryptMessageForPair,
+  encryptForDevicesAndSelf,
   decryptMessage,
+  decryptForMyDevice,
   decryptSelfEnvelope,
   isEncryptedEnvelope,
+  isMultiDeviceEnvelope,
 } from '../crypto/encryption';
+import { getDeviceKeysForUser, publishMyDeviceKey } from '../services/deviceKeys';
+import { getDeviceId } from '../services/deviceIdentity';
+import { loadLatest, loadOlder } from '../services/messagePager';
 
 // ── GIFs & Emojis ─────────────────────────────────────────────
 const GIFS = [
@@ -373,6 +379,13 @@ export default function ChatRoomScreen({ route, navigation }) {
   const [messages,     setMessages]     = useState([]);
   const [text,         setText]         = useState('');
   const [sending,      setSending]      = useState(false);
+  // Phase NN: cursor-based pagination state. We hold onto the
+  // oldest-loaded message timestamp so onEndReached can ask for
+  // the next 50 older. `hasMore` flips false when the server
+  // returns less than the page size — no further pages.
+  const [oldestCursor, setOldestCursor] = useState(null);
+  const [hasMore,      setHasMore]      = useState(true);
+  const [loadingOlder, setLoadingOlder] = useState(false);
 
   // ── Voice notes (task #69) ─────────────────────────────────
   // useAudioRecorder returns a recorder object that lives across renders.
@@ -430,6 +443,11 @@ export default function ChatRoomScreen({ route, navigation }) {
   const [scheduledAt,     setScheduledAt]     = useState(new Date(Date.now() + 60 * 60 * 1000)); // default: 1 hour from now
   const [schedulePickerStep, setSchedulePickerStep] = useState('date'); // 'date' → 'time' → submit
   const [recipientPubKey, setRecipientPubKey] = useState(null);
+  // Phase MM: list of recipient's device keys for multi-device E2E.
+  // [{device_id, public_key}, ...]. Empty when peer is pre-Phase-MM
+  // (no rows in user_device_keys yet) — we then fall back to
+  // recipientPubKey for the legacy single-recipient envelope.
+  const [recipientDevices, setRecipientDevices] = useState([]);
   // encryptionStatus gates the send button until we know whether we can
   // encrypt to the peer. States:
   //   'resolving' — useEffect still running (publish + lookup). Send blocked.
@@ -470,18 +488,28 @@ export default function ChatRoomScreen({ route, navigation }) {
     // Plaintext cache hit (e.g., we just sent this — avoid re-decrypting).
     const cached = plaintextCacheRef.current.get(row.id);
     if (cached != null) return { ...row, content: cached };
-    if (!isEncryptedEnvelope(row.content)) return row;
+    const isMulti = isMultiDeviceEnvelope(row.content);
+    if (!isMulti && !isEncryptedEnvelope(row.content)) return row;
     try {
       let plaintext;
       if (row.sender_id && row.sender_id === myId) {
-        // I sent this — try the self-seal first, then fall back to main envelope
-        // (some older sends may not have self-seal metadata).
+        // I sent this — try the self-seal first (works for both
+        // single and multi-device wire formats since ct_self is
+        // independent), then fall back to opening my slot.
         const selfEnv = row.metadata?.ct_self;
         if (selfEnv) {
           plaintext = await decryptSelfEnvelope(selfEnv);
+        } else if (isMulti) {
+          const myDeviceId = await getDeviceId();
+          plaintext = await decryptForMyDevice(row.content, myDeviceId);
         } else {
           plaintext = await decryptMessage(row.content);
         }
+      } else if (isMulti) {
+        // Peer sent a multi-device envelope — open the slot for
+        // THIS device's id.
+        const myDeviceId = await getDeviceId();
+        plaintext = await decryptForMyDevice(row.content, myDeviceId);
       } else {
         plaintext = await decryptMessage(row.content);
       }
@@ -514,18 +542,32 @@ export default function ChatRoomScreen({ route, navigation }) {
 
     (async () => {
       try {
-        // Publish our pubkey (best-effort) so the other side can encrypt to us.
+        // Publish our legacy single-recipient pubkey AND the per-
+        // device key (Phase MM) so peers using either path can
+        // encrypt to us. Both are best-effort — silent on failure
+        // so a slow Supabase doesn't strand the user.
         publishMyPublicKey(myId).catch(() => {});
+        publishMyDeviceKey(myId, recipientPhone).catch(() => {});
         // Find the other member of this room. Pass recipientPhone so legacy
         // chats (no rooms row yet) can fall back to a profile lookup.
         const otherId = await resolveDirectRecipient(roomId, myId, { recipientPhone });
         if (cancelled) return;
         setRecipientId(otherId);
         if (otherId) {
-          const pk = await getPublicKey(otherId);
+          // Resolve BOTH the multi-device list (preferred) and the
+          // legacy single pubkey (fallback) in parallel. Whichever
+          // returns usable data drives encryptionStatus.
+          const [devices, pk] = await Promise.all([
+            getDeviceKeysForUser(otherId),
+            getPublicKey(otherId),
+          ]);
           if (cancelled) return;
+          setRecipientDevices(devices);
           setRecipientPubKey(pk);
-          setEncryptionStatus(pk ? 'ready' : 'plaintext');
+          // Ready if peer has at least one published key (device or
+          // legacy single). Otherwise plaintext gate fires.
+          const ready = (devices && devices.length > 0) || !!pk;
+          setEncryptionStatus(ready ? 'ready' : 'plaintext');
         } else {
           setEncryptionStatus('plaintext');
         }
@@ -553,9 +595,17 @@ export default function ChatRoomScreen({ route, navigation }) {
     let cancelled = false;
     const tick = async () => {
       try {
-        const pk = await getPublicKey(recipientId);
-        if (cancelled || !pk) return;
-        setRecipientPubKey(pk);
+        // Try BOTH the multi-device path and the legacy single-pubkey
+        // path. Whichever returns usable data first unlocks the chat.
+        const [devices, pk] = await Promise.all([
+          getDeviceKeysForUser(recipientId),
+          getPublicKey(recipientId),
+        ]);
+        if (cancelled) return;
+        const hasAnything = (devices && devices.length > 0) || !!pk;
+        if (!hasAnything) return;
+        setRecipientDevices(devices || []);
+        if (pk) setRecipientPubKey(pk);
         setEncryptionStatus('ready');
       } catch {}
     };
@@ -715,13 +765,15 @@ export default function ChatRoomScreen({ route, navigation }) {
     if (!roomId) return;
     const MKEY = `vaultchat_msgs_${roomId}`;
     try {
-      const { data, error } = await supabase
-        .from('messages')
-        .select('*')
-        .eq('room_id', roomId)
-        .order('created_at', { ascending: true });
-      if (!error && data && data.length > 0) {
+      // Phase NN: fetch only the LATEST page (50 by default) instead
+      // of the entire room history. The user can scroll to older
+      // messages and the FlatList's onEndReached fires loadMoreOlder().
+      const page = await loadLatest({ roomId, table: 'messages', roomColumn: 'room_id' });
+      const data = page.items;
+      if (data && data.length > 0) {
         const real = data.filter(m => m.id && !String(m.id).startsWith('temp_'));
+        setOldestCursor(page.oldestCursor);
+        setHasMore(page.hasMore);
         // Decrypt in parallel before rendering. Plaintext legacy rows pass through.
         const decrypted = await decryptRows(real);
         // Merge — preserve local optimistic temp_-id messages so a
@@ -785,14 +837,38 @@ export default function ChatRoomScreen({ route, navigation }) {
     } catch {}
   }
 
+  // Phase NN: pull the next page of OLDER messages when the user
+  // scrolls to the top of the inverted FlatList. Inverted = bottom
+  // of the list is "newest", top is "oldest", so onEndReached fires
+  // when they reach the top edge. We load 50 more older + prepend.
+  async function loadMoreOlder() {
+    if (!roomId || !oldestCursor || !hasMore || loadingOlder) return;
+    setLoadingOlder(true);
+    try {
+      const page = await loadOlder({ roomId, table: 'messages', roomColumn: 'room_id', cursor: oldestCursor });
+      if (page.items?.length) {
+        const decrypted = await decryptRows(page.items);
+        setMessages(prev => {
+          const seen = new Set(prev.map(m => m.id));
+          const fresh = decrypted.filter(m => !seen.has(m.id));
+          return [...fresh, ...prev]; // prepend older to chronological list
+        });
+        setOldestCursor(page.oldestCursor);
+      }
+      setHasMore(!!page.hasMore);
+    } catch (e) {
+      if (__DEV__) console.warn('loadMoreOlder error:', e?.message);
+    } finally {
+      setLoadingOlder(false);
+    }
+  }
+
   async function postMsg(content) {
     // ── Hard E2E gate ────────────────────────────────────────
-    // VaultChat advertises end-to-end encryption. We previously fell
-    // back to plaintext when the peer hadn't published a public key
-    // yet — that broke the privacy promise the moment a contact
-    // signed up before opening the app. Refuse the send instead and
-    // tell the user how to unblock the channel.
-    if (!recipientPubKey) {
+    // VaultChat advertises end-to-end encryption. Refuse to send
+    // when peer has neither device keys nor a legacy single pubkey.
+    const hasDevices = recipientDevices && recipientDevices.length > 0;
+    if (!hasDevices && !recipientPubKey) {
       try {
         Alert.alert(
           'Encrypted only',
@@ -813,18 +889,27 @@ export default function ChatRoomScreen({ route, navigation }) {
     setMessages(prev => [...prev, newMsg]);
     // inverted FlatList — new messages appear at bottom automatically
 
-    // Build the insert payload. We're guaranteed to have the peer's
-    // pubkey here (gated above), so always encrypt. If encryption itself
-    // throws, surface the error and bail rather than silently sending
-    // ciphertext-shaped garbage that the peer can't decrypt.
+    // Build the insert payload.
+    // Phase MM: prefer multi-device envelope when peer has device
+    // keys published — encrypts once per device so all of their
+    // installs can decrypt with their own private key. Falls back to
+    // the legacy single-recipient envelope if peer is pre-Phase-MM
+    // (still has profiles.public_key but no user_device_keys rows).
     let insertPayload;
     try {
-      const { content: wireContent, metadataSelf } = await encryptMessageForPair(content, recipientPubKey);
+      let wireContent, metadataSelf;
+      if (hasDevices) {
+        ({ content: wireContent, metadataSelf } =
+          await encryptForDevicesAndSelf(content, recipientDevices));
+      } else {
+        ({ content: wireContent, metadataSelf } =
+          await encryptMessageForPair(content, recipientPubKey));
+      }
       insertPayload = {
         room_id:  roomId,
         sender_id: myId,
         content:  wireContent,
-        metadata: { ct_self: metadataSelf, encrypted: true, v: 2 },
+        metadata: { ct_self: metadataSelf, encrypted: true, v: hasDevices ? 'multi:1' : 2 },
       };
     } catch (e) {
       if (__DEV__) console.warn('encrypt failed:', e?.message);
@@ -1533,6 +1618,11 @@ export default function ChatRoomScreen({ route, navigation }) {
         keyExtractor={(item, i) => String(item.id || i)}
         inverted
         contentContainerStyle={{ padding: 12, paddingTop: 8 }}
+        onEndReached={loadMoreOlder}
+        onEndReachedThreshold={0.4}
+        ListFooterComponent={hasMore && loadingOlder ? (
+          <Text style={{ color: sub, textAlign: 'center', paddingVertical: 12, fontSize: 12 }}>Loading older…</Text>
+        ) : null}
         renderItem={({ item }) => (
           <Bubble
             item={item} myId={myId} tx={tx} sub={sub} card={card} accent={accent}

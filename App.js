@@ -335,12 +335,16 @@ export default function App() {
       try {
         const { supabase } = require('./src/services/supabase');
         const { publishMyPublicKey } = require('./src/services/keyExchange');
+        // Phase MM: also publish this install's per-device key.
+        // Best-effort; silently no-ops if Supabase is unreachable.
+        const { publishMyDeviceKey } = require('./src/services/deviceKeys');
         const { data: { session } } = await supabase.auth.getSession();
         if (session) {
           setIsLoggedIn(true);
           // Publish our NaCl public key so peers can encrypt to us.
           if (session.user?.id) {
             publishMyPublicKey(session.user.id).catch(() => {});
+            publishMyDeviceKey(session.user.id, session.user?.phone || null).catch(() => {});
             bootstrapRealtime(session.user.id);
           }
         } else {
@@ -360,6 +364,7 @@ export default function App() {
           setIsLoggedIn(!!session);
           if (session?.user?.id) {
             publishMyPublicKey(session.user.id).catch(() => {});
+            publishMyDeviceKey(session.user.id, session.user?.phone || null).catch(() => {});
             bootstrapRealtime(session.user.id);
           } else {
             stopCallListener();

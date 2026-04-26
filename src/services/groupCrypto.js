@@ -82,19 +82,26 @@ export async function resolveAndCacheGroupMembers(groupId) {
     const seed = typeof m === 'string' ? { name: m } : { ...m };
     if (seed.user_id && seed.public_key) return seed;
 
-    // Try to resolve via @handle or phone using whatever we have
+    // Try to resolve via @handle or phone using whatever we have.
+    // Phase MM: also fetch the member's per-device key list so the
+    // group send can fan out to every install of every member.
     const lookup = seed.vault_handle || seed.handle || seed.phone || seed.name;
     if (!lookup) return seed;
     try {
       const profile = await findByHandleOrPhone(lookup);
       if (!profile?.id) return seed;
-      const pk = await getPublicKey(profile.id);
+      const { getDeviceKeysForUser } = require('./deviceKeys');
+      const [pk, devices] = await Promise.all([
+        getPublicKey(profile.id),
+        getDeviceKeysForUser(profile.id),
+      ]);
       return {
         ...seed,
         user_id:     profile.id,
         vault_handle: profile.vault_handle || seed.vault_handle || null,
         phone:       profile.phone || seed.phone || null,
         public_key:  pk || seed.public_key || null,
+        device_keys: Array.isArray(devices) ? devices : [],
       };
     } catch { return seed; }
   }));
@@ -113,26 +120,64 @@ export async function resolveAndCacheGroupMembers(groupId) {
  * members have published keys yet) and how to message the user.
  */
 export async function encryptForGroup(plaintext, members, myUserId) {
+  // Phase MM upgrade: per-DEVICE per-recipient envelopes. Each
+  // member is fanned out to every device they've published a
+  // key for. Wire shape becomes:
+  //   metadata.ct_for_devices = { [device_id]: <ENC2 envelope>, ... }
+  //
+  // We also keep the legacy ct_for_recipients map populated for
+  // peers still on Phase BB (single-recipient envelope) so they
+  // can decrypt during the rollout window. New clients prefer
+  // ct_for_devices when present.
+  const ct_for_devices    = {};
   const ct_for_recipients = {};
   let recipientCount = 0;
+  let deviceCount    = 0;
   let missingCount   = 0;
 
-  // Encrypt for each member who has a published pubkey.
   for (const m of members) {
-    if (!m?.user_id || !m?.public_key) { missingCount++; continue; }
-    if (m.user_id === myUserId) continue; // self-envelope handled below
-    try {
-      ct_for_recipients[m.user_id] = await encryptMessage(plaintext, m.public_key);
+    if (!m?.user_id) { missingCount++; continue; }
+    if (m.user_id === myUserId) continue; // self handled below
+    const devices = Array.isArray(m.device_keys) ? m.device_keys : [];
+    if (devices.length > 0) {
+      // Multi-device path — encrypt once per published device.
+      for (const d of devices) {
+        if (!d?.device_id || !d?.public_key) continue;
+        try {
+          ct_for_devices[d.device_id] = await encryptMessage(plaintext, d.public_key);
+          deviceCount++;
+        } catch {}
+      }
       recipientCount++;
-    } catch { missingCount++; }
+    } else if (m.public_key) {
+      // Legacy fallback — peer hasn't published per-device keys yet.
+      try {
+        ct_for_recipients[m.user_id] = await encryptMessage(plaintext, m.public_key);
+        recipientCount++;
+      } catch { missingCount++; }
+    } else {
+      missingCount++;
+    }
   }
 
-  // Encrypt-to-self so the sender's own device can decrypt their
-  // history back from the server. Self-DH (encrypt to my own pub).
+  // Encrypt-to-self for sender history. Use my own device keys if
+  // available so this device + any other install of mine can read
+  // back; fall back to identity-key self-seal if not.
   if (myUserId) {
     try {
-      const me = await ensureIdentityKeys();
-      ct_for_recipients[myUserId] = await encryptMessage(plaintext, me.publicKey);
+      const { getDeviceKeysForUser } = require('./deviceKeys');
+      const myDevices = await getDeviceKeysForUser(myUserId);
+      if (Array.isArray(myDevices) && myDevices.length > 0) {
+        for (const d of myDevices) {
+          if (!d?.device_id || !d?.public_key) continue;
+          try {
+            ct_for_devices[d.device_id] = await encryptMessage(plaintext, d.public_key);
+          } catch {}
+        }
+      } else {
+        const me = await ensureIdentityKeys();
+        ct_for_recipients[myUserId] = await encryptMessage(plaintext, me.publicKey);
+      }
     } catch {}
   }
 
@@ -141,11 +186,13 @@ export async function encryptForGroup(plaintext, members, myUserId) {
       content:  GRP_SENTINEL,
       metadata: {
         encrypted: true,
-        v:        'group:1',
-        ct_for_recipients,
+        v:        'group:2',          // bumped — devices map present
+        ct_for_devices,                // primary (new clients)
+        ct_for_recipients,             // legacy (Phase BB peers)
       },
     },
     recipientCount,
+    deviceCount,
     missingCount,
   };
 }
@@ -158,9 +205,25 @@ export async function encryptForGroup(plaintext, members, myUserId) {
  */
 export async function decryptGroupMessageForMe(row, myUserId) {
   try {
+    const { decryptMessage } = require('../crypto/encryption');
+    // Phase MM upgrade — prefer the per-DEVICE map written by
+    // group:2 senders. Look up THIS device's slot first; that
+    // gives a unique envelope per install of the same user.
+    const devMap = row?.metadata?.ct_for_devices;
+    if (devMap && Object.keys(devMap).length > 0) {
+      try {
+        const { getDeviceId } = require('./deviceIdentity');
+        const myDeviceId = await getDeviceId();
+        const env = devMap[myDeviceId];
+        if (env) return await decryptMessage(env);
+      } catch {}
+      // Fall through to the user-id map if device lookup misses
+      // (e.g., sender encrypted before this device's key was
+      // published — happens during the first multi-device send
+      // window).
+    }
     const env = row?.metadata?.ct_for_recipients?.[myUserId];
     if (!env) return '🔒 Encrypted message';
-    const { decryptMessage } = require('../crypto/encryption');
     return await decryptMessage(env);
   } catch {
     return '🔒 Encrypted message';

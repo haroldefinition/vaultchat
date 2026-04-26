@@ -193,7 +193,20 @@ export async function decryptSelfEnvelope(env) {
  * the original string on non-envelope input, or a user-visible placeholder
  * on failure. Never throws.
  */
-export async function safeDecrypt(envelopeOrPlain) {
+export async function safeDecrypt(envelopeOrPlain, opts = {}) {
+  // Multi-device envelope (Phase MM) \u2014 needs my device_id to know
+  // which envelope slot to open. Caller should pass `myDeviceId`
+  // via opts; if absent we lazy-load it.
+  if (isMultiDeviceEnvelope(envelopeOrPlain)) {
+    try {
+      let did = opts.myDeviceId;
+      if (!did) { did = await require('../services/deviceIdentity').getDeviceId(); }
+      return await decryptForMyDevice(envelopeOrPlain, did);
+    } catch (e) {
+      if (__DEV__) console.warn('safeDecrypt(multi) failed:', e?.message || e);
+      return '[Can\u2019t decrypt this message on this device]';
+    }
+  }
   if (!isEncryptedEnvelope(envelopeOrPlain)) return envelopeOrPlain;
   try {
     return await decryptMessage(envelopeOrPlain);
@@ -221,6 +234,98 @@ export async function generateFingerprint(myPublicKeyB64, theirPublicKeyB64) {
   const hex = bytesToHex(digest).toUpperCase();
   // 8 blocks of 4 hex chars each = 32 chars of fingerprint
   return hex.slice(0, 32).match(/.{4}/g).join(' ');
+}
+
+// ── Multi-device envelope (Phase MM) ───────────────────────
+//
+// Wire shape:
+//   content:  'MD2:' + JSON.stringify({
+//     v: 'multi:1',
+//     by_dev: { [device_id]: '<ENC2 envelope string>', ... }
+//   })
+//
+// The 'MD2:' prefix lets the existing receive path detect a
+// multi-device envelope without parsing JSON. Inside it, each
+// device_id maps to a regular ENC2 envelope encrypted to that
+// device's pubkey. The recipient picks their own device_id key
+// and decrypts that envelope with the local private key.
+//
+// Backwards compat: legacy 'ENC2:' single-recipient envelopes
+// still decrypt via the existing decryptMessage path. Senders
+// still produce 'ENC2:' if the recipient has no device-key
+// rows (pre-Phase MM peer).
+
+const MD_TAG = 'MD2:';
+
+export function isMultiDeviceEnvelope(s) {
+  return typeof s === 'string' && s.startsWith(MD_TAG);
+}
+
+/**
+ * Build a multi-device envelope by encrypting `plaintext` to every
+ * provided recipient device. Each device entry is `{ device_id,
+ * public_key }`. Returns the wire string ready to insert as
+ * `messages.content`.
+ *
+ * Throws if the device list is empty — caller should fall back to
+ * a single-recipient envelope (or refuse to send) in that case.
+ */
+export async function encryptForDevices(plaintext, deviceList) {
+  if (!Array.isArray(deviceList) || !deviceList.length) {
+    throw new Error('encryptForDevices: at least one device required');
+  }
+  const by_dev = {};
+  for (const d of deviceList) {
+    if (!d?.device_id || !d?.public_key) continue;
+    // Each per-device payload is a normal ENC2 envelope, so the
+    // receiving device's decryptMessage path works unchanged.
+    by_dev[d.device_id] = await encryptMessage(plaintext, d.public_key);
+  }
+  if (!Object.keys(by_dev).length) {
+    throw new Error('encryptForDevices: no usable device keys');
+  }
+  return MD_TAG + JSON.stringify({ v: 'multi:1', by_dev });
+}
+
+/**
+ * Decrypt a multi-device envelope picking my own device_id slot.
+ * Falls through with a clear error if my device isn't included
+ * (sender hadn't seen this device's key when they encrypted).
+ */
+export async function decryptForMyDevice(wire, myDeviceId) {
+  if (!isMultiDeviceEnvelope(wire)) throw new Error('Not a multi-device envelope');
+  const json = wire.slice(MD_TAG.length);
+  let env;
+  try { env = JSON.parse(json); }
+  catch { throw new Error('Malformed multi-device envelope JSON'); }
+  if (!env.by_dev || !env.by_dev[myDeviceId]) {
+    throw new Error(`No envelope for device ${myDeviceId.slice(0, 8)} — sender encrypted before this device's key was published`);
+  }
+  return await decryptMessage(env.by_dev[myDeviceId]);
+}
+
+/**
+ * Convenience: encrypt to a recipient's device list AND a self-
+ * envelope so the sender can read their own history back. Mirrors
+ * encryptMessageForPair but for the multi-device era.
+ *
+ * Returns { content, metadataSelf } in the same shape so call
+ * sites swap one in for the other with no other changes.
+ */
+export async function encryptForDevicesAndSelf(plaintext, deviceList) {
+  const content = await encryptForDevices(plaintext, deviceList);
+  const me = await ensureIdentityKeys();
+  const nonce = nacl.randomBytes(nacl.box.nonceLength);
+  const myPubBytes  = naclUtil.decodeBase64(me.publicKey);
+  const myPrivBytes = naclUtil.decodeBase64(me.privateKey);
+  const sealed = nacl.box(naclUtil.decodeUTF8(String(plaintext)), nonce, myPubBytes, myPrivBytes);
+  const metadataSelf = {
+    v:   ENVELOPE_V,
+    ct:  naclUtil.encodeBase64(sealed),
+    n:   naclUtil.encodeBase64(nonce),
+    spk: me.publicKey,
+  };
+  return { content, metadataSelf };
 }
 
 // ── Vanishing-photo key (single-use symmetric key) ─────────

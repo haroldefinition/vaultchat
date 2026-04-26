@@ -23,6 +23,7 @@ import SwipeableRow   from '../components/SwipeableRow';
 import ZoomableImage  from '../components/ZoomableImage';
 import ReactionPicker from '../components/ReactionPicker';
 import ReactionBar    from '../components/ReactionBar';
+import GroupMemberMigrationModal from '../components/GroupMemberMigrationModal';
 import PinnedMessagePreview from '../components/PinnedMessagePreview';
 import ContactEditModal from '../components/ContactEditModal';
 import PremiumModal from '../components/PremiumModal';
@@ -47,6 +48,7 @@ import {
   encryptForGroup,
   decryptGroupMessageForMe,
 } from '../services/groupCrypto';
+import { loadLatest, loadOlder } from '../services/messagePager';
 
 // ── Media helpers ─────────────────────────────────────────────
 function SinglePhoto({ msgKey, isLocal, onOpen, onLongPress }) {
@@ -297,6 +299,11 @@ export default function GroupChatScreen({ route, navigation }) {
   const [groupDesc,    setGroupDesc]    = useState('');
   const [groupMembers, setGroupMembers] = useState([]); // array of member descriptors
   const [encBannerHidden, setEncBannerHidden] = useState(false); // dismissible amber/green banner state
+  const [migrationOpen,   setMigrationOpen]   = useState(false);  // group member migration modal
+  // Phase NN pagination state — same shape as ChatRoomScreen.
+  const [oldestCursor, setOldestCursor] = useState(null);
+  const [hasMore,      setHasMore]      = useState(true);
+  const [loadingOlder, setLoadingOlder] = useState(false);
 
   // ── @mentions (#80) ─────────────────────────────────────────
   // Detect when the user is mid-@-mention in the composer so we can
@@ -583,13 +590,14 @@ export default function GroupChatScreen({ route, navigation }) {
   // Merge Supabase data on top — never wipe local messages
   async function syncSupabase() {
     try {
-      const { data, error } = await supabase
-        .from('group_messages')
-        .select('*')
-        .eq('group_id', groupId)
-        .order('created_at', { ascending: true });
-      if (!error && data && data.length > 0) {
+      // Phase NN: cursor-paged fetch — only the latest page on entry.
+      // The user can scroll up to load older via loadMoreOlder().
+      const page = await loadLatest({ roomId: groupId, table: 'group_messages', roomColumn: 'group_id' });
+      const data = page.items;
+      if (data && data.length > 0) {
         const real = data.filter(m => m.id);
+        setOldestCursor(page.oldestCursor);
+        setHasMore(page.hasMore);
         // Decrypt every group-encrypted row to plaintext for the
         // current user before pushing into state. Plaintext rows
         // pass through untouched (legacy support / sentinel-less
@@ -672,6 +680,35 @@ export default function GroupChatScreen({ route, navigation }) {
   async function saveLocal(msgs) {
     const toSave = msgs.filter(m => m.id && !String(m.id).startsWith('temp_'));
     if (toSave.length > 0) AsyncStorage.setItem(SKEY, JSON.stringify(toSave)).catch(() => {});
+  }
+
+  // Phase NN: load the next OLDER page when the user scrolls to
+  // the top of the inverted FlatList. Decrypts each row to
+  // plaintext for THIS device before prepending into state.
+  async function loadMoreOlder() {
+    if (!groupId || !oldestCursor || !hasMore || loadingOlder) return;
+    setLoadingOlder(true);
+    try {
+      const page = await loadOlder({ roomId: groupId, table: 'group_messages', roomColumn: 'group_id', cursor: oldestCursor });
+      if (page.items?.length) {
+        const decrypted = await Promise.all(page.items.map(async row => {
+          if (!isGroupEnvelope(row)) return row;
+          const plain = await decryptGroupMessageForMe(row, currentUserId);
+          return { ...row, text: plain };
+        }));
+        setMessages(prev => {
+          const seen = new Set(prev.map(m => m.id));
+          const fresh = decrypted.filter(m => !seen.has(m.id));
+          return [...fresh, ...prev];
+        });
+        setOldestCursor(page.oldestCursor);
+      }
+      setHasMore(!!page.hasMore);
+    } catch (e) {
+      if (__DEV__) console.warn('group loadMoreOlder error:', e?.message);
+    } finally {
+      setLoadingOlder(false);
+    }
   }
 
   async function postMsg(text, type = 'text') {
@@ -1214,8 +1251,17 @@ export default function GroupChatScreen({ route, navigation }) {
           }}>
             <Text style={{ fontSize: 13 }}>⚠️</Text>
             <Text style={{ flex: 1, color: '#B45309', fontSize: 11, fontWeight: '600' }}>
-              Waiting for group members to set up encryption. Messages may go out plaintext.
+              Group members aren't set up for encryption yet.
             </Text>
+            {/* Set Up — opens GroupMemberMigrationModal so the user
+                can resolve each bare-string member to a @handle/phone
+                + pubkey. Once any member resolves, the next send goes
+                E2E and the banner flips green automatically. */}
+            <TouchableOpacity
+              onPress={() => setMigrationOpen(true)}
+              style={{ backgroundColor: '#B45309', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 }}>
+              <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>Set Up</Text>
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => setEncBannerHidden(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <Text style={{ color: '#B45309', fontSize: 14, paddingHorizontal: 4 }}>✕</Text>
             </TouchableOpacity>
@@ -1252,6 +1298,11 @@ export default function GroupChatScreen({ route, navigation }) {
         keyExtractor={(item, i) => String(item.id || i)}
         inverted
         contentContainerStyle={{ padding: 12, paddingTop: 8 }}
+        onEndReached={loadMoreOlder}
+        onEndReachedThreshold={0.4}
+        ListFooterComponent={hasMore && loadingOlder ? (
+          <Text style={{ color: sub, textAlign: 'center', paddingVertical: 12, fontSize: 12 }}>Loading older…</Text>
+        ) : null}
         renderItem={({ item }) => {
 
           return (
@@ -1547,6 +1598,22 @@ export default function GroupChatScreen({ route, navigation }) {
         roomId={groupId}
         reporterId={currentUserId}
         reporterHandle={currentHandle}
+      />
+
+      {/* Group member migration — opens from the amber "Set Up"
+          banner, lets the user resolve each legacy bare-name member
+          to a @handle/phone so per-recipient encryption can fire on
+          send. On save, we update local state with the enriched
+          members array so the encryption banner flips green
+          immediately without waiting for a screen re-mount. */}
+      <GroupMemberMigrationModal
+        visible={migrationOpen}
+        groupId={groupId}
+        onClose={() => setMigrationOpen(false)}
+        onMigrated={(enriched, okCount) => {
+          setGroupMembers(enriched);
+          if (okCount > 0) setEncBannerHidden(false); // surface the new green banner
+        }}
       />
 
       {/* Attach sheet */}
