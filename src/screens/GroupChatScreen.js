@@ -1655,8 +1655,14 @@ const g = StyleSheet.create({
   hName:          { fontWeight: 'bold', fontSize: 15 },
   hSub:           { fontSize: 11 },
   msgWrapper:     { marginBottom: 6, maxWidth: '80%' },
-  right:          { alignSelf: 'flex-end' },
-  left:           { alignSelf: 'flex-start' },
+  // alignItems on the wrapper is what makes ReactionBar's chips
+  // anchor to the BUBBLE's right edge for outgoing messages and
+  // left edge for incoming — exactly the iMessage-style placement
+  // you see in 1:1 chats. Without these, chips land at the left of
+  // the row regardless of the bubble's alignment, which broke the
+  // visual parity Harold flagged.
+  right:          { alignSelf: 'flex-end',   alignItems: 'flex-end'   },
+  left:           { alignSelf: 'flex-start', alignItems: 'flex-start' },
   senderHandle:   { fontSize: 11, fontWeight: '700', marginBottom: 2, marginLeft: 4 },
   bubble:         { borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10 },
   mediaPad:       { paddingHorizontal: 4, paddingVertical: 4 },
