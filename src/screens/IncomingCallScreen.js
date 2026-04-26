@@ -30,7 +30,10 @@ import * as callLog from '../services/callLog';
 import { Phone, PhoneOff, Video as VideoIcon } from 'lucide-react-native';
 
 export default function IncomingCallScreen({ route, navigation }) {
-  const { bg, tx, sub, accent } = useTheme();
+  // isPremium drives the dispersing-dots shape (arc for premium,
+  // flat line for free) so the ringing UI matches the rest of the
+  // premium polish.
+  const { bg, tx, sub, accent, isPremium } = useTheme();
   const {
     callId, roomId, myUserId, callerId, callerName,
     type = 'voice',
@@ -143,7 +146,7 @@ export default function IncomingCallScreen({ route, navigation }) {
 
         {/* Avatar stage — dots | glow-ring avatar | dots */}
         <View style={s.avatarStage}>
-          <DisperseDots accent={accent} side="left"  active={true} speed="ringing" />
+          <DisperseDots accent={accent} side="left"  active={true} speed="ringing" shape={isPremium ? 'arc' : 'line'} />
           <Animated.View
             style={[
               s.avatarGlow,
@@ -153,7 +156,7 @@ export default function IncomingCallScreen({ route, navigation }) {
               <Text style={s.avatarTx}>{(callerName || '?')[0]?.toUpperCase()}</Text>
             </View>
           </Animated.View>
-          <DisperseDots accent={accent} side="right" active={true} speed="ringing" />
+          <DisperseDots accent={accent} side="right" active={true} speed="ringing" shape={isPremium ? 'arc' : 'line'} />
         </View>
 
         <Text style={[s.name, { color: tx }]}>{callerName || 'Unknown'}</Text>

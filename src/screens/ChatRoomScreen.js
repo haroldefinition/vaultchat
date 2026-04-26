@@ -21,6 +21,7 @@ import ReactionPicker from '../components/ReactionPicker';
 import ReactionBar    from '../components/ReactionBar';
 import PinnedMessagePreview from '../components/PinnedMessagePreview';
 import ReportMessageModal from '../components/ReportMessageModal';
+import PremiumCrown from '../components/PremiumCrown';
 import { supabase } from '../services/supabase';
 import { placeCall } from '../services/placeCall';
 import { usePresence } from '../services/presence';
@@ -539,6 +540,29 @@ export default function ChatRoomScreen({ route, navigation }) {
     };
   }, [roomId, myId]);
 
+  // ── Peer key polling ────────────────────────────────────────
+  // The peer might not have published their NaCl public key yet
+  // (signed up before encryption shipped, app never opened, etc).
+  // Re-check every 15s while we're stuck in plaintext/error so the
+  // chat unlocks automatically the moment they open VaultChat —
+  // no manual refresh required from either side. getPublicKey only
+  // caches HITS, so polling on misses re-queries the server cheaply.
+  useEffect(() => {
+    if (!recipientId) return;
+    if (encryptionStatus !== 'plaintext' && encryptionStatus !== 'error') return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const pk = await getPublicKey(recipientId);
+        if (cancelled || !pk) return;
+        setRecipientPubKey(pk);
+        setEncryptionStatus('ready');
+      } catch {}
+    };
+    const id = setInterval(tick, 15000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [recipientId, encryptionStatus]);
+
   useEffect(() => {
     loadUser();
     fetchMessages();
@@ -731,6 +755,23 @@ export default function ChatRoomScreen({ route, navigation }) {
   }
 
   async function postMsg(content) {
+    // ── Hard E2E gate ────────────────────────────────────────
+    // VaultChat advertises end-to-end encryption. We previously fell
+    // back to plaintext when the peer hadn't published a public key
+    // yet — that broke the privacy promise the moment a contact
+    // signed up before opening the app. Refuse the send instead and
+    // tell the user how to unblock the channel.
+    if (!recipientPubKey) {
+      try {
+        Alert.alert(
+          'Encrypted only',
+          `${recipientName || 'This contact'} hasn’t set up encryption yet. Ask them to open VaultChat — your messages will be deliverable as soon as their key publishes.`,
+          [{ text: 'OK' }],
+        );
+      } catch {}
+      return;
+    }
+
     const now = new Date().toISOString();
     const tempId = `temp_${Date.now()}`;
     // Optimistic row uses PLAINTEXT `content` so the sender sees their own
@@ -741,22 +782,25 @@ export default function ChatRoomScreen({ route, navigation }) {
     setMessages(prev => [...prev, newMsg]);
     // inverted FlatList — new messages appear at bottom automatically
 
-    // Build the insert payload. If we have the recipient's public key, encrypt.
-    // Otherwise, fall back to plaintext so existing rooms (or partners who
-    // haven't published a key yet) still work.
-    let insertPayload = { room_id: roomId, sender_id: myId, content };
-    if (recipientPubKey) {
-      try {
-        const { content: wireContent, metadataSelf } = await encryptMessageForPair(content, recipientPubKey);
-        insertPayload = {
-          room_id:  roomId,
-          sender_id: myId,
-          content:  wireContent,
-          metadata: { ct_self: metadataSelf, encrypted: true, v: 2 },
-        };
-      } catch (e) {
-        if (__DEV__) console.warn('encrypt failed, sending plaintext:', e?.message);
-      }
+    // Build the insert payload. We're guaranteed to have the peer's
+    // pubkey here (gated above), so always encrypt. If encryption itself
+    // throws, surface the error and bail rather than silently sending
+    // ciphertext-shaped garbage that the peer can't decrypt.
+    let insertPayload;
+    try {
+      const { content: wireContent, metadataSelf } = await encryptMessageForPair(content, recipientPubKey);
+      insertPayload = {
+        room_id:  roomId,
+        sender_id: myId,
+        content:  wireContent,
+        metadata: { ct_self: metadataSelf, encrypted: true, v: 2 },
+      };
+    } catch (e) {
+      if (__DEV__) console.warn('encrypt failed:', e?.message);
+      try { Alert.alert('Send failed', 'Could not encrypt this message. Try again in a moment.'); } catch {}
+      // Roll back the optimistic row.
+      setMessages(prev => prev.filter(m => m.id !== tempId));
+      return;
     }
 
     try {
@@ -1354,7 +1398,10 @@ export default function ChatRoomScreen({ route, navigation }) {
               : <Text style={s.hAvatarTx}>{(recipientName || '?')[0]?.toUpperCase()}</Text>}
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={[s.hName, { color: tx }]}>{contactData?.name || recipientName || recipientPhone || 'Chat'}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Text style={[s.hName, { color: tx }]}>{contactData?.name || recipientName || recipientPhone || 'Chat'}</Text>
+              <PremiumCrown userId={recipientId} phone={recipientPhone} size={15} />
+            </View>
             {/* Combined trust + presence line: lock icon is always visible
                 so users see the E2E guarantee on every chat, and the
                 presence state appears inline after it (green dot Online
@@ -1510,25 +1557,53 @@ export default function ChatRoomScreen({ route, navigation }) {
         </View>
       )}
       {encryptionStatus === 'plaintext' && (
+        // Hard E2E gate. The peer hasn't published their public key
+        // yet (signed up before encryption shipped, or app never
+        // opened). Sends are blocked entirely; we re-poll every 15s
+        // so the chat unlocks the moment they open VaultChat. The
+        // Retry button cuts that wait when the user knows the peer
+        // just opened the app.
         <View style={{
           backgroundColor: '#F59E0B' + '1A',
           borderTopWidth: 1, borderTopColor: border,
-          paddingHorizontal: 14, paddingVertical: 8,
+          paddingHorizontal: 14, paddingVertical: 10,
+          flexDirection: 'row', alignItems: 'center', gap: 10,
         }}>
-          <Text style={{ color: '#B45309', fontSize: 12, fontWeight: '600' }}>
-            ⚠️ Peer hasn't set up encryption — messages will be sent in plaintext.
+          <Text style={{ fontSize: 14 }}>🔒</Text>
+          <Text style={{ flex: 1, color: '#B45309', fontSize: 12, fontWeight: '600' }}>
+            Waiting for {recipientName || 'this contact'} to set up encryption. Messages are end-to-end only.
           </Text>
+          <TouchableOpacity
+            onPress={async () => {
+              if (!recipientId) return;
+              const pk = await getPublicKey(recipientId);
+              if (pk) { setRecipientPubKey(pk); setEncryptionStatus('ready'); }
+            }}
+            style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, backgroundColor: '#B45309' }}>
+            <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>Retry</Text>
+          </TouchableOpacity>
         </View>
       )}
       {encryptionStatus === 'error' && (
         <View style={{
           backgroundColor: '#EF4444' + '1A',
           borderTopWidth: 1, borderTopColor: border,
-          paddingHorizontal: 14, paddingVertical: 8,
+          paddingHorizontal: 14, paddingVertical: 10,
+          flexDirection: 'row', alignItems: 'center', gap: 10,
         }}>
-          <Text style={{ color: '#B91C1C', fontSize: 12, fontWeight: '600' }}>
-            ⚠️ Couldn't verify encryption. Messages may be plaintext.
+          <Text style={{ fontSize: 14 }}>⚠️</Text>
+          <Text style={{ flex: 1, color: '#B91C1C', fontSize: 12, fontWeight: '600' }}>
+            Couldn't verify encryption. Messages can't be sent right now.
           </Text>
+          <TouchableOpacity
+            onPress={async () => {
+              if (!recipientId) return;
+              const pk = await getPublicKey(recipientId);
+              if (pk) { setRecipientPubKey(pk); setEncryptionStatus('ready'); }
+            }}
+            style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, backgroundColor: '#B91C1C' }}>
+            <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>Retry</Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -1567,7 +1642,7 @@ export default function ChatRoomScreen({ route, navigation }) {
             <TouchableOpacity
               style={[s.sendBtn, { backgroundColor: accent }]}
               onPress={() => { if (stagedVideos.length > 0) sendStagedVideos(); else sendStagedPhotos(); }}
-              disabled={sending || encryptionStatus === 'resolving'}>
+              disabled={sending || encryptionStatus !== 'ready'}>
               {sending
                 ? <ActivityIndicator color="#000" size="small" />
                 : <Text style={{ color: '#000', fontWeight: '900', fontSize: 20 }}>➤</Text>}
@@ -1641,7 +1716,7 @@ export default function ChatRoomScreen({ route, navigation }) {
                 setScheduleMode(true);
               }}
               delayLongPress={450}
-              disabled={sending || encryptionStatus === 'resolving'}>
+              disabled={sending || encryptionStatus !== 'ready'}>
               {sending
                 ? <ActivityIndicator color="#fff" size="small" />
                 : <Text style={{ color: '#000', fontSize: 18 }}>➤</Text>}
@@ -1651,7 +1726,7 @@ export default function ChatRoomScreen({ route, navigation }) {
               style={[s.sendBtn, { backgroundColor: accent }]}
               onPress={startRecording}
               accessibilityLabel="Record voice note"
-              disabled={sending || encryptionStatus === 'resolving'}>
+              disabled={sending || encryptionStatus !== 'ready'}>
               <Mic size={20} color="#ffffff" strokeWidth={2} />
             </TouchableOpacity>
           )}

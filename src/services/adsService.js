@@ -2,6 +2,26 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const PREMIUM_KEY = 'vaultchat_premium';
 
+// ── Premium-change pub/sub ─────────────────────────────────────
+// Surfaces (theme.js, PremiumCrown isMe mode, header chips) need
+// to react the *moment* a purchase completes — waiting for the
+// next AppState foreground means the gold polish doesn't show up
+// until the user backgrounds the app, which feels broken right
+// after they tap Subscribe. Anything that flips the local premium
+// flag (purchase success, restore, server sync, sign-out) calls
+// `setPremiumUser(value)` which writes the key AND notifies every
+// subscribed listener synchronously.
+const _premiumListeners = new Set();
+export function subscribeToPremium(cb) {
+  _premiumListeners.add(cb);
+  return () => _premiumListeners.delete(cb);
+}
+function _notifyPremium(value) {
+  for (const cb of _premiumListeners) {
+    try { cb(!!value); } catch {}
+  }
+}
+
 const SPONSORED_MESSAGES = [
   {
     id: 'ad_1',
@@ -48,6 +68,10 @@ export const setPremiumUser = async (value) => {
   try {
     await AsyncStorage.setItem(PREMIUM_KEY, value ? 'true' : 'false');
   } catch {}
+  // Fan-out to every subscriber so theme polish, crowns, and any
+  // other premium-aware surface re-render without waiting for an
+  // AppState transition.
+  _notifyPremium(!!value);
 };
 
 export const injectAds = (messages, isPremium, every = 8) => {

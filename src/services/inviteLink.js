@@ -77,16 +77,25 @@ export function parseInviteUrl(raw) {
  * Build the URL for the current user and pop the iOS Share sheet.
  * Returns true if the share dialog opened, false on failure (no
  * handle set yet, share cancelled, etc).
+ *
+ * Options:
+ *   preface — optional one-line lead-in prepended to the message.
+ *             ContactsScreen's "Secure Invite" quick-action passes a
+ *             preface so the recipient sees the E2E promise before
+ *             the link itself.
  */
-export async function shareMyInvite() {
+export async function shareMyInvite(opts = {}) {
   const handle = await getMyHandle();
   if (!handle) return false;
   const name   = await getMyDisplayName();
   const url    = buildInviteUrl({ handle, name });
   if (!url) return false;
+  const preface = typeof opts.preface === 'string' && opts.preface.trim()
+    ? opts.preface.trim() + '\n\n'
+    : '';
   try {
     await Share.share({
-      message: `Add me on VaultChat: ${handle}\n${url}`,
+      message: `${preface}Add me on VaultChat: ${handle}\n${url}`,
       url,
       title: 'My VaultChat Invite',
     });

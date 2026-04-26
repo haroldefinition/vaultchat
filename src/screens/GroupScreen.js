@@ -161,10 +161,18 @@ export default function GroupScreen({ navigation }) {
   const [groupSearch, setGroupSearch] = useState('');
   const [refreshing,  setRefreshing]  = useState(false);
   const [premiumModalVis, setPremiumModalVis] = useState(false);
+  // Pinning groups to the top is a Premium feature — same gating
+  // model as Pinned Chats. We pull the local cached flag on focus
+  // so an upgrade elsewhere lights up immediately on return.
+  const [premium, setPremium] = useState(false);
 
   useEffect(() => {
     loadGroups();
-    const unsub = navigation.addListener('focus', loadGroups);
+    const unsub = navigation.addListener('focus', () => {
+      loadGroups();
+      try { require('../services/iapService').isPremium().then(setPremium); } catch {}
+    });
+    try { require('../services/iapService').isPremium().then(setPremium); } catch {}
     return unsub;
   }, [navigation]);
 
@@ -209,6 +217,14 @@ export default function GroupScreen({ navigation }) {
   const openActionMenu = (group) => { setSelectedGroup(group); setActionModal(true); };
 
   const handlePin = async () => {
+    // Premium gate. Free users see the upsell; allow unpin so users
+    // who downgraded aren't stuck with a frozen pinned group.
+    const willPin = !selectedGroup?.pinned;
+    if (willPin && !premium) {
+      setActionModal(false);
+      setTimeout(() => setPremiumModalVis(true), 250);
+      return;
+    }
     const updated = groups.map(g => g.id === selectedGroup.id ? { ...g, pinned: !g.pinned } : g);
     updated.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
     await saveGroups(updated);
@@ -368,6 +384,9 @@ export default function GroupScreen({ navigation }) {
             <TouchableOpacity style={[s.actionRow, { borderBottomColor: border }]} onPress={handlePin}>
               <Text style={s.actionIcon}>📌</Text>
               <Text style={[s.actionLabel, { color: tx }]}>{selectedGroup?.pinned ? 'Unpin' : 'Pin'}</Text>
+              {!premium && !selectedGroup?.pinned && (
+                <Text style={{ marginLeft: 'auto', fontSize: 14 }}>👑</Text>
+              )}
             </TouchableOpacity>
             <TouchableOpacity style={[s.actionRow, { borderBottomColor: border }]} onPress={handleHideAlerts}>
               <Text style={s.actionIcon}>{selectedGroup?.hideAlerts ? '🔔' : '🔕'}</Text>

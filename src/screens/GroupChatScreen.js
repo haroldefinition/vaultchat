@@ -27,6 +27,7 @@ import PinnedMessagePreview from '../components/PinnedMessagePreview';
 import ContactEditModal from '../components/ContactEditModal';
 import PremiumModal from '../components/PremiumModal';
 import ReportMessageModal from '../components/ReportMessageModal';
+import PremiumCrown from '../components/PremiumCrown';
 import { ResolvedPhotoStack, ResolvedVideoCarousel } from '../components/MediaBubbles';
 import VoiceNoteBubble from '../components/VoiceNoteBubble';
 import ViewOncePhoto from '../components/ViewOncePhoto';
@@ -138,11 +139,15 @@ function Bubble({ item, currentUserId, colors, onFullScreen, onPlay, onLongPress
       if (match.index > last) {
         out.push(<Text key={`t${i}`} style={{ color: baseColor }}>{body.slice(last, match.index)}</Text>);
       }
+      // Render the mention as just the bare name (drop the leading
+      // '@'), styled in the accent color so the highlight still
+      // signals "this is a mention". The underlying message text
+      // keeps the '@' intact so notifications + parsing keep working.
       out.push(
         <Text
           key={`m${i}`}
           style={{ color: mentionColor, fontWeight: '700' }}>
-          {match[0]}
+          {match[0].replace(/^@+/, '')}
         </Text>,
       );
       last = match.index + match[0].length;
@@ -227,7 +232,7 @@ function Bubble({ item, currentUserId, colors, onFullScreen, onPlay, onLongPress
         onPress={() => onTap && onTap(item.id)}
         onLongPress={onLongPress} delayLongPress={450}
         style={[g.msgWrapper, isMe ? g.right : g.left]}>
-        {!isMe && <Text style={[g.senderHandle, { color: accent }]}>@{item.sender_handle || 'member'}</Text>}
+        {!isMe && <Text style={[g.senderHandle, { color: accent }]}>{(item.sender_handle || 'member').replace(/^@+/, '')}</Text>}
         <View style={[
           g.bubble,
           isMedia && g.mediaPad,
@@ -982,10 +987,16 @@ export default function GroupChatScreen({ route, navigation }) {
           }}
           delayLongPress={550}>
           <Text style={[g.hName, { color: tx }]} numberOfLines={1}>{groupName || 'Group'}</Text>
+          {/* Honest sub-line. Group chats are NOT yet end-to-end
+              encrypted (group E2E needs a sender-keys / Megolm-style
+              ratchet — tracked separately). The header used to show a
+              lock that implied E2E in groups too; we now show the
+              member count only and surface the actual security state
+              via the banner below the header. */}
           <Text style={[g.hSub, { color: sub }]}>
-            🔒  {groupMembers.length > 0
+            {groupMembers.length > 0
               ? `${groupMembers.length} ${groupMembers.length === 1 ? 'member' : 'members'}`
-              : 'Encrypted'}
+              : 'Group'}
           </Text>
         </TouchableOpacity>
         {/* Group call launchers — voice + video. Tapping either spins up
@@ -1008,6 +1019,25 @@ export default function GroupChatScreen({ route, navigation }) {
         <TouchableOpacity onPress={leaveGroup} style={{ paddingHorizontal: 8 }}>
           <Text style={{ fontSize: 18, color: sub }}>⋯</Text>
         </TouchableOpacity>
+      </View>
+
+      {/* Group encryption-status banner — group chats don't yet have
+          end-to-end encryption (1:1 chats do, gated hard via the
+          peer-key check in ChatRoomScreen). Surface the truth so
+          users can make an informed call about what they share in
+          a group room. We aim to ship sender-keys group E2E in a
+          follow-up; once that lands this banner becomes the active
+          "encrypted" indicator instead. */}
+      <View style={{
+        backgroundColor: '#F59E0B' + '1A',
+        borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: border,
+        paddingHorizontal: 14, paddingVertical: 8,
+        flexDirection: 'row', alignItems: 'center', gap: 8,
+      }}>
+        <Text style={{ fontSize: 13 }}>⚠️</Text>
+        <Text style={{ flex: 1, color: '#B45309', fontSize: 11, fontWeight: '600' }}>
+          Group messages aren't end-to-end encrypted yet. Avoid sharing sensitive info here for now.
+        </Text>
       </View>
 
       {/* Pinned message banner — uses PinnedMessagePreview which renders
@@ -1055,8 +1085,8 @@ export default function GroupChatScreen({ route, navigation }) {
         }}
         ListEmptyComponent={
           <View style={g.emptyBox}>
-            <Text style={{ fontSize: 40, marginBottom: 10 }}>🔒</Text>
-            <Text style={[g.emptyTx, { color: sub }]}>Messages are end-to-end encrypted.{'\n'}Say hello!</Text>
+            <Text style={{ fontSize: 40, marginBottom: 10 }}>👥</Text>
+            <Text style={[g.emptyTx, { color: sub }]}>No messages yet.{'\n'}Say hello!</Text>
           </View>
         }
       />
@@ -1137,13 +1167,21 @@ export default function GroupChatScreen({ route, navigation }) {
             return (
               <View style={[g.mentionPop, { backgroundColor: card, borderColor: border }]}>
                 {candidates.map((m, i) => {
+                  // The bare handle (no '@') drives both the visible
+                  // label and what we insert into the composer. The
+                  // inserted text still includes '@' so it parses as
+                  // a mention; the visible label drops it because
+                  // display surfaces app-wide are bare-name now.
                   const handle = (m.handle || m.name || 'member').replace(/^@/, '');
-                  const display = m.name && m.name !== handle ? m.name : `@${handle}`;
+                  const display = m.name && m.name !== handle ? m.name : handle;
                   return (
                     <TouchableOpacity
                       key={i}
                       onPress={() => {
-                        // Replace the in-progress '@query' with '@handle ' at the cursor.
+                        // Replace the in-progress '@query' with '@handle ' at
+                        // the cursor — keep the '@' in the inserted text so
+                        // the message renderer + mention notifier still
+                        // recognise it.
                         const atIdx = inputText.lastIndexOf('@');
                         if (atIdx < 0) return;
                         const head = inputText.slice(0, atIdx);
@@ -1153,11 +1191,17 @@ export default function GroupChatScreen({ route, navigation }) {
                       }}
                       style={[g.mentionRow, { borderBottomColor: border }]}>
                       <View style={[g.mentionAvatar, { backgroundColor: accent }]}>
-                        <Text style={{ color: '#fff', fontWeight: '700' }}>{(display || '?')[1 - (display?.startsWith('@') ? 0 : 1)]?.toUpperCase() || (display || '?')[0]?.toUpperCase()}</Text>
+                        <Text style={{ color: '#fff', fontWeight: '700' }}>{(display || '?')[0]?.toUpperCase()}</Text>
                       </View>
                       <View style={{ flex: 1 }}>
-                        <Text style={[g.mentionName, { color: tx }]}>{display}</Text>
-                        <Text style={[g.mentionSub, { color: sub }]}>@{handle}</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <Text style={[g.mentionName, { color: tx }]}>{display}</Text>
+                          <PremiumCrown userId={m.user_id || m.id} phone={m.phone} size={12} />
+                        </View>
+                        {/* Sub-line shows the bare handle so the user
+                            can tell two members with the same display
+                            name apart, without the '@' clutter. */}
+                        <Text style={[g.mentionSub, { color: sub }]}>{handle}</Text>
                       </View>
                     </TouchableOpacity>
                   );

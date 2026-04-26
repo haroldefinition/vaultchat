@@ -36,7 +36,12 @@ export default function NewContactScreen({ route, navigation }) {
     if (!result.canceled && result.assets?.[0]) setPhoto(result.assets[0].uri);
   }
 
-  async function saveContact() {
+  // NOTE: this handler used to be named `saveContact` — same as the
+  // imported service function — which silently shadowed the import
+  // and made the Done button recursively call itself instead of
+  // persisting anything. Renamed to `handleSave` so the call to
+  // `saveContact(contact)` resolves to the contactsSync service.
+  async function handleSave() {
     if (!firstName.trim() && !mobile.trim()) {
       Alert.alert('Required', 'Enter at least a first name or phone number.');
       return;
@@ -56,16 +61,28 @@ export default function NewContactScreen({ route, navigation }) {
       url:       url.trim(),
       notes:     notes.trim(),
     };
-    // Save to AsyncStorage + Supabase via sync service
-    try { await saveContact(contact); } catch {}
+    // Save to AsyncStorage + Supabase via sync service. Surface any
+    // failure so a silent error doesn't look like a successful save.
+    let persisted = false;
+    try {
+      await saveContact(contact);
+      persisted = true;
+    } catch (e) {
+      if (__DEV__) console.warn('saveContact failed:', e?.message);
+    }
+    setLoading(false);
 
-    // Notify caller if a callback was provided
+    if (!persisted) {
+      Alert.alert('Save failed', 'Couldn’t save this contact. Try again in a moment.');
+      return;
+    }
+
+    // Notify caller if a callback was provided.
     if (typeof onSave === 'function') onSave(contact);
 
     Alert.alert('Saved!', `${contact.name} has been added to your contacts.`, [
       { text: 'OK', onPress: () => navigation.goBack() },
     ]);
-    setLoading(false);
   }
 
   const FIELDS = [
@@ -96,7 +113,7 @@ export default function NewContactScreen({ route, navigation }) {
             style={{ paddingHorizontal: 4 }}>
             <Text style={{ fontSize: 20 }}>📷</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={saveContact} disabled={loading} style={s.headerBtn}>
+          <TouchableOpacity onPress={handleSave} disabled={loading} style={s.headerBtn}>
             {loading
               ? <ActivityIndicator color={accent} size="small" />
               : <Text style={[s.doneTx, { color: accent }]}>Done</Text>}

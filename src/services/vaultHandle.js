@@ -15,6 +15,21 @@ import { supabase }  from './supabase';
 
 const LOCAL_KEY = 'vaultchat_handle';
 
+/**
+ * Display formatter — strips a leading '@' so handles render as the
+ * bare name in chat headers, contact rows, mention popups, etc.
+ * The signup flow still accepts the '@' prefix as user input, and
+ * @-mention typing inside chat composers still uses '@handle' to
+ * trigger the autocomplete — only the *display* form is bare.
+ *
+ * Safe on `undefined` / `null` (returns ''), so callers don't need
+ * to null-check before passing.
+ */
+export function displayHandle(h) {
+  if (typeof h !== 'string') return '';
+  return h.replace(/^@+/, '');
+}
+
 // Strip the leading '@' and lowercase. Returns null for unusable input.
 function normalize(h) {
   if (typeof h !== 'string') return null;

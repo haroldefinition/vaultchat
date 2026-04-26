@@ -8,12 +8,13 @@ import { Swipeable } from 'react-native-gesture-handler';
 import ContactEditModal from '../components/ContactEditModal';
 import { useTheme } from '../services/theme';
 import { useUnread } from '../services/unreadBadge';
-import { getMyHandle } from '../services/vaultHandle';
+import { getMyHandle, displayHandle } from '../services/vaultHandle';
 import { taptic, longPressFeedback } from '../services/haptics';
 import { requestContactsPermission, syncContacts } from '../services/contacts';
 import { listFolders, subscribe as subscribeFolders } from '../services/folders';
 import { isPremiumUser } from '../services/adsService';
 import PremiumModal from '../components/PremiumModal';
+import PremiumCrown from '../components/PremiumCrown';
 import {
   subscribe as subscribeVault,
   isUnlocked as isVaultUnlocked,
@@ -144,8 +145,22 @@ export default function ChatsScreen({ navigation }) {
     return false;
   }
 
+  // ── Pin cap ─────────────────────────────────────────────
+  // Free users can pin up to FREE_PIN_CAP chats; premium users get
+  // unlimited (one of the headline subscription benefits). Unpin is
+  // always free so a downgrade doesn't leave anyone stuck.
+  const FREE_PIN_CAP = 3;
   async function togglePinAt(item) {
     taptic();
+    const willPin = !item.pinned;
+    if (willPin && !premium) {
+      const currentlyPinned = chats.filter(c => c.pinned && !sameChat(c, item)).length;
+      if (currentlyPinned >= FREE_PIN_CAP) {
+        openSwipeRef.current?.close?.();
+        setPremiumModalVis(true);
+        return;
+      }
+    }
     const updated = chats
       .map(c => sameChat(c, item) ? { ...c, pinned: !c.pinned } : c)
       .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
@@ -178,6 +193,17 @@ export default function ChatsScreen({ navigation }) {
   // ── Legacy modal-driven versions (still used by long-press) ──
 
   async function pinChat() {
+    // Mirror the swipe-pin gate so the long-press menu also enforces
+    // the free 3-pin cap. Premium users have unlimited pins.
+    const willPin = !selected?.pinned;
+    if (willPin && !premium) {
+      const currentlyPinned = chats.filter(c => c.pinned && c.id !== selected.id).length;
+      if (currentlyPinned >= FREE_PIN_CAP) {
+        setActionModal(false);
+        setTimeout(() => setPremiumModalVis(true), 200);
+        return;
+      }
+    }
     const updated = chats
       .map(c => c.id === selected.id ? { ...c, pinned: !c.pinned } : c)
       .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
@@ -371,24 +397,45 @@ export default function ChatsScreen({ navigation }) {
     );
   };
 
+  // Premium polish — when the user is a subscriber, the header band
+  // adopts the deep-purple gradient backdrop from Harold's mockup
+  // ("VaultChat 👑" hero), the title goes white-on-purple, and the
+  // header buttons swap to translucent-white tiles. Free users keep
+  // the existing flat header so the upgrade visibly changes the app.
+  const headerBg     = premium ? '#5B2FB8' : bg;
+  const headerTitleC = premium ? '#FFFFFF' : (vaultUnlocked ? '#10B981' : accent);
+  const headerHandleC= premium ? 'rgba(255,255,255,0.7)' : '#5856d6';
+  const headerBtnBg  = premium ? 'rgba(255,255,255,0.18)' : accent + '22';
+  const headerBtnBd  = premium ? 'rgba(255,255,255,0.30)' : accent + '55';
+  const headerIconC  = premium ? '#FFFFFF' : accent;
+
   return (
     <View style={[s.container, { backgroundColor: bg }]}>
       {/* Header */}
-      <View style={[s.header, { borderBottomColor: border }]}>
+      <View style={[s.header, { backgroundColor: headerBg, borderBottomColor: premium ? 'transparent' : border }]}>
         <TouchableOpacity onLongPress={onTitleLongPress} delayLongPress={500} activeOpacity={1}>
-          <Text style={[s.title, { color: vaultUnlocked ? '#10B981' : accent }]}>
-            {vaultUnlocked ? '🛡️ Vault' : 'Chats'}
-          </Text>
-          {myHandle ? <Text style={[s.handle, { color: '#5856d6' }]}>{myHandle}</Text> : null}
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <Text style={[s.title, { color: headerTitleC }]}>
+              {vaultUnlocked ? '🛡️ Vault' : 'Chats'}
+            </Text>
+            {/* Crown next to MY title when I'm premium — matches the
+                "VaultChat 👑" branding from the mockup. Only renders
+                for paying users so the crown stays meaningful. We
+                pass the parent's tracked `premium` state directly so
+                the crown lights up the moment a purchase completes
+                (PremiumModal.onUpgraded refreshes it). */}
+            <PremiumCrown isPremium={premium} size={20} />
+          </View>
+          {myHandle ? <Text style={[s.handle, { color: headerHandleC }]}>{displayHandle(myHandle)}</Text> : null}
         </TouchableOpacity>
         <TouchableOpacity
-          style={[s.iconBtn, { backgroundColor: accent + '22', borderColor: accent + '55' }]}
+          style={[s.iconBtn, { backgroundColor: headerBtnBg, borderColor: headerBtnBd }]}
           onPress={() => { taptic(); navigation.navigate('Contacts'); }}>
           <Text style={{ fontSize: 15 }}>👤</Text>
-          <Text style={[s.iconBtnPlus, { color: accent }]}>+</Text>
+          <Text style={[s.iconBtnPlus, { color: headerIconC }]}>+</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[s.iconBtn, { backgroundColor: accent + '22', borderColor: accent + '55' }]}
+          style={[s.iconBtn, { backgroundColor: headerBtnBg, borderColor: headerBtnBd }]}
           onPress={() => { taptic(); navigation.navigate('NewMessage'); }}>
           <Text style={{ fontSize: 18 }}>✏️</Text>
         </TouchableOpacity>
@@ -402,11 +449,43 @@ export default function ChatsScreen({ navigation }) {
       <View style={[s.folderRow, { borderBottomColor: border }]}>
         <FlatList
           horizontal
-          data={[{ id: null, name: 'All', emoji: null }, ...folders, { id: '__manage', name: 'Manage', emoji: '⚙️' }]}
+          data={[{ id: null, name: 'All', emoji: null }, { id: '__groups', name: 'Groups', emoji: '👥' }, ...folders, { id: '__vault', name: 'Vault', emoji: '🔒' }, { id: '__manage', name: 'Manage', emoji: '⚙️' }]}
           keyExtractor={f => f.id || 'all'}
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={{ paddingHorizontal: 16, gap: 8, alignItems: 'center' }}
           renderItem={({ item }) => {
+            if (item.id === '__groups') {
+              // Groups shortcut — jumps to the Groups bottom tab.
+              // Lives next to All so users can pivot between 1:1
+              // chats and group chats without diving into the tab
+              // bar at the bottom of the screen.
+              return (
+                <TouchableOpacity
+                  onPress={() => { taptic(); navigation.navigate('Groups'); }}
+                  style={[s.folderPill, { backgroundColor: inputBg, borderColor: border }]}>
+                  <Text style={{ fontSize: 14 }}>👥</Text>
+                  <Text style={{ color: sub, fontSize: 13, fontWeight: '600' }}>Groups</Text>
+                </TouchableOpacity>
+              );
+            }
+            if (item.id === '__vault') {
+              // Vault pill — premium gated. Tapping when non-premium opens
+              // the upgrade modal so the lock icon serves as a soft upsell;
+              // premium users get routed straight to the dashboard.
+              return (
+                <TouchableOpacity
+                  onPress={() => {
+                    taptic();
+                    if (!premium) { setPremiumModalVis(true); return; }
+                    navigation.navigate('Vault');
+                  }}
+                  style={[s.folderPill, { backgroundColor: inputBg, borderColor: border }]}>
+                  <Text style={{ fontSize: 14 }}>🔒</Text>
+                  <Text style={{ color: sub, fontSize: 13, fontWeight: '600' }}>Vault</Text>
+                  {!premium && <Text style={{ color: accent, fontSize: 11 }}>👑</Text>}
+                </TouchableOpacity>
+              );
+            }
             if (item.id === '__manage') {
               return (
                 <TouchableOpacity
@@ -547,9 +626,10 @@ export default function ChatsScreen({ navigation }) {
                   <View style={s.nameRow}>
                     {item.pinned && <Text style={s.pin}>📌</Text>}
                     <Text style={[s.name, { color: tx }]}>{item.name || 'Unknown'}</Text>
+                    <PremiumCrown phone={item.phone} size={13} />
                   </View>
                   {item.handle
-                    ? <Text style={[s.subHandle, { color: '#5856d6' }]}>{item.handle}</Text>
+                    ? <Text style={[s.subHandle, { color: '#5856d6' }]}>{displayHandle(item.handle)}</Text>
                     : null}
                   <Text style={[s.lastMsg, { color: sub }]} numberOfLines={1}>
                     {item.lastMessage || 'Tap to chat'}

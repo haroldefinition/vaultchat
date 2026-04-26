@@ -260,7 +260,11 @@ function ZoomableRemoteVideo({ streamURL, style, RTCViewComponent }) {
 }
 
 export default function ActiveCallScreen({ route, navigation }) {
-  const { bg, card, tx, sub, border, inputBg, accent } = useTheme();
+  // isPremium + gold come from the premium polish in theme.js. They
+  // tint the call screen ("End-to-end Encrypted 👑" pill, gold ring)
+  // and switch the dispersing-dots from a flat line into the curved
+  // arc shape Harold approved for premium users.
+  const { bg, card, tx, sub, border, inputBg, accent, isPremium, gold } = useTheme();
   const {
     mode, callId, roomId, myUserId, peerUserId,
     recipientName, recipientPhone, callType,
@@ -584,7 +588,9 @@ export default function ActiveCallScreen({ route, navigation }) {
       return;
     }
 
-    const peerName   = peer.display_name || (peer.vault_handle ? `@${peer.vault_handle}` : peer.phone || 'VaultChat User');
+    // Peer name shown in the call screen — fall back to the bare
+    // handle (no '@') so it matches every other display surface.
+    const peerName   = peer.display_name || peer.vault_handle || peer.phone || 'VaultChat User';
 
     try {
       // Already a conference → just invite.
@@ -789,8 +795,17 @@ export default function ActiveCallScreen({ route, navigation }) {
       ) : (
         <View style={s.top}>
           <View style={s.avatarStage}>
-            {/* Left disperse waveform dots */}
-            <DisperseDots accent={accent} side="left"  active={status !== 'Connected'} />
+            {/* Left disperse waveform dots — faster cadence while
+                ringing so the energy reads as "outgoing call in
+                progress"; the calmer cadence is reserved for the
+                Connecting handshake. */}
+            <DisperseDots
+              accent={accent}
+              side="left"
+              active={status !== 'Connected'}
+              speed={status === 'Ringing...' ? 'ringing' : 'calm'}
+              shape={isPremium ? 'arc' : 'line'}
+            />
             {/* Glow ring + avatar (centered) */}
             <Animated.View
               style={[
@@ -803,7 +818,13 @@ export default function ActiveCallScreen({ route, navigation }) {
               </View>
             </Animated.View>
             {/* Right disperse waveform dots */}
-            <DisperseDots accent={accent} side="right" active={status !== 'Connected'} />
+            <DisperseDots
+              accent={accent}
+              side="right"
+              active={status !== 'Connected'}
+              speed={status === 'Ringing...' ? 'ringing' : 'calm'}
+              shape={isPremium ? 'arc' : 'line'}
+            />
           </View>
 
           <Text style={[s.name, { color: tx }]}>{recipientName || 'Unknown'}</Text>

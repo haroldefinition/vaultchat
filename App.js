@@ -59,11 +59,13 @@ import AIAssistantScreen   from './src/screens/AIAssistantScreen';
 import NearbyScreen        from './src/screens/NearbyScreen';
 import ContactViewScreen   from './src/screens/ContactViewScreen';
 import ContactsScreen      from './src/screens/ContactsScreen';
+import AddContactScreen    from './src/screens/AddContactScreen';
 import IncomingCallScreen  from './src/screens/IncomingCallScreen';
 import QRContactScreen     from './src/screens/QRContactScreen';
 import FoldersScreen       from './src/screens/FoldersScreen';
 import BlockedUsersScreen  from './src/screens/BlockedUsersScreen';
 import ThemePickerScreen   from './src/screens/ThemePickerScreen';
+import VaultScreen         from './src/screens/VaultScreen';
 
 // ── Premium Modal (accessed everywhere) ──────────────────────
 import PremiumModal from './src/components/PremiumModal';
@@ -77,6 +79,10 @@ function MoreScreen({ navigation }) {
   const items = [
     { icon:'🏪', label:'Business',        screen:'Business',      desc:'Dashboard, inbox & plans' },
     { icon:'🤖', label:'AI Assistant',    screen:'AIAssistant',   desc:'Private, on-device AI' },
+    // Discover used to be a top-level bottom tab. With the tab-bar
+    // refresh it lives here in the overflow page so we keep the
+    // surface accessible without crowding the bottom dock.
+    { icon:'🔍', label:'Discover',        screen:'Discover',      desc:'Channels, communities, trending' },
     { icon:'📡', label:'Nearby',          screen:'Nearby',        desc:'Offline mesh messaging' },
     { icon:'🔒', label:'Privacy Policy',     screen:'PrivacyPolicy',      desc:'How we protect you' },
     { icon:'📋', label:'Terms of Service',   screen:'TermsOfService',     desc:'Usage terms & conditions' },
@@ -85,8 +91,19 @@ function MoreScreen({ navigation }) {
   ];
   return (
     <View style={[m.container,{backgroundColor:bg}]}>
+      {/* Header now includes a back chevron — MoreScreen used to be
+          a tab root, but post-refresh it's reached via a Settings
+          row push, so users need a way back. canGoBack guard keeps
+          the chevron hidden if it ever lands as a tab root again. */}
       <View style={[m.header,{borderBottomColor:border,backgroundColor:bg}]}>
-        <Text style={[m.title,{color:tx}]}>More</Text>
+        {navigation.canGoBack && navigation.canGoBack() ? (
+          <TouchableOpacity onPress={() => navigation.goBack()} style={m.backBtn}>
+            <Text style={[m.backTx,{color:accent}]}>‹</Text>
+          </TouchableOpacity>
+        ) : null}
+        <Text style={[m.title,{color:tx,flex:1,textAlign:navigation.canGoBack?.() ? 'center' : 'left'}]}>More</Text>
+        {/* Spacer so the centered title stays optically balanced. */}
+        {navigation.canGoBack && navigation.canGoBack() ? <View style={m.backBtn} /> : null}
       </View>
       <View style={{paddingHorizontal:16,paddingTop:16,gap:10}}>
         {items.map(item => (
@@ -111,7 +128,9 @@ function MoreScreen({ navigation }) {
 
 const m = StyleSheet.create({
   container:{flex:1},
-  header:   {paddingHorizontal:20,paddingTop:60,paddingBottom:14,borderBottomWidth:StyleSheet.hairlineWidth},
+  header:   {flexDirection:'row',alignItems:'center',paddingHorizontal:14,paddingTop:60,paddingBottom:14,borderBottomWidth:StyleSheet.hairlineWidth},
+  backBtn:  {width:36,height:36,alignItems:'center',justifyContent:'center'},
+  backTx:   {fontSize:30,fontWeight:'bold'},
   title:    {fontSize:28,fontWeight:'800'},
   row:      {flexDirection:'row',alignItems:'center',borderRadius:18,padding:16,borderWidth:1},
   iconWrap: {width:46,height:46,borderRadius:14,alignItems:'center',justifyContent:'center'},
@@ -158,19 +177,28 @@ function MainTabs() {
           ),
         };
       }} />
-      <Tab.Screen name="Calls"    component={CallScreen}    options={{ tabBarIcon:({focused})=><Text style={{fontSize:26,opacity:focused?1:0.85}}>📞</Text> }}/>
-      <Tab.Screen name="Groups"   component={GroupScreen}   options={{ tabBarIcon:({focused})=><Text style={{fontSize:26,opacity:focused?1:0.85}}>👥</Text> }}/>
-      <Tab.Screen name="Discover" component={DiscoverScreen}options={{ tabBarIcon:({focused})=><Text style={{fontSize:26,opacity:focused?1:0.85}}>🔍</Text> }}/>
-      <Tab.Screen name="More"     component={MoreScreen}    options={{
-        // Same compact glyph as the other tab icons (fontSize 26), but
-        // tinted with the theme accent so it pops against the dark
-        // tab-bar background instead of being a near-invisible thin
-        // gray character. Tracks active/inactive via opacity like the
-        // emoji icons do.
-        tabBarIcon:({focused})=>(
-          <Text style={{ fontSize: 26, color: accent, opacity: focused ? 1 : 0.85 }}>⋯</Text>
-        ),
-      }}/>
+      <Tab.Screen name="Calls"    component={CallScreen}     options={{ tabBarIcon:({focused})=><Text style={{fontSize:26,opacity:focused?1:0.85}}>📞</Text> }}/>
+      {/* Contacts is now a top-level bottom tab per the design refresh
+          (was previously a Stack screen pushed from the Chats header).
+          The Stack registration further down still lives so deep links
+          like ContactView → back continue to land on the same screen. */}
+      <Tab.Screen name="ContactsTab" component={ContactsScreen}
+        options={{
+          tabBarLabel: 'Contacts',
+          tabBarIcon:({focused})=><Text style={{fontSize:26,opacity:focused?1:0.85}}>👤</Text>,
+        }}/>
+      <Tab.Screen name="Groups"   component={GroupScreen}    options={{ tabBarIcon:({focused})=><Text style={{fontSize:26,opacity:focused?1:0.85}}>👥</Text> }}/>
+      {/* "Settings" replaces the old "More" tab. The MoreScreen overflow
+          (Business, AI Assistant, Nearby, Discover, legal pages) is now
+          reachable from a row inside SettingsScreen, so this tab leads
+          straight to the user's Settings instead of an interstitial. */}
+      <Tab.Screen name="SettingsTab" component={SettingsScreen}
+        options={{
+          tabBarLabel: 'Settings',
+          tabBarIcon:({focused})=>(
+            <Text style={{ fontSize: 26, opacity: focused ? 1 : 0.85 }}>⚙️</Text>
+          ),
+        }}/>
     </Tab.Navigator>
   );
 }
@@ -411,12 +439,20 @@ export default function App() {
               <Stack.Screen name="Trending"      component={TrendingScreen} />
               <Stack.Screen name="AIAssistant"   component={AIAssistantScreen} />
               <Stack.Screen name="Nearby"        component={NearbyScreen} />
+              {/* Discover lives in MoreScreen now (was a bottom tab),
+                  so it needs a Stack registration to be navigable. */}
+              <Stack.Screen name="Discover"      component={DiscoverScreen} />
+              {/* MoreScreen reachable from a row in SettingsScreen so the
+                  overflow items remain accessible after the tab swap. */}
+              <Stack.Screen name="More"          component={MoreScreen} />
               <Stack.Screen name="ContactView"   component={ContactViewScreen} />
               <Stack.Screen name="Contacts"      component={ContactsScreen} />
+              <Stack.Screen name="AddContact"    component={AddContactScreen} options={{ animation:'slide_from_bottom', presentation:'modal' }} />
               <Stack.Screen name="QRContact"     component={QRContactScreen} options={{ animation:'slide_from_bottom' }} />
               <Stack.Screen name="Folders"       component={FoldersScreen} />
               <Stack.Screen name="BlockedUsers"  component={BlockedUsersScreen} />
               <Stack.Screen name="ThemePicker"   component={ThemePickerScreen} />
+              <Stack.Screen name="Vault"         component={VaultScreen} />
               <Stack.Screen name="Premium"       component={({navigation}) => {
                 const [vis,setVis] = useState(true);
                 return <PremiumModal visible={vis} onClose={() => navigation.goBack()} onUpgraded={() => navigation.goBack()} />;

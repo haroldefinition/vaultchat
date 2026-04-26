@@ -143,13 +143,29 @@ export default function AddParticipantModal({ onClose, onAddUser, theme }) {
         ))}
       </View>
 
-      {/* Green add-to-call button */}
-      <TouchableOpacity
-        style={[s.callBtn, { opacity: canSubmit ? 1 : 0.4 }]}
-        onPress={submit}
-        disabled={!canSubmit}>
-        <Text style={s.callIcon}>➕</Text>
-      </TouchableOpacity>
+      {/* Action row — backspace ⌫ sits to the right of the green
+          add-to-call button, mirroring the iOS Phone app. The
+          left-side spacer keeps the green button centered when no
+          backspace is showing (input is empty). */}
+      <View style={s.actionRow}>
+        <View style={s.actionSlot} />
+        <TouchableOpacity
+          style={[s.callBtn, { opacity: canSubmit ? 1 : 0.4 }]}
+          onPress={submit}
+          disabled={!canSubmit}>
+          <Text style={s.callIcon}>➕</Text>
+        </TouchableOpacity>
+        <View style={s.actionSlot}>
+          {input.length > 0 && (
+            <TouchableOpacity
+              onPress={backspace}
+              style={[s.backspaceBtn, { backgroundColor: inputBg }]}
+              accessibilityLabel="Backspace">
+              <Text style={[s.backspaceIcon, { color: tx }]}>⌫</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
     </View>
   );
 }
@@ -175,9 +191,21 @@ const s = StyleSheet.create({
   keyDigit:   { fontSize: 28, fontWeight: '400' },
   keyLetters: { fontSize: 10, marginTop: -2, letterSpacing: 1 },
   callBtn:    {
-    alignSelf: 'center', marginTop: 20, marginBottom: 40,
     width: 70, height: 70, borderRadius: 35,
     backgroundColor: '#34C759', alignItems: 'center', justifyContent: 'center',
   },
   callIcon:   { fontSize: 32, color: '#fff' },
+  // Action row holds the green call button centered with backspace
+  // to its right and a matching empty slot on the left so the
+  // green button stays optically centered.
+  actionRow:  {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    paddingHorizontal: 30, marginTop: 20, marginBottom: 40, gap: 24,
+  },
+  actionSlot: { width: 56, height: 56, alignItems: 'center', justifyContent: 'center' },
+  backspaceBtn: {
+    width: 56, height: 56, borderRadius: 28,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  backspaceIcon: { fontSize: 24 },
 });

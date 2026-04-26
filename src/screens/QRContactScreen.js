@@ -155,7 +155,10 @@ function MyCodeTab({ theme }) {
         />
       </View>
 
-      <Text style={[s.handleBig, { color: accent }]}>{handle.startsWith('@') ? handle : `@${handle}`}</Text>
+      {/* Show the bare handle (no '@'). Display surfaces app-wide
+          drop the '@' — only signup entry and live mention typing
+          carry it. */}
+      <Text style={[s.handleBig, { color: accent }]}>{handle.replace(/^@+/, '')}</Text>
       {!!name && <Text style={[s.nameSmall, { color: sub }]}>{name}</Text>}
 
       <Text style={[s.tip, { color: sub }]}>
@@ -214,7 +217,10 @@ function ScanTab({ theme, navigation }) {
   function startChat() {
     if (!matched?.profile) return;
     const p = matched.profile;
-    const displayName = p.display_name || matched.hintName || (p.vault_handle ? `@${p.vault_handle}` : 'VaultChat User');
+    // Display name fallback uses the bare handle (no '@') so the
+    // chat header matches the rest of the app's display surfaces.
+    // The actual @-form is reserved for signup entry + mention typing.
+    const displayName = p.display_name || matched.hintName || p.vault_handle || 'VaultChat User';
     // NewMessageScreen reads `selectedContact: { handle, phone, name }` —
     // keep that shape exactly so the "To:" field prefills correctly and
     // the existing handle-resolution path finds the profile.
@@ -301,11 +307,15 @@ function ScanTab({ theme, navigation }) {
                     </Text>
                   </View>
                   <View style={{ flex: 1 }}>
+                    {/* Name = bare display label; sub-line = bare handle.
+                        The '@' symbol now only appears in signup entry
+                        and live mention typing, never as a passive
+                        display ornament. */}
                     <Text style={{ color: tx, fontWeight: '700', fontSize: 17 }}>
-                      {matched.profile.display_name || matched.hintName || `@${matched.handle}`}
+                      {matched.profile.display_name || matched.hintName || matched.handle}
                     </Text>
                     <Text style={{ color: sub, fontSize: 13 }}>
-                      @{matched.profile.vault_handle || matched.handle}
+                      {matched.profile.vault_handle || matched.handle}
                     </Text>
                   </View>
                 </View>

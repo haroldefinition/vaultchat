@@ -516,7 +516,7 @@ export default function SettingsScreen({ navigation }) {
               // Show up to 6 names by default, then "and N more" so the
               // alert stays readable even with a big match list. Full
               // list cached at vaultchat_friends for future surfaces.
-              const named = friends.map(f => f.contact_name || f.display_name || (f.vault_handle ? `@${f.vault_handle}` : 'Friend'));
+              const named = friends.map(f => f.contact_name || f.display_name || f.vault_handle || 'Friend');
               const preview = named.slice(0, 6).join('\n• ');
               const more    = named.length > 6 ? `\n…and ${named.length - 6} more` : '';
               Alert.alert(
@@ -567,6 +567,12 @@ export default function SettingsScreen({ navigation }) {
               label="Vault PIN"
               subText={vaultPinSet ? 'Set — long-press Chats title to unlock' : 'Not set'}
               onPress={() => { setPinType('vault'); setPinInput(''); setPinModal(true); }}
+            />
+            <Row
+              icon="🔒"
+              label="Vault"
+              subText="View your vaulted chats, files, and media · Premium 👑"
+              onPress={() => navigation.navigate('Vault')}
             />
             <Row
               icon="🚫"
@@ -846,6 +852,13 @@ export default function SettingsScreen({ navigation }) {
         <View style={[st.categoryCard, { backgroundColor: card, borderColor: border, marginTop: 12 }]}>
           <CatRow icon="❓" label="Help & Support"   onPress={() => setPage('help')}         tx={tx} sub={sub} border={border} accent={accent} />
           <CatRow icon="ℹ️" label="About VaultChat"  onPress={() => setPage('about')}        tx={tx} sub={sub} border={border} accent={accent} last />
+        </View>
+
+        {/* More — overflow page that holds Discover, Business, AI Assistant,
+            Nearby, and the legal docs. Lives here now that the bottom-tab
+            "More" was replaced by a direct Settings tab. */}
+        <View style={[st.categoryCard, { backgroundColor: card, borderColor: border, marginTop: 12 }]}>
+          <CatRow icon="⋯"  label="More"             onPress={() => navigation.navigate('More')}     tx={tx} sub={sub} border={border} accent={accent} last />
         </View>
 
         <TouchableOpacity style={st.signOutBtn} onPress={signOut}>

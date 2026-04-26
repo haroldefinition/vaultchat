@@ -228,7 +228,10 @@ export default function NewMessageScreen({ navigation, route }) {
     // so calls and chats in this room agree on the id on both sides.
     const roomId        = hashPair(myUserId, peer.id);
     const peerUserId    = peer.id;
-    const peerHandle    = peer.vault_handle ? `@${peer.vault_handle}` : '';
+    // Display fallback uses the bare handle (no '@') so chat headers
+    // and contact lists stay consistent with the rest of the app —
+    // '@' only appears when the user is mid-typing a mention.
+    const peerHandle    = peer.vault_handle || '';
     const peerDisplay   = selectedName || peer.display_name || peerHandle || peer.phone || 'VaultChat User';
     const peerPhone     = peer.phone || null;
 

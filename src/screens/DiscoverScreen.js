@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, TextInput, Alert, FlatList, Linking } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../services/theme';
+import { isPremiumUser } from '../services/adsService';
 
 const FEATURED = [
   { id: 'f1', tag: 'UPGRADE',     color: '#00ffa3', title: 'Go Premium', sub: 'Remove ads · Priority calls · Full encryption shield', action: 'premium' },
@@ -32,12 +33,25 @@ export default function DiscoverScreen({ navigation }) {
   const [adName,    setAdName]    = useState('');
   const [adMsg,     setAdMsg]     = useState('');
   const [adUrl,     setAdUrl]     = useState('');
+  // Premium gate — paying users skip the SPONSORED rotation entirely
+  // ("Remove all ads" benefit). Refreshed on focus so an upgrade
+  // takes effect immediately.
+  const [premium,   setPremium]   = useState(false);
 
   useEffect(() => {
     loadUserChannels();
-    const t = setInterval(() => setFeatIdx(i => (i + 1) % FEATURED.length), 4000);
-    return () => clearInterval(t);
-  }, []);
+    isPremiumUser().then(setPremium);
+    const focusUnsub = navigation?.addListener?.('focus', () => isPremiumUser().then(setPremium));
+    const t = setInterval(() => setFeatIdx(i => (i + 1) % Math.max(1, visibleFeatured.length)), 4000);
+    return () => { clearInterval(t); try { focusUnsub?.(); } catch {} };
+  }, [navigation]);
+
+  // Featured rotation visible to the user — premium users see the
+  // non-sponsored entries only (filters out anything tagged
+  // SPONSORED so the carousel skips ads automatically).
+  const visibleFeatured = premium
+    ? FEATURED.filter(f => f.tag !== 'SPONSORED')
+    : FEATURED;
 
   async function loadUserChannels() {
     const raw = await AsyncStorage.getItem('vaultchat_user_channels');
@@ -62,7 +76,9 @@ export default function DiscoverScreen({ navigation }) {
     setAdModal(false); setAdName(''); setAdMsg(''); setAdUrl('');
   }
 
-  const feat = FEATURED[featIdx];
+  // Use the premium-filtered list so paying users never see a
+  // sponsored card flash by during the rotation.
+  const feat = visibleFeatured[featIdx % visibleFeatured.length];
   const filtered = channels.filter(c =>
     (cat === 'All' || c.cat === cat) &&
     (c.name.toLowerCase().includes(search.toLowerCase()) || c.desc.toLowerCase().includes(search.toLowerCase()))
@@ -71,8 +87,15 @@ export default function DiscoverScreen({ navigation }) {
 
   return (
     <View style={[s.container, { backgroundColor: bg }]}>
-      {/* Header */}
+      {/* Header — back chevron added for the Stack-push entry path
+          (Discover used to be a tab root; canGoBack guard keeps the
+          chevron hidden if it ever lands as a tab again). */}
       <View style={[s.header, { backgroundColor: card, borderBottomColor: border }]}>
+        {navigation.canGoBack && navigation.canGoBack() ? (
+          <TouchableOpacity onPress={() => navigation.goBack()} style={s.backBtn}>
+            <Text style={[s.backTx, { color: accent }]}>‹</Text>
+          </TouchableOpacity>
+        ) : null}
         <Text style={[s.headerTitle, { color: tx }]}>Discover</Text>
         <TouchableOpacity style={[s.offersBtn, { backgroundColor: accent }]} onPress={() => navigation.navigate('OfferInbox')}>
           <Text style={{ color: '#000', fontWeight: '800', fontSize: 13 }}>🎁 Offers</Text>
@@ -97,7 +120,7 @@ export default function DiscoverScreen({ navigation }) {
             </Text>
           </TouchableOpacity>
           <View style={s.dots}>
-            {FEATURED.map((_, i) => <View key={i} style={[s.dot, { backgroundColor: i===featIdx ? accent : border }]} />)}
+            {visibleFeatured.map((_, i) => <View key={i} style={[s.dot, { backgroundColor: i===featIdx % Math.max(1, visibleFeatured.length) ? accent : border }]} />)}
           </View>
         </View>
 
@@ -202,8 +225,10 @@ export default function DiscoverScreen({ navigation }) {
 
 const s = StyleSheet.create({
   container:     { flex: 1 },
-  header:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 56, paddingBottom: 12, borderBottomWidth: 1 },
-  headerTitle:   { fontSize: 24, fontWeight: '800' },
+  header:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, borderBottomWidth: 1, gap: 8 },
+  backBtn:       { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  backTx:        { fontSize: 30, fontWeight: 'bold' },
+  headerTitle:   { flex: 1, fontSize: 24, fontWeight: '800' },
   offersBtn:     { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 16 },
   featCard:      { margin: 16, borderRadius: 20, padding: 20, borderWidth: 1 },
   featTag:       { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, marginBottom: 10 },

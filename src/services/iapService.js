@@ -67,7 +67,17 @@ export function onPremiumChange(cb) {
 }
 
 async function _setPremiumLocally(value) {
-  try { await AsyncStorage.setItem(PREMIUM_KEY, value ? 'true' : 'false'); } catch {}
+  // Route through adsService.setPremiumUser so every subscribed
+  // surface (theme.js, header crowns, gold-tinted hero cards) gets
+  // notified the moment the flag flips. The legacy single-listener
+  // _onPremiumChange callback is preserved for any caller that hasn't
+  // migrated to the pub/sub yet.
+  try {
+    const { setPremiumUser } = require('./adsService');
+    await setPremiumUser(!!value);
+  } catch {
+    try { await AsyncStorage.setItem(PREMIUM_KEY, value ? 'true' : 'false'); } catch {}
+  }
   if (_onPremiumChange) { try { _onPremiumChange(!!value); } catch {} }
 }
 
@@ -100,7 +110,12 @@ export async function initIAP() {
   // until they're explicitly finished, which would cause the user to
   // see a "purchase complete" prompt every launch.
   if (Platform.OS === 'ios') {
-    try { await RNIap.clearTransactionIOS(); } catch {}
+    // v15 renamed clearTransactionIOS → clearTransactionsIOS (plural).
+    // Try both so this keeps working on either version.
+    try {
+      if (typeof RNIap.clearTransactionsIOS === 'function') await RNIap.clearTransactionsIOS();
+      else if (typeof RNIap.clearTransactionIOS === 'function') await RNIap.clearTransactionIOS();
+    } catch {}
   }
 
   _purchaseSub = RNIap.purchaseUpdatedListener(_onPurchaseUpdated);
@@ -145,13 +160,44 @@ export async function purchase(productId) {
   if (!RNIap) throw new Error('In-app purchases are not available on this build.');
   if (!_initialized) await initIAP();
   if (!productId) throw new Error('productId required');
+
+  // ── Version-tolerant API call ─────────────────────────────
+  // react-native-iap v15 renamed `requestSubscription` to
+  // `requestPurchase` and changed the parameter shape from
+  // { sku: 'x' } to { skus: ['x'] } (with a `type: 'subs'` hint
+  // on Android and a nested `request: { ios, android }` object on
+  // newer minors). v12 still uses `requestSubscription({ sku })`.
+  //
+  // We detect what the installed version exports and call the
+  // right shape, so the same client code works on v12, v13, v14,
+  // and v15 without further changes. This fixes the
+  // "RNIap.requestSubscription is not a function" crash on v15.
   try {
-    if (Platform.OS === 'ios') {
+    if (typeof RNIap.requestSubscription === 'function') {
+      // v12-v14 path — single sku.
       await RNIap.requestSubscription({ sku: productId });
+    } else if (typeof RNIap.requestPurchase === 'function') {
+      // v15+ path — unified call, subscriptions take a `subs` type.
+      // We try the most permissive shape first and fall back if the
+      // installed minor needs the nested `request` envelope.
+      try {
+        await RNIap.requestPurchase({
+          sku: productId,
+          skus: [productId],
+          type: 'subs',
+          subscriptionOffers: [],
+        });
+      } catch (innerErr) {
+        // Newer v15 minors expect the platform-split envelope.
+        await RNIap.requestPurchase({
+          request: Platform.OS === 'ios'
+            ? { sku: productId }
+            : { skus: [productId], subscriptionOffers: [] },
+          type: 'subs',
+        });
+      }
     } else {
-      // Android requires the previous offer token for upgrades; we
-      // keep it simple and pass just the SKU — StoreKit-equivalent.
-      await RNIap.requestSubscription({ sku: productId });
+      throw new Error('react-native-iap is missing requestPurchase / requestSubscription. Update the native module and rebuild.');
     }
     return true;
   } catch (e) {

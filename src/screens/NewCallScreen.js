@@ -8,6 +8,7 @@ import { useTheme } from '../services/theme';
 import { requestContactsPermission, syncContacts, getCachedContacts } from '../services/contacts';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { placeCall } from '../services/placeCall';
+import { displayHandle } from '../services/vaultHandle';
 
 // ── Create Contact Modal ───────────────────────────────────────
 function CreateContactModal({ visible, onClose, onSave, accent, bg, card, tx, sub, border, inputBg }) {
@@ -365,7 +366,7 @@ export default function NewCallScreen({ navigation }) {
               <Avatar contact={item} size={48} onPress={() => tapAvatar(item)} />
               <View style={{ flex: 1, marginLeft: 14 }}>
                 <Text style={[st.contactName, { color: tx }]}>{item.name}</Text>
-                {item.handle ? <Text style={[{ color: accent, fontSize: 12 }]}>@{item.handle}</Text> : null}
+                {item.handle ? <Text style={[{ color: accent, fontSize: 12 }]}>{displayHandle(item.handle)}</Text> : null}
                 <Text style={[st.contactPhone, { color: sub }]}>{item.phone}</Text>
               </View>
               <TouchableOpacity style={[st.callBtn, { backgroundColor: '#34C759' }]} onPress={() => makeCall(item.name, item.phone, 'voice')}>
