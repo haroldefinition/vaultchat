@@ -724,22 +724,49 @@ export default function ChatRoomScreen({ route, navigation }) {
         const real = data.filter(m => m.id && !String(m.id).startsWith('temp_'));
         // Decrypt in parallel before rendering. Plaintext legacy rows pass through.
         const decrypted = await decryptRows(real);
-        setMessages(decrypted);
+        // Merge — preserve local optimistic temp_-id messages so a
+        // freshly-sent reply doesn't briefly disappear when the
+        // server poll arrives before the realtime INSERT echo. Same
+        // rule as the reactions merge in Phase FF.
+        setMessages(prev => {
+          const serverIds = new Set(decrypted.map(m => m.id));
+          const localPending = prev.filter(m =>
+            String(m.id).startsWith('temp_') && !serverIds.has(m.id)
+          );
+          return [...decrypted, ...localPending];
+        });
         AsyncStorage.setItem(MKEY, JSON.stringify(decrypted)).catch(() => {});
-        // Load reactions for these messages
+        // Load reactions for these messages.
+        // MERGE rather than overwrite — preserve any local optimistic
+        // entries (temp_-id reactions still being confirmed) so the
+        // user's just-added emoji doesn't briefly disappear when the
+        // poll arrives ahead of the server's read replica.
         setTimeout(() => {
           const ids = real.map(m => m.id).filter(Boolean);
           if (ids.length) {
             supabase.from('message_reactions').select('*').in('message_id', ids)
               .then(({ data: rdata }) => {
-                if (rdata) {
-                  const grouped = {};
-                  rdata.forEach(r => {
-                    if (!grouped[r.message_id]) grouped[r.message_id] = [];
-                    grouped[r.message_id].push(r);
-                  });
-                  setReactions(grouped);
-                }
+                if (!rdata) return;
+                const grouped = {};
+                rdata.forEach(r => {
+                  if (!grouped[r.message_id]) grouped[r.message_id] = [];
+                  grouped[r.message_id].push(r);
+                });
+                setReactions(prev => {
+                  const next = { ...prev };
+                  for (const mid of Object.keys(grouped)) {
+                    const serverRows   = grouped[mid] || [];
+                    const localPending = (prev[mid] || []).filter(r => String(r.id).startsWith('temp_'));
+                    next[mid] = [...serverRows, ...localPending];
+                  }
+                  for (const mid of ids) {
+                    if (grouped[mid]) continue;
+                    const localPending = (prev[mid] || []).filter(r => String(r.id).startsWith('temp_'));
+                    if (localPending.length) next[mid] = localPending;
+                    else delete next[mid];
+                  }
+                  return next;
+                });
               }).catch(() => {});
           }
         }, 100);
@@ -1011,6 +1038,8 @@ export default function ChatRoomScreen({ route, navigation }) {
   }
 
   // ── Load reactions for all messages in this room ────────────
+  // Uses the same merge-not-overwrite rule as the syncSupabase load
+  // path so a refetch never wipes a freshly-added optimistic reaction.
   async function loadReactions() {
     try {
       const msgIds = messages.map(m => m.id).filter(Boolean);
@@ -1019,18 +1048,35 @@ export default function ChatRoomScreen({ route, navigation }) {
         .from('message_reactions')
         .select('*')
         .in('message_id', msgIds);
-      if (data) {
-        const grouped = {};
-        data.forEach(r => {
-          if (!grouped[r.message_id]) grouped[r.message_id] = [];
-          grouped[r.message_id].push(r);
-        });
-        setReactions(grouped);
-      }
+      if (!data) return;
+      const grouped = {};
+      data.forEach(r => {
+        if (!grouped[r.message_id]) grouped[r.message_id] = [];
+        grouped[r.message_id].push(r);
+      });
+      setReactions(prev => {
+        const next = { ...prev };
+        for (const mid of Object.keys(grouped)) {
+          const serverRows   = grouped[mid] || [];
+          const localPending = (prev[mid] || []).filter(r => String(r.id).startsWith('temp_'));
+          next[mid] = [...serverRows, ...localPending];
+        }
+        for (const mid of msgIds) {
+          if (grouped[mid]) continue;
+          const localPending = (prev[mid] || []).filter(r => String(r.id).startsWith('temp_'));
+          if (localPending.length) next[mid] = localPending;
+          else delete next[mid];
+        }
+        return next;
+      });
     } catch {}
   }
 
   // ── Toggle a reaction on a message ───────────────────────────
+  // Same-emoji tap removes that reaction; different-emoji tap *adds*
+  // a new one. Users (including the sender) can stack as many distinct
+  // emoji on a message as they want — no one-per-message restriction.
+  // Mirrors the group-chat behavior so the two surfaces feel uniform.
   async function toggleReaction(messageId, emoji) {
     if (!myId || !messageId) return;
     const current = reactions[messageId] || [];
@@ -1043,16 +1089,8 @@ export default function ChatRoomScreen({ route, navigation }) {
       }));
       try { await supabase.from('message_reactions').delete().eq('id', existing.id); } catch {}
     } else {
-      // Remove any existing reaction from this user on this message first (one reaction per message)
-      const myOld = current.find(r => r.user_id === myId);
-      if (myOld) {
-        setReactions(prev => ({
-          ...prev,
-          [messageId]: (prev[messageId] || []).filter(r => r.id !== myOld.id),
-        }));
-        try { await supabase.from('message_reactions').delete().eq('id', myOld.id); } catch {}
-      }
-      // Add new reaction
+      // Add new reaction without clearing the user's previous one —
+      // multiple distinct emoji per user per message are allowed.
       const optimistic = { id: `temp_${Date.now()}`, message_id: messageId, user_id: myId, emoji, created_at: new Date().toISOString() };
       setReactions(prev => ({
         ...prev,

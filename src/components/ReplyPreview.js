@@ -189,24 +189,24 @@ export default function ReplyPreview({ content, label, labelColor, textColor, bo
   // ── Render media ───────────────────────────────────────────
   const renderContent = () => {
 
-    // Single local photo
+    // Single local photo — thumbnail only, no "📷 Photo" caption.
+    // The image alone is enough context; the redundant text label
+    // was crowding the reply quote per Harold's review.
     if (c.startsWith('LOCALIMG:')) {
       const key = c.replace('LOCALIMG:', '').split('\n')[0].trim();
       return (
         <TouchableOpacity onPress={openSinglePhoto} activeOpacity={0.88}>
           <LocalImg msgKey={key} style={PHOTO_STYLE} />
-          <View style={rp.mediaTag}><Text style={rp.mediaTagTx}>📷 Photo  · tap to expand</Text></View>
         </TouchableOpacity>
       );
     }
 
-    // Remote single photo
+    // Remote single photo — thumbnail only.
     if (c.startsWith('IMG:')) {
       const uri = c.replace('IMG:', '').split('\n')[0].trim();
       return (
         <TouchableOpacity onPress={openSinglePhoto} activeOpacity={0.88}>
           <Image source={{ uri }} style={PHOTO_STYLE} resizeMode="cover" />
-          <View style={rp.mediaTag}><Text style={rp.mediaTagTx}>📷 Photo  · tap to expand</Text></View>
         </TouchableOpacity>
       );
     }
@@ -241,14 +241,12 @@ export default function ReplyPreview({ content, label, labelColor, textColor, bo
               </View>
             )}
           </View>
-          <View style={rp.mediaTag}>
-            <Text style={rp.mediaTagTx}>🖼️ {count} photo{count > 1 ? 's' : ''}  · tap to browse</Text>
-          </View>
         </TouchableOpacity>
       );
     }
 
-    // Single video
+    // Single video — play-button overlay on the thumb is enough
+    // signal; dropped the "🎥 Video · tap to play" caption.
     if (c.startsWith('LOCALVID:') || c.startsWith('VID:')) {
       return (
         <TouchableOpacity onPress={openVideo} activeOpacity={0.88}>
@@ -257,23 +255,18 @@ export default function ReplyPreview({ content, label, labelColor, textColor, bo
               <Text style={rp.playIcon}>▶</Text>
             </View>
           </View>
-          <View style={rp.mediaTag}><Text style={rp.mediaTagTx}>🎥 Video  · tap to play</Text></View>
         </TouchableOpacity>
       );
     }
 
     // Multiple videos — play first
     if (c.startsWith('VIDEOS:')) {
-      const parts = c.replace('VIDEOS:', '').split('\n')[0].split('|').filter(Boolean);
       return (
         <TouchableOpacity onPress={openVideo} activeOpacity={0.88}>
           <View style={[VIDEO_STYLE, rp.videoBg]}>
             <View style={rp.playCircle}>
               <Text style={rp.playIcon}>▶</Text>
             </View>
-          </View>
-          <View style={rp.mediaTag}>
-            <Text style={rp.mediaTagTx}>🎥 {parts.length} video{parts.length > 1 ? 's' : ''}  · tap to play</Text>
           </View>
         </TouchableOpacity>
       );

@@ -12,6 +12,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Location from 'expo-location';
 import { uploadMedia } from '../services/mediaUpload';
+import { MessageCircle } from 'lucide-react-native';
 
 const GIFS = [
   { emoji: '😂', name: 'Haha',  msg: '😂' },
@@ -326,21 +327,25 @@ export default function NewMessageScreen({ navigation, route }) {
       style={[s.container, { backgroundColor: bg }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
 
-      {/* Header */}
-      <View style={[s.header, { backgroundColor: card, borderBottomColor: border }]}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Text style={{ color: accent, fontSize: 16 }}>Cancel</Text>
+      {/* Header — Cancel / New Message / Start. Cancel + Start use the
+          theme accent (violet in dark / Fiji blue in light) so this
+          screen never shows the gold-on-black look from the mockup. */}
+      <View style={[s.header, { backgroundColor: bg, borderBottomColor: 'transparent' }]}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={s.headerSide}>
+          <Text style={{ color: accent, fontSize: 16, fontWeight: '600' }}>Cancel</Text>
         </TouchableOpacity>
         <Text style={[s.headerTitle, { color: tx }]}>New Message</Text>
-        <TouchableOpacity onPress={startChat} disabled={toInput.trim().length < 3}>
+        <TouchableOpacity onPress={startChat} disabled={toInput.trim().length < 3} style={[s.headerSide, { alignItems: 'flex-end' }]}>
           <Text style={{ color: toInput.trim().length >= 3 ? accent : sub, fontWeight: '700', fontSize: 16 }}>
             Start
           </Text>
         </TouchableOpacity>
       </View>
 
-      {/* To: row */}
-      <View style={[s.toRow, { backgroundColor: card, borderBottomColor: border }]}>
+      {/* To: row — bordered rounded container with accent outline so
+          the input visually matches the mockup's rounded "pill" with
+          a square +-button slot on the right. */}
+      <View style={[s.toWrap, { borderColor: accent + '55', backgroundColor: card }]}>
         <Text style={[s.toLabel, { color: accent }]}>To:</Text>
         <TextInput
           style={[s.toInput, { color: tx }]}
@@ -351,11 +356,12 @@ export default function NewMessageScreen({ navigation, route }) {
           autoCapitalize="none"
           autoFocus
           returnKeyType="done"
+          onSubmitEditing={() => { if (toInput.trim().length >= 3) startChat(); }}
         />
         <TouchableOpacity
           style={[s.toPickBtn, { backgroundColor: accent }]}
           onPress={() => navigation.navigate('ContactPicker')}>
-          <Text style={{ color: '#000', fontSize: 20, fontWeight: '700', lineHeight: 24 }}>+</Text>
+          <Text style={{ color: '#fff', fontSize: 22, fontWeight: '700', lineHeight: 26 }}>+</Text>
         </TouchableOpacity>
       </View>
 
@@ -371,7 +377,27 @@ export default function NewMessageScreen({ navigation, route }) {
         </View>
       ) : null}
 
-      <View style={{ flex: 1 }} />
+      {/* Empty state — chat bubble with a small crown above it,
+          centered, with a hint that mirrors the To: input copy. Hides
+          as soon as the user has typed a recipient or staged media so
+          the screen doesn't get cluttered. */}
+      {!toInput && !selectedName && stagedPhotos.length === 0 && stagedVideos.length === 0 && !stagedFile ? (
+        <View style={s.emptyWrap}>
+          <View style={s.emptyIconWrap}>
+            {/* Crown removed per Harold's review — just the chat-bubble
+                ring on its own keeps the focus on the call-to-action. */}
+            <View style={[s.emptyBubbleRing, { borderColor: accent }]}>
+              <MessageCircle size={36} color={accent} strokeWidth={2.2} />
+            </View>
+          </View>
+          <Text style={[s.emptyTitle, { color: tx }]}>Start a conversation</Text>
+          <Text style={[s.emptyHint, { color: sub }]}>
+            Add a contact or search for{'\n'}a phone number or @handle.
+          </Text>
+        </View>
+      ) : (
+        <View style={{ flex: 1 }} />
+      )}
 
       {/* Staged photos preview */}
       {stagedPhotos.length > 0 && (
@@ -410,31 +436,38 @@ export default function NewMessageScreen({ navigation, route }) {
         </View>
       )}
 
-      {/* Input bar — identical to ChatRoomScreen */}
-      <View style={[s.inputBar, { backgroundColor: card, borderTopColor: border }]}>
-        <TouchableOpacity
-          style={[s.plusBtn, { backgroundColor: inputBg, borderColor: accent }]}
-          onPress={() => setAttachModal(true)}>
-          <Text style={[s.plusTx, { color: accent }]}>+</Text>
-        </TouchableOpacity>
-        <TextInput
-          style={[s.input, { backgroundColor: inputBg, color: tx }]}
-          placeholder={stagedPhotos.length || stagedVideos.length || stagedFile ? 'Caption… (optional)' : 'Message…'}
-          placeholderTextColor={sub}
-          value={msg}
-          onChangeText={setMsg}
-          multiline
-          maxLength={2000}
-        />
-        <TouchableOpacity
-          style={[s.sendBtn, { backgroundColor: (toInput.trim().length >= 3 && (msg.trim() || stagedPhotos.length || stagedVideos.length || stagedFile)) ? accent : inputBg }]}
-          onPress={startChat}
-          disabled={toInput.trim().length < 3 || sending}>
-          {sending
-            ? <ActivityIndicator color={accent} size="small" />
-            : <Text style={{ color: (toInput.trim().length >= 3 && (msg.trim() || stagedPhotos.length || stagedVideos.length || stagedFile)) ? '#000' : sub, fontSize: 18 }}>➤</Text>}
-        </TouchableOpacity>
-      </View>
+      {/* Input bar — circular accent + and ▶ buttons flanking a
+          rounded message field, mirroring the mockup. The send
+          button stays accent-filled when ready, ringed when not. */}
+      {(() => {
+        const canSend = toInput.trim().length >= 3 && (msg.trim() || stagedPhotos.length || stagedVideos.length || stagedFile);
+        return (
+          <View style={[s.inputBar, { backgroundColor: bg, borderTopColor: border }]}>
+            <TouchableOpacity
+              style={[s.circleBtn, { borderColor: accent, backgroundColor: 'transparent' }]}
+              onPress={() => setAttachModal(true)}>
+              <Text style={[s.circleBtnTx, { color: accent }]}>+</Text>
+            </TouchableOpacity>
+            <TextInput
+              style={[s.input, { backgroundColor: card, color: tx, borderColor: border }]}
+              placeholder={stagedPhotos.length || stagedVideos.length || stagedFile ? 'Caption… (optional)' : 'Message…'}
+              placeholderTextColor={sub}
+              value={msg}
+              onChangeText={setMsg}
+              multiline
+              maxLength={2000}
+            />
+            <TouchableOpacity
+              style={[s.circleBtn, { borderColor: accent, backgroundColor: canSend ? accent : 'transparent' }]}
+              onPress={startChat}
+              disabled={!canSend || sending}>
+              {sending
+                ? <ActivityIndicator color={canSend ? '#fff' : accent} size="small" />
+                : <Text style={[s.sendArrow, { color: canSend ? '#fff' : accent }]}>▶</Text>}
+            </TouchableOpacity>
+          </View>
+        );
+      })()}
 
       {/* Attach sheet — identical to ChatRoomScreen */}
       <Modal visible={attachModal} transparent animationType="slide">
@@ -538,17 +571,27 @@ export default function NewMessageScreen({ navigation, route }) {
 const s = StyleSheet.create({
   container:      { flex: 1 },
   header:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 56, paddingBottom: 14, borderBottomWidth: StyleSheet.hairlineWidth },
-  headerTitle:    { fontSize: 17, fontWeight: '700' },
-  toRow:          { flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth, paddingLeft: 16, minHeight: 56 },
-  toLabel:        { fontWeight: '700', fontSize: 16, width: 28 },
+  headerSide:     { minWidth: 60 },
+  headerTitle:    { fontSize: 17, fontWeight: '700', flex: 1, textAlign: 'center' },
+  // Bordered To: container — rounded outline that matches the
+  // mockup, with a square accent +-button slot on the right.
+  toWrap:         { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginTop: 8, borderWidth: 1.5, borderRadius: 14, paddingLeft: 14, overflow: 'hidden', minHeight: 52 },
+  toLabel:        { fontWeight: '700', fontSize: 16, width: 32 },
   toInput:        { flex: 1, fontSize: 16, paddingVertical: 14, paddingHorizontal: 8 },
-  toPickBtn:      { width: 52, height: 52, alignItems: 'center', justifyContent: 'center' },
+  toPickBtn:      { width: 50, height: 50, alignItems: 'center', justifyContent: 'center' },
   badge:          { flexDirection: 'row', alignItems: 'center', margin: 12, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, borderWidth: 1 },
-  // Input bar — mirrors ChatRoomScreen exactly
-  inputBar:       { flexDirection: 'row', alignItems: 'center', padding: 10, paddingHorizontal: 12, borderTopWidth: 1, gap: 8, paddingBottom: 24, minHeight: 70 },
-  plusBtn:        { width: 44, height: 44, borderRadius: 22, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
-  plusTx:         { fontSize: 26, fontWeight: '300', lineHeight: 30 },
-  input:          { flex: 1, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 22, fontSize: 15, maxHeight: 100, minHeight: 42 },
+  // Empty state — chat bubble + crown centered with a hint copy.
+  emptyWrap:      { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
+  emptyIconWrap:  { alignItems: 'center', marginBottom: 18 },
+  emptyBubbleRing:{ width: 72, height: 72, borderRadius: 36, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  emptyTitle:     { fontSize: 20, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
+  emptyHint:      { fontSize: 13, lineHeight: 19, textAlign: 'center' },
+  // Input bar — circular accent buttons flanking the message field.
+  inputBar:       { flexDirection: 'row', alignItems: 'center', padding: 10, paddingHorizontal: 16, borderTopWidth: StyleSheet.hairlineWidth, gap: 10, paddingBottom: 28, minHeight: 76 },
+  circleBtn:      { width: 46, height: 46, borderRadius: 23, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  circleBtnTx:    { fontSize: 24, fontWeight: '400', lineHeight: 28, marginTop: -2 },
+  sendArrow:      { fontSize: 16, fontWeight: '700', marginLeft: 2 },
+  input:          { flex: 1, paddingHorizontal: 18, paddingVertical: 12, borderRadius: 24, borderWidth: 1, fontSize: 15, maxHeight: 100, minHeight: 46 },
   sendBtn:        { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   // Attachment sheet — mirrors ChatRoomScreen exactly
   overlay:        { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },

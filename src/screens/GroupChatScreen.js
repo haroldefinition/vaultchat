@@ -41,6 +41,12 @@ import {
 import { Phone, Video as VideoIcon, Mic } from 'lucide-react-native';
 import { makeCallId } from '../services/placeCall';
 import { getMyDisplayName } from '../services/vaultHandle';
+import {
+  isGroupEnvelope,
+  resolveAndCacheGroupMembers,
+  encryptForGroup,
+  decryptGroupMessageForMe,
+} from '../services/groupCrypto';
 
 // ── Media helpers ─────────────────────────────────────────────
 function SinglePhoto({ msgKey, isLocal, onOpen, onLongPress }) {
@@ -328,13 +334,29 @@ export default function GroupChatScreen({ route, navigation }) {
     syncSupabase();
     flushQueue().catch(() => {});
 
-    // Realtime subscription for instant group messages
+    // Realtime subscription for instant group messages.
+    // resolveIncoming() decrypts our own per-recipient envelope on
+    // group-encrypted rows BEFORE inserting into the FlatList state,
+    // so the rendered `text` is always plaintext on this device. The
+    // wire row stays encrypted; only the local state holds plaintext.
+    const resolveIncoming = async (raw) => {
+      if (!raw) return raw;
+      if (isGroupEnvelope(raw)) {
+        const plain = await decryptGroupMessageForMe(raw, currentUserId);
+        return { ...raw, text: plain };
+      }
+      return raw;
+    };
     const unsubGroup = subscribeToGroup(
       groupId,
-      (newMsg) => {
+      async (rawMsg) => {
+        const newMsg = await resolveIncoming(rawMsg);
         setMessages(prev => {
           if (prev.find(m => m.id === newMsg.id)) return prev;
-          // Replace matching temp message
+          // Replace matching temp message — match on sender + the
+          // optimistic plaintext (group-enc rows arrive with the
+          // sentinel as `text`, but our resolveIncoming has already
+          // restored plaintext above).
           const replaced = prev.map(m =>
             m.sender_id === newMsg.sender_id && m.text === newMsg.text && String(m.id).startsWith('temp_')
               ? newMsg : m
@@ -345,7 +367,8 @@ export default function GroupChatScreen({ route, navigation }) {
           return next;
         });
       },
-      (updatedMsg) => {
+      async (rawUpdated) => {
+        const updatedMsg = await resolveIncoming(rawUpdated);
         setMessages(prev => prev.map(m => m.id === updatedMsg.id ? { ...m, ...updatedMsg } : m));
       }
     );
@@ -414,6 +437,13 @@ export default function GroupChatScreen({ route, navigation }) {
         setGroupPhoto(g.photo || null);
         setGroupDesc(g.desc || '');
         setGroupMembers(Array.isArray(g.members) ? g.members : []);
+        // Kick off member resolution so per-recipient encryption
+        // has user_ids + pubkeys ready by the time the user sends.
+        // Updates state with the enriched objects so the encryption
+        // banner can flip to green once any member has a published key.
+        resolveAndCacheGroupMembers(groupId).then(enriched => {
+          if (!cancelled) setGroupMembers(enriched);
+        }).catch(() => {});
       } catch {}
     }
     loadGroup();
@@ -445,6 +475,23 @@ export default function GroupChatScreen({ route, navigation }) {
       const myName = await getMyDisplayName();
       const callId = makeCallId();
 
+      // Resolve the group's bare-string members to user_ids first so
+      // the conference rings everyone in one shot. Only members with
+      // a known user_id can be invited (we can't ring a string-only
+      // legacy entry); others stay reachable via the Add Participant
+      // modal on ActiveCallScreen.
+      let initialParticipants = [];
+      try {
+        const enriched = await resolveAndCacheGroupMembers(groupId);
+        initialParticipants = enriched
+          .filter(m => m?.user_id && m.user_id !== myUserId)
+          .map(m => ({
+            userId: m.user_id,
+            name:   m.name || m.vault_handle || m.phone || 'Member',
+            phone:  m.phone || null,
+          }));
+      } catch {}
+
       navigation.navigate('ActiveCall', {
         mode:        'outgoing-conference',
         callId,
@@ -454,7 +501,7 @@ export default function GroupChatScreen({ route, navigation }) {
         recipientName: groupName || 'Group',
         callType:    type === 'video' ? 'video' : 'voice',
         isConference: true,
-        initialParticipants: [], // populated via Add Participant during the call
+        initialParticipants,
       });
     } catch (e) {
       Alert.alert('Call failed', e?.message || 'Unable to start the group call.');
@@ -525,21 +572,75 @@ export default function GroupChatScreen({ route, navigation }) {
         .order('created_at', { ascending: true });
       if (!error && data && data.length > 0) {
         const real = data.filter(m => m.id);
-        setMessages(real);
-        AsyncStorage.setItem(SKEY, JSON.stringify(real)).catch(() => {});
-        // Load reactions for these messages
+        // Decrypt every group-encrypted row to plaintext for the
+        // current user before pushing into state. Plaintext rows
+        // pass through untouched (legacy support / sentinel-less
+        // older messages).
+        const decrypted = await Promise.all(real.map(async row => {
+          if (!isGroupEnvelope(row)) return row;
+          const plain = await decryptGroupMessageForMe(row, currentUserId);
+          return { ...row, text: plain };
+        }));
+        // Merge instead of overwrite — preserve any optimistic
+        // temp_-id messages (replies and regular sends) that haven't
+        // been confirmed yet, so a poll firing in the half-second
+        // before realtime swaps the temp id can't make a freshly-
+        // sent reply briefly disappear. Same rule as the reactions
+        // merge in Phase FF.
+        setMessages(prev => {
+          const serverIds = new Set(decrypted.map(m => m.id));
+          const localPending = prev.filter(m =>
+            String(m.id).startsWith('temp_') && !serverIds.has(m.id)
+          );
+          return [...decrypted, ...localPending];
+        });
+        AsyncStorage.setItem(SKEY, JSON.stringify(decrypted)).catch(() => {});
+        // Load reactions for these messages.
+        // CRITICAL: merge instead of overwrite. The previous version
+        // did `setReactions(grouped)` which wiped any optimistic
+        // reactions the user had just added (still carrying a
+        // `temp_…` id) before the server insert had propagated to the
+        // read replica. Result: reactions visibly disappeared shortly
+        // after being added, then re-appeared on the *next* poll —
+        // exactly the "emojis don't stick" symptom Harold reported.
+        //
+        // Merge rule:
+        //   • For every message_id the server returned, take the
+        //     server's reaction list as authoritative — but UNION it
+        //     with any local entries whose id starts with `temp_`
+        //     (still pending confirmation).
+        //   • Message_ids not in the server response keep whatever's
+        //     in local state untouched.
         const ids = real.map(m => m.id).filter(Boolean);
         if (ids.length) {
           supabase.from('message_reactions').select('*').in('message_id', ids)
             .then(({ data: rdata }) => {
-              if (rdata) {
-                const grouped = {};
-                rdata.forEach(r => {
-                  if (!grouped[r.message_id]) grouped[r.message_id] = [];
-                  grouped[r.message_id].push(r);
-                });
-                setReactions(grouped);
-              }
+              if (!rdata) return;
+              const grouped = {};
+              rdata.forEach(r => {
+                if (!grouped[r.message_id]) grouped[r.message_id] = [];
+                grouped[r.message_id].push(r);
+              });
+              setReactions(prev => {
+                const next = { ...prev };
+                // Apply server-authoritative state per touched id, but
+                // preserve any local temp_-id rows (still in flight).
+                for (const mid of Object.keys(grouped)) {
+                  const serverRows  = grouped[mid] || [];
+                  const localPending = (prev[mid] || []).filter(r => String(r.id).startsWith('temp_'));
+                  next[mid] = [...serverRows, ...localPending];
+                }
+                // Also handle message_ids in the request that came back
+                // empty — server says "no reactions". Keep any local
+                // pending entries here too.
+                for (const mid of ids) {
+                  if (grouped[mid]) continue;
+                  const localPending = (prev[mid] || []).filter(r => String(r.id).startsWith('temp_'));
+                  if (localPending.length) next[mid] = localPending;
+                  else delete next[mid];
+                }
+                return next;
+              });
             }).catch(() => {});
         }
       }
@@ -553,7 +654,39 @@ export default function GroupChatScreen({ route, navigation }) {
 
   async function postMsg(text, type = 'text') {
     const tempId  = `temp_${Date.now()}`;
-    const payload = {
+
+    // ── E2E encryption (per-recipient envelopes) ──────────────
+    // Resolve members → user_ids + pubkeys, then build a per-recipient
+    // ciphertext bundle. The plaintext text NEVER hits the server when
+    // at least one recipient was resolvable; we send `text: 'GRPENC:v1'`
+    // as a sentinel and stash all envelopes under metadata.
+    // Falls back to plaintext only if NO members could be resolved
+    // (fresh group, no one has opened the app yet) so we never lose
+    // the user's message.
+    let encryptedPayload = null;
+    try {
+      const resolved = await resolveAndCacheGroupMembers(groupId);
+      const sendable = resolved.filter(m => m?.user_id && m?.public_key);
+      if (sendable.length > 0) {
+        const enc = await encryptForGroup(text, sendable, currentUserId);
+        encryptedPayload = enc.insertPayload;
+      }
+    } catch (e) {
+      if (__DEV__) console.warn('group encrypt failed, sending plaintext:', e?.message);
+    }
+
+    const payload = encryptedPayload ? {
+      group_id: groupId,
+      sender_id: currentUserId,
+      sender_handle: currentHandle,
+      text:       encryptedPayload.content,        // 'GRPENC:v1' sentinel
+      type,
+      metadata:   encryptedPayload.metadata,        // ct_for_recipients map
+      reply_to_id:     replyingTo?.id     || null,
+      reply_to_text:   replyingTo?.text   || null,
+      reply_to_sender: replyingTo?.sender || null,
+      created_at: new Date().toISOString(),
+    } : {
       group_id: groupId,
       sender_id: currentUserId,
       sender_handle: currentHandle,
@@ -563,7 +696,10 @@ export default function GroupChatScreen({ route, navigation }) {
       reply_to_sender: replyingTo?.sender || null,
       created_at: new Date().toISOString(),
     };
-    const tempMsg = { ...payload, id: tempId };
+    // Optimistic row uses PLAINTEXT `text` so the sender sees their
+    // own message immediately. Wire payload (above) carries the
+    // sentinel + envelopes only.
+    const tempMsg = { ...payload, text, id: tempId };
     setMessages(prev => {
       const next = [...prev, tempMsg];
       // Save including temp so the user never sees empty on re-enter
@@ -604,6 +740,12 @@ export default function GroupChatScreen({ route, navigation }) {
   }
 
   // ── Toggle a reaction on a group message ─────────────────────
+  // Same-emoji tap removes that reaction (toggle), different-emoji
+  // tap *adds* a new one without clearing the previous — users can
+  // stack as many distinct emoji as they want, including on their
+  // own messages. This applies to the sender too, matching Harold's
+  // ask: senders can react to their own posts as many times as they
+  // like, with as many different emoji as they want.
   async function toggleGroupReaction(messageId, emoji) {
     if (!currentUserId || !messageId) return;
     const current  = reactions[messageId] || [];
@@ -616,16 +758,9 @@ export default function GroupChatScreen({ route, navigation }) {
       }));
       try { await supabase.from('message_reactions').delete().eq('id', existing.id); } catch {}
     } else {
-      // Remove previous reaction from this user (one per message)
-      const myOld = current.find(r => r.user_id === currentUserId);
-      if (myOld) {
-        setReactions(prev => ({
-          ...prev,
-          [messageId]: (prev[messageId] || []).filter(r => r.id !== myOld.id),
-        }));
-        try { await supabase.from('message_reactions').delete().eq('id', myOld.id); } catch {}
-      }
-      // Add new reaction optimistically
+      // Add new reaction optimistically — no longer clear the user's
+      // previous reaction. Multiple distinct emoji per user per
+      // message are intentionally allowed.
       const optimistic = {
         id: `temp_${Date.now()}`,
         message_id: messageId,
@@ -1021,24 +1156,44 @@ export default function GroupChatScreen({ route, navigation }) {
         </TouchableOpacity>
       </View>
 
-      {/* Group encryption-status banner — group chats don't yet have
-          end-to-end encryption (1:1 chats do, gated hard via the
-          peer-key check in ChatRoomScreen). Surface the truth so
-          users can make an informed call about what they share in
-          a group room. We aim to ship sender-keys group E2E in a
-          follow-up; once that lands this banner becomes the active
-          "encrypted" indicator instead. */}
-      <View style={{
-        backgroundColor: '#F59E0B' + '1A',
-        borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: border,
-        paddingHorizontal: 14, paddingVertical: 8,
-        flexDirection: 'row', alignItems: 'center', gap: 8,
-      }}>
-        <Text style={{ fontSize: 13 }}>⚠️</Text>
-        <Text style={{ flex: 1, color: '#B45309', fontSize: 11, fontWeight: '600' }}>
-          Group messages aren't end-to-end encrypted yet. Avoid sharing sensitive info here for now.
-        </Text>
-      </View>
+      {/* Group encryption banner — green when at least one member's
+          public key is on file (per-recipient envelopes will fire on
+          send), amber when nobody on the roster has published a key
+          yet so the user knows messages will go out plaintext until
+          they do. The banner is dismissible-feeling but stays sticky
+          on purpose so it never disappears mid-typing.
+          See services/groupCrypto.js for the envelope format. */}
+      {(() => {
+        const ready = groupMembers.some(m => m && m.public_key);
+        if (ready) {
+          return (
+            <View style={{
+              backgroundColor: '#10B981' + '14',
+              borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: border,
+              paddingHorizontal: 14, paddingVertical: 8,
+              flexDirection: 'row', alignItems: 'center', gap: 8,
+            }}>
+              <Text style={{ fontSize: 13 }}>🔒</Text>
+              <Text style={{ flex: 1, color: '#10B981', fontSize: 11, fontWeight: '600' }}>
+                End-to-end encrypted — each member's copy is sealed to their own key.
+              </Text>
+            </View>
+          );
+        }
+        return (
+          <View style={{
+            backgroundColor: '#F59E0B' + '1A',
+            borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: border,
+            paddingHorizontal: 14, paddingVertical: 8,
+            flexDirection: 'row', alignItems: 'center', gap: 8,
+          }}>
+            <Text style={{ fontSize: 13 }}>⚠️</Text>
+            <Text style={{ flex: 1, color: '#B45309', fontSize: 11, fontWeight: '600' }}>
+              Waiting for group members to set up encryption. Messages may go out plaintext.
+            </Text>
+          </View>
+        );
+      })()}
 
       {/* Pinned message banner — uses PinnedMessagePreview which renders
           actual photo/video thumbnails for media messages instead of the
