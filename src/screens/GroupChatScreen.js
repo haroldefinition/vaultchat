@@ -248,9 +248,18 @@ function Bubble({ item, currentUserId, colors, onFullScreen, onPlay, onLongPress
           isMedia && !cap && { backgroundColor: 'transparent', shadowOpacity: 0, elevation: 0, padding: 0 },
         ]}>
           {body()}
-          <Text style={[g.msgTime, { color: isMe ? 'rgba(255,255,255,0.6)' : sub }]}>
-            {showFull ? fullTimeStr : shortTimeStr}{item.edited ? '  ✎' : ''}
-          </Text>
+          {/* Caption-message bubbles keep the timestamp INSIDE the
+              bubble (where it has a tinted ground). Media-only bubbles
+              push the timestamp out as a sibling — the bubble's bottom
+              edge IS the photo edge then, so the ReactionBar's -14
+              negative-margin pull-up actually overlaps the photo's
+              corner instead of just hovering over the timestamp.
+              Matches the 1:1 layout exactly. */}
+          {(!isMedia || cap) && (
+            <Text style={[g.msgTime, { color: isMe ? 'rgba(255,255,255,0.6)' : sub }]}>
+              {showFull ? fullTimeStr : shortTimeStr}{item.edited ? '  ✎' : ''}
+            </Text>
+          )}
         </View>
         {reactions?.length > 0 && (
           <ReactionBar
@@ -260,6 +269,14 @@ function Bubble({ item, currentUserId, colors, onFullScreen, onPlay, onLongPress
             accent={accent}
             card={card}
           />
+        )}
+        {/* Timestamp moved here for media-only bubbles — sits below
+            the bubble (and below the reaction chips) so the chips
+            cleanly overlap the photo's bottom corner above. */}
+        {isMedia && !cap && (
+          <Text style={[g.msgTime, { color: sub, alignSelf: isMe ? 'flex-end' : 'flex-start', marginTop: 2 }]}>
+            {showFull ? fullTimeStr : shortTimeStr}{item.edited ? '  ✎' : ''}
+          </Text>
         )}
       </TouchableOpacity>
     </SwipeableRow>
@@ -279,6 +296,7 @@ export default function GroupChatScreen({ route, navigation }) {
   const [groupPhoto,   setGroupPhoto]   = useState(null);
   const [groupDesc,    setGroupDesc]    = useState('');
   const [groupMembers, setGroupMembers] = useState([]); // array of member descriptors
+  const [encBannerHidden, setEncBannerHidden] = useState(false); // dismissible amber/green banner state
 
   // ── @mentions (#80) ─────────────────────────────────────────
   // Detect when the user is mid-@-mention in the composer so we can
@@ -630,13 +648,17 @@ export default function GroupChatScreen({ route, navigation }) {
                   const localPending = (prev[mid] || []).filter(r => String(r.id).startsWith('temp_'));
                   next[mid] = [...serverRows, ...localPending];
                 }
-                // Also handle message_ids in the request that came back
-                // empty — server says "no reactions". Keep any local
-                // pending entries here too.
+                // For message_ids the server returned empty: KEEP local
+                // state intact. A stale read replica can return empty
+                // for a row that was just inserted — and previously
+                // we'd delete the just-confirmed reaction here, which
+                // is what made fresh emojis flicker off after a few
+                // seconds. The realtime DELETE listener handles real
+                // removals, so trusting local-non-empty here is safe.
                 for (const mid of ids) {
                   if (grouped[mid]) continue;
-                  const localPending = (prev[mid] || []).filter(r => String(r.id).startsWith('temp_'));
-                  if (localPending.length) next[mid] = localPending;
+                  const localRows = prev[mid];
+                  if (localRows && localRows.length > 0) next[mid] = localRows;
                   else delete next[mid];
                 }
                 return next;
@@ -1156,14 +1178,14 @@ export default function GroupChatScreen({ route, navigation }) {
         </TouchableOpacity>
       </View>
 
-      {/* Group encryption banner — green when at least one member's
-          public key is on file (per-recipient envelopes will fire on
-          send), amber when nobody on the roster has published a key
-          yet so the user knows messages will go out plaintext until
-          they do. The banner is dismissible-feeling but stays sticky
-          on purpose so it never disappears mid-typing.
-          See services/groupCrypto.js for the envelope format. */}
-      {(() => {
+      {/* Group encryption banner.
+          • Green: at least one member's pubkey is on file → per-recipient
+            envelopes will fire on send. Auto-hides after 3s.
+          • Amber: legacy/string-only members couldn't be resolved to
+            VaultChat profiles. Includes an ✕ so the user can dismiss it
+            for the session — once dismissed it stays hidden until they
+            navigate away and come back. */}
+      {!encBannerHidden && (() => {
         const ready = groupMembers.some(m => m && m.public_key);
         if (ready) {
           return (
@@ -1177,6 +1199,9 @@ export default function GroupChatScreen({ route, navigation }) {
               <Text style={{ flex: 1, color: '#10B981', fontSize: 11, fontWeight: '600' }}>
                 End-to-end encrypted — each member's copy is sealed to their own key.
               </Text>
+              <TouchableOpacity onPress={() => setEncBannerHidden(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Text style={{ color: '#10B981', fontSize: 14, paddingHorizontal: 4 }}>✕</Text>
+              </TouchableOpacity>
             </View>
           );
         }
@@ -1191,6 +1216,9 @@ export default function GroupChatScreen({ route, navigation }) {
             <Text style={{ flex: 1, color: '#B45309', fontSize: 11, fontWeight: '600' }}>
               Waiting for group members to set up encryption. Messages may go out plaintext.
             </Text>
+            <TouchableOpacity onPress={() => setEncBannerHidden(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={{ color: '#B45309', fontSize: 14, paddingHorizontal: 4 }}>✕</Text>
+            </TouchableOpacity>
           </View>
         );
       })()}

@@ -759,10 +759,14 @@ export default function ChatRoomScreen({ route, navigation }) {
                     const localPending = (prev[mid] || []).filter(r => String(r.id).startsWith('temp_'));
                     next[mid] = [...serverRows, ...localPending];
                   }
+                  // KEEP local non-empty entries when the server returns
+                  // empty (stale read replica). Realtime DELETE handles
+                  // genuine removals, so trusting local here is safe and
+                  // stops fresh emojis from flickering off.
                   for (const mid of ids) {
                     if (grouped[mid]) continue;
-                    const localPending = (prev[mid] || []).filter(r => String(r.id).startsWith('temp_'));
-                    if (localPending.length) next[mid] = localPending;
+                    const localRows = prev[mid];
+                    if (localRows && localRows.length > 0) next[mid] = localRows;
                     else delete next[mid];
                   }
                   return next;
@@ -1061,10 +1065,14 @@ export default function ChatRoomScreen({ route, navigation }) {
           const localPending = (prev[mid] || []).filter(r => String(r.id).startsWith('temp_'));
           next[mid] = [...serverRows, ...localPending];
         }
+        // KEEP local non-empty entries when the server returned empty —
+        // stale read replicas can omit a row that was just inserted.
+        // Realtime DELETE catches genuine removals; this stops fresh
+        // confirmed reactions from briefly disappearing on a refetch.
         for (const mid of msgIds) {
           if (grouped[mid]) continue;
-          const localPending = (prev[mid] || []).filter(r => String(r.id).startsWith('temp_'));
-          if (localPending.length) next[mid] = localPending;
+          const localRows = prev[mid];
+          if (localRows && localRows.length > 0) next[mid] = localRows;
           else delete next[mid];
         }
         return next;
