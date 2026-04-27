@@ -310,15 +310,35 @@ export function ratchetEncrypt(state, plaintext) {
   const nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
   const ct = nacl.secretbox(naclUtil.decodeUTF8(String(plaintext)), nonce, msgKey);
   if (!ct) throw new Error('Ratchet encrypt failed');
-  const wire = RATCHET_TAG + JSON.stringify({
+  // Always include the X3DH ephemeral pub on the wire if the sender
+  // still has one stashed. Receivers that have never bootstrapped
+  // (fresh install / reinstall) need it to derive the same root key;
+  // receivers already in sync just ignore the field.
+  const env = {
     dh:    naclUtil.encodeBase64(state.DHs.pub),
     n:     state.Ns,
     pn:    state.PN,
     ct:    naclUtil.encodeBase64(ct),
     nonce: naclUtil.encodeBase64(nonce),
-  });
+  };
+  if (state._initialEphPub) env.eph = naclUtil.encodeBase64(state._initialEphPub);
+  const wire = RATCHET_TAG + JSON.stringify(env);
   state.Ns += 1;
   return wire;
+}
+
+/**
+ * Peek at a ratchet wire envelope and pull out the X3DH ephemeral
+ * pub if present. Used by the receive path to bootstrap a fresh
+ * receiver state on the very first message from a peer.
+ */
+export function peekRatchetEph(wire) {
+  if (!isRatchetEnvelope(wire)) return null;
+  try {
+    const env = JSON.parse(wire.slice(RATCHET_TAG.length));
+    if (!env.eph) return null;
+    return naclUtil.decodeBase64(env.eph);
+  } catch { return null; }
 }
 
 export function ratchetDecrypt(state, wire) {

@@ -3,6 +3,8 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, Alert, Im
 import { supabase } from '../services/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
+import { exportVaultBackup, restoreVaultBackup } from '../services/vaultBackup';
 import { useTheme } from '../services/theme';
 import { requestContactsPermission, syncContacts, findFriendsOnVaultChat } from '../services/contacts';
 import { checkBiometricSupport } from '../services/biometric';
@@ -64,6 +66,13 @@ export default function SettingsScreen({ navigation }) {
   // chats they've moved into it. See src/services/vault.js.
   const [vaultPinSet, setVaultPinSet] = useState(false);
   const [pinInput, setPinInput] = useState('');
+  // Vault backup state (Phase XX). `mode` = 'export' | 'restore';
+  // `backupPin` is the encryption key (same as the user's Vault PIN
+  // — never stored, only used for the AES-GCM key derivation).
+  const [backupModal, setBackupModal] = useState(false);
+  const [backupMode,  setBackupMode]  = useState('export');
+  const [backupPin,   setBackupPin]   = useState('');
+  const [backupBusy,  setBackupBusy]  = useState(false);
   const [devCallState, setDevCallState] = useState('idle');
   const [devSocketConnected, setDevSocketConnected] = useState(false);
 
@@ -574,6 +583,36 @@ export default function SettingsScreen({ navigation }) {
               subText="View your vaulted chats, files, and media · Premium 👑"
               onPress={() => navigation.navigate('Vault')}
             />
+            {/* Encrypted vault backup (Phase VV+XX). PIN is the
+                encryption key — same one that protects the live
+                vault — so we prompt for it, derive an AES key
+                via PBKDF2, encrypt a JSON snapshot, and let the
+                user pick where to save the file via the iOS
+                Share Sheet (iCloud Drive / Files / AirDrop). */}
+            <Row
+              icon="📤"
+              label="Backup Vault"
+              subText="Encrypted snapshot you can save to iCloud Drive or Files"
+              onPress={() => {
+                if (!vaultPinSet) {
+                  Alert.alert('Set a Vault PIN first', 'The Vault PIN is the encryption key for your backup. Set one above before backing up.');
+                  return;
+                }
+                setBackupMode('export');
+                setBackupPin('');
+                setBackupModal(true);
+              }}
+            />
+            <Row
+              icon="📥"
+              label="Restore Vault"
+              subText="Re-import a backup .vchat file using your Vault PIN"
+              onPress={() => {
+                setBackupMode('restore');
+                setBackupPin('');
+                setBackupModal(true);
+              }}
+            />
             <Row
               icon="🚫"
               label="Blocked Users"
@@ -871,6 +910,76 @@ export default function SettingsScreen({ navigation }) {
           6-digit PIN via a numeric keypad, saves it to AsyncStorage under
           the appropriate key (vaultchat_real_pin or vaultchat_decoy_pin)
           which BiometricLockScreen already reads to validate entries. */}
+      {/* ── Vault backup modal (Phase XX) ────────────────
+          Single modal with both export + restore flows; the
+          `backupMode` state switches the title/CTA. PIN is the
+          encryption key — never stored, only used to derive the
+          AES-GCM key in vaultBackup.js. */}
+      <Modal visible={backupModal} transparent animationType="fade" onRequestClose={() => setBackupModal(false)}>
+        <TouchableOpacity
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center' }}
+          activeOpacity={1}
+          onPress={() => !backupBusy && setBackupModal(false)}>
+          <View style={{ backgroundColor: card, borderRadius: 18, padding: 24, width: '85%' }} onStartShouldSetResponder={() => true}>
+            <Text style={{ color: tx, fontSize: 18, fontWeight: '800', textAlign: 'center', marginBottom: 6 }}>
+              {backupMode === 'export' ? 'Backup Vault' : 'Restore Vault'}
+            </Text>
+            <Text style={{ color: sub, fontSize: 13, textAlign: 'center', marginBottom: 18 }}>
+              {backupMode === 'export'
+                ? 'Enter your Vault PIN — it will encrypt the backup. You\'ll need the same PIN to restore.'
+                : 'Enter the Vault PIN you used when you exported the backup.'}
+            </Text>
+            <TextInput
+              value={backupPin}
+              onChangeText={setBackupPin}
+              placeholder="Vault PIN"
+              placeholderTextColor={sub}
+              secureTextEntry
+              keyboardType="number-pad"
+              maxLength={12}
+              autoFocus
+              style={{ backgroundColor: bg, color: tx, borderColor: border, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 18, textAlign: 'center', letterSpacing: 4, marginBottom: 14 }}
+              editable={!backupBusy}
+            />
+            <TouchableOpacity
+              style={{ backgroundColor: accent, paddingVertical: 14, borderRadius: 12, alignItems: 'center', opacity: backupPin && !backupBusy ? 1 : 0.5 }}
+              disabled={!backupPin || backupBusy}
+              onPress={async () => {
+                setBackupBusy(true);
+                try {
+                  if (backupMode === 'export') {
+                    const r = await exportVaultBackup(backupPin);
+                    setBackupBusy(false);
+                    setBackupModal(false);
+                    Alert.alert(r.ok ? 'Backup ready' : 'Backup failed', r.message);
+                  } else {
+                    // Pick a .vchat file via the system document picker.
+                    const pick = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
+                    if (pick.canceled || !pick.assets?.[0]?.uri) {
+                      setBackupBusy(false);
+                      return;
+                    }
+                    const r = await restoreVaultBackup(pick.assets[0].uri, backupPin);
+                    setBackupBusy(false);
+                    setBackupModal(false);
+                    Alert.alert(r.ok ? 'Restored' : 'Restore failed', r.message);
+                  }
+                } catch (e) {
+                  setBackupBusy(false);
+                  Alert.alert('Error', e?.message || 'Something went wrong.');
+                }
+              }}>
+              <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>
+                {backupBusy ? 'Working…' : (backupMode === 'export' ? 'Encrypt & Export' : 'Decrypt & Restore')}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => !backupBusy && setBackupModal(false)} style={{ alignItems: 'center', paddingVertical: 12, marginTop: 4 }}>
+              <Text style={{ color: sub, fontSize: 14 }}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       <Modal visible={pinModal} transparent animationType="fade" onRequestClose={() => setPinModal(false)}>
         <TouchableOpacity
           style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center' }}

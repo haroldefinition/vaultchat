@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, TextInput, Modal, StyleSheet, RefreshControl,
-  Alert, StatusBar, KeyboardAvoidingView, Platform, ScrollView,
+  Alert, StatusBar, KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -33,34 +33,76 @@ const FREE_GROUP_MAX    = 8;
 const PREMIUM_GROUP_MAX = 256;
 
 // ── Manage Members Modal ──────────────────────────────────────
+//
+//  Members are stored as objects:
+//    { name, user_id, vault_handle, phone, public_key }
+//
+//  Adding a new member REQUIRES a @handle or phone — we resolve the
+//  input via vaultHandle.findByHandleOrPhone the moment Add is
+//  tapped, fetch the NaCl pubkey via getPublicKey, and only then
+//  insert the row. Free-form names are no longer accepted because
+//  the per-recipient envelope encryption (groupCrypto.js) needs
+//  user_id + public_key to actually encrypt for that recipient.
+//
+//  Legacy bare-string entries (e.g. "John") are tolerated for
+//  backwards-compat: rendered with an amber "Resolve" affordance so
+//  the user can convert them in-place by typing the member's
+//  @handle or phone. Once converted, that member starts receiving
+//  encrypted messages on the next send. Unresolved legacy entries
+//  can also be removed in one tap.
 function ManageMembersModal({ visible, group, onClose, onSave, accent, bg, card, tx, sub, border, inputBg, onUpsell }) {
-  const [members,   setMembers]   = useState(group?.members || []);
-  const [newMember, setNewMember] = useState('');
-  const [premium,   setPremium]   = useState(false);
+  // Local state. Each entry is normalized to an object so renders
+  // can branch cleanly on the presence of `user_id`.
+  const normalize = (m) => (typeof m === 'string' ? { name: m } : { ...m });
+  const [members,   setMembers]    = useState((group?.members || []).map(normalize));
+  const [newInput,  setNewInput]   = useState('');
+  const [adding,    setAdding]     = useState(false);
+  const [premium,   setPremium]    = useState(false);
+  // Per-row state for legacy resolution: { [index]: { lookup, status } }
+  const [resolveState, setResolveState] = useState({});
 
   useEffect(() => {
-    if (group) setMembers(group.members || []);
+    if (group) setMembers((group.members || []).map(normalize));
   }, [group]);
 
-  // Re-pull premium flag whenever the modal becomes visible so an
-  // upgrade in the parent screen takes effect without remount.
   useEffect(() => {
     if (!visible) return;
-    try {
-      require('../services/iapService').isPremium().then(setPremium);
-    } catch {}
+    try { require('../services/iapService').isPremium().then(setPremium); } catch {}
   }, [visible]);
 
-  function add() {
-    const name = newMember.trim();
-    if (!name) return;
-    if (members.includes(name)) { Alert.alert('Already added'); return; }
+  // Lazy require so this file doesn't grow a hard dep on the
+  // services layer at parse time.
+  function lookupServices() {
+    const vh  = require('../services/vaultHandle');
+    const kx  = require('../services/keyExchange');
+    return { findByHandleOrPhone: vh.findByHandleOrPhone, getPublicKey: kx.getPublicKey };
+  }
+
+  // Hard validation — must look like a handle (@xxx) or a phone
+  // (5+ digits). Free-form names are rejected so we never store
+  // an unresolvable entry going forward.
+  function looksLikeIdentity(s) {
+    const t = String(s || '').trim();
+    if (!t) return false;
+    if (t.startsWith('@')) return /^@[a-z0-9_]{2,}$/i.test(t);
+    const digits = t.replace(/\D/g, '');
+    return digits.length >= 5;
+  }
+
+  async function add() {
+    const raw = newInput.trim();
+    if (!raw) return;
+    if (!looksLikeIdentity(raw)) {
+      Alert.alert(
+        'Use @handle or phone',
+        'Members must be added by their VaultChat @handle (e.g. @harold) or phone number so messages can be encrypted to them.',
+      );
+      return;
+    }
+    // Group cap (free vs premium).
     const cap = premium ? PREMIUM_GROUP_MAX : FREE_GROUP_MAX;
     if (members.length >= cap) {
       if (!premium) {
-        // Hit the free cap — open the paywall. The parent passes
-        // onUpsell, which fires PremiumModal in the parent so the
-        // user doesn't have to leave the screen.
         Alert.alert(
           'Group full',
           `Free groups can have up to ${FREE_GROUP_MAX} members. Upgrade to Premium for groups up to ${PREMIUM_GROUP_MAX}.`,
@@ -74,14 +116,87 @@ function ManageMembersModal({ visible, group, onClose, onSave, accent, bg, card,
       }
       return;
     }
-    setMembers(prev => [...prev, name]);
-    setNewMember('');
+    setAdding(true);
+    try {
+      const { findByHandleOrPhone, getPublicKey } = lookupServices();
+      const profile = await findByHandleOrPhone(raw);
+      if (!profile?.id) {
+        Alert.alert(
+          'No match',
+          `No VaultChat user matches "${raw}". Double-check the @handle or phone number.`,
+        );
+        setAdding(false);
+        return;
+      }
+      // Dup-check by user_id (more robust than name comparison).
+      if (members.some(m => m.user_id === profile.id)) {
+        Alert.alert('Already added', 'This member is already in the group.');
+        setAdding(false);
+        return;
+      }
+      const pk = await getPublicKey(profile.id);
+      const enriched = {
+        name:         profile.display_name || profile.vault_handle || profile.phone || raw,
+        user_id:      profile.id,
+        vault_handle: profile.vault_handle || null,
+        phone:        profile.phone || null,
+        public_key:   pk || null,
+      };
+      setMembers(prev => [...prev, enriched]);
+      setNewInput('');
+    } catch {
+      Alert.alert('Couldn’t add', 'Try again in a moment.');
+    } finally {
+      setAdding(false);
+    }
   }
 
-  function remove(name) {
-    Alert.alert('Remove Member', `Remove "${name}" from the group?`, [
+  // Convert a legacy bare-name entry to a resolved one in-place.
+  async function resolveAt(idx) {
+    const state = resolveState[idx] || {};
+    const lookup = (state.lookup || '').trim();
+    if (!looksLikeIdentity(lookup)) {
+      Alert.alert('Use @handle or phone', 'Enter the member\'s VaultChat @handle or phone to resolve.');
+      return;
+    }
+    setResolveState(prev => ({ ...prev, [idx]: { ...state, status: 'resolving' } }));
+    try {
+      const { findByHandleOrPhone, getPublicKey } = lookupServices();
+      const profile = await findByHandleOrPhone(lookup);
+      if (!profile?.id) {
+        setResolveState(prev => ({ ...prev, [idx]: { ...state, status: 'fail' } }));
+        return;
+      }
+      const pk = await getPublicKey(profile.id);
+      setMembers(prev => prev.map((m, i) => i === idx ? {
+        name:         m.name || profile.display_name || profile.vault_handle || profile.phone || lookup,
+        user_id:      profile.id,
+        vault_handle: profile.vault_handle || null,
+        phone:        profile.phone || null,
+        public_key:   pk || null,
+      } : m));
+      setResolveState(prev => {
+        const next = { ...prev };
+        delete next[idx];
+        return next;
+      });
+    } catch {
+      setResolveState(prev => ({ ...prev, [idx]: { ...state, status: 'fail' } }));
+    }
+  }
+
+  function remove(idx) {
+    const m = members[idx];
+    Alert.alert('Remove Member', `Remove "${m.name || 'this member'}" from the group?`, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Remove', style: 'destructive', onPress: () => setMembers(prev => prev.filter(m => m !== name)) },
+      { text: 'Remove', style: 'destructive', onPress: () => {
+        setMembers(prev => prev.filter((_, i) => i !== idx));
+        setResolveState(prev => {
+          const next = { ...prev };
+          delete next[idx];
+          return next;
+        });
+      }},
     ]);
   }
 
@@ -93,7 +208,7 @@ function ManageMembersModal({ visible, group, onClose, onSave, accent, bg, card,
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }}>
-        <View style={[{ backgroundColor: bg, borderTopLeftRadius: 28, borderTopRightRadius: 28, maxHeight: '80%' }]}>
+        <View style={[{ backgroundColor: bg, borderTopLeftRadius: 28, borderTopRightRadius: 28, maxHeight: '85%' }]}>
           {/* Header */}
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: border }}>
             <TouchableOpacity onPress={onClose}><Text style={{ color: sub, fontSize: 16 }}>Cancel</Text></TouchableOpacity>
@@ -101,44 +216,102 @@ function ManageMembersModal({ visible, group, onClose, onSave, accent, bg, card,
             <TouchableOpacity onPress={save}><Text style={{ color: accent, fontWeight: '700', fontSize: 16 }}>Save</Text></TouchableOpacity>
           </View>
 
-          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
+          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
             <Text style={{ color: sub, fontSize: 11, fontWeight: '700', marginBottom: 12, letterSpacing: 0.5 }}>
               {members.length} MEMBER{members.length !== 1 ? 'S' : ''}
             </Text>
 
-            {/* Add member row */}
-            <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16 }}>
+            {/* Add member row — identity-required */}
+            <View style={{ flexDirection: 'row', gap: 10, marginBottom: 6 }}>
               <TextInput
                 style={{ flex: 1, backgroundColor: inputBg, color: tx, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 }}
-                placeholder="Add member name or handle…"
+                placeholder="@handle or phone"
                 placeholderTextColor={sub}
-                value={newMember}
-                onChangeText={setNewMember}
+                value={newInput}
+                onChangeText={setNewInput}
                 onSubmitEditing={add}
+                autoCapitalize="none"
+                autoCorrect={false}
                 returnKeyType="done"
+                editable={!adding}
               />
               <TouchableOpacity
-                style={{ backgroundColor: accent, borderRadius: 14, paddingHorizontal: 18, alignItems: 'center', justifyContent: 'center' }}
-                onPress={add}>
-                <Text style={{ color: '#000', fontWeight: '700', fontSize: 15 }}>Add</Text>
+                style={{ backgroundColor: accent, borderRadius: 14, paddingHorizontal: 18, alignItems: 'center', justifyContent: 'center', opacity: adding ? 0.6 : 1 }}
+                onPress={add}
+                disabled={adding}>
+                {adding
+                  ? <ActivityIndicator color="#000" size="small" />
+                  : <Text style={{ color: '#000', fontWeight: '700', fontSize: 15 }}>Add</Text>}
               </TouchableOpacity>
             </View>
+            <Text style={{ color: sub, fontSize: 11, marginBottom: 16 }}>
+              Members are added by VaultChat @handle or phone so messages can be end-to-end encrypted to them.
+            </Text>
 
             {/* Members list */}
             {members.length === 0 && (
               <Text style={{ color: sub, textAlign: 'center', paddingVertical: 20 }}>No members yet. Add someone above.</Text>
             )}
-            {members.map((m, i) => (
-              <View key={i} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: card, borderRadius: 14, padding: 14, marginBottom: 8 }}>
-                <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: accent + '33', alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
-                  <Text style={{ color: tx, fontWeight: '700', fontSize: 15 }}>{m[0]?.toUpperCase()}</Text>
+            {members.map((m, i) => {
+              const resolved = !!(m.user_id && m.public_key);
+              const rs       = resolveState[i] || {};
+              return (
+                <View key={i} style={{ backgroundColor: card, borderRadius: 14, padding: 14, marginBottom: 8 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: accent + '33', alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
+                      <Text style={{ color: tx, fontWeight: '700', fontSize: 15 }}>{(m.name || '?')[0]?.toUpperCase()}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: tx, fontSize: 15, fontWeight: '600' }} numberOfLines={1}>{m.name || 'Member'}</Text>
+                      {/* Status line — green when encryptable, amber otherwise */}
+                      {resolved ? (
+                        <Text style={{ color: '#10B981', fontSize: 11, fontWeight: '600', marginTop: 2 }}>
+                          🔒 {m.vault_handle ? `@${m.vault_handle}` : (m.phone || 'encrypted')}
+                        </Text>
+                      ) : (
+                        <Text style={{ color: '#B45309', fontSize: 11, fontWeight: '600', marginTop: 2 }}>
+                          ⚠️ Legacy member — needs an identity to encrypt
+                        </Text>
+                      )}
+                    </View>
+                    <TouchableOpacity onPress={() => remove(i)} style={{ padding: 6 }}>
+                      <Text style={{ color: '#FF3B30', fontSize: 18 }}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Inline resolve row for legacy bare-name entries */}
+                  {!resolved && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 }}>
+                      <TextInput
+                        style={{ flex: 1, backgroundColor: inputBg, color: tx, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, fontSize: 13 }}
+                        placeholder="@handle or phone"
+                        placeholderTextColor={sub}
+                        value={rs.lookup || ''}
+                        onChangeText={t => setResolveState(prev => ({ ...prev, [i]: { ...prev[i], lookup: t, status: 'idle' } }))}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        returnKeyType="done"
+                        onSubmitEditing={() => resolveAt(i)}
+                        editable={rs.status !== 'resolving'}
+                      />
+                      <TouchableOpacity
+                        style={{ backgroundColor: accent, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, opacity: (rs.lookup || '').trim() ? 1 : 0.5 }}
+                        onPress={() => resolveAt(i)}
+                        disabled={!(rs.lookup || '').trim() || rs.status === 'resolving'}>
+                        {rs.status === 'resolving'
+                          ? <ActivityIndicator color="#000" size="small" />
+                          : <Text style={{ color: '#000', fontWeight: '700', fontSize: 12 }}>Resolve</Text>}
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                  {!resolved && rs.status === 'fail' && (
+                    <Text style={{ color: '#ef4444', fontSize: 11, fontWeight: '600', marginTop: 6 }}>
+                      No VaultChat user matches that handle / phone.
+                    </Text>
+                  )}
                 </View>
-                <Text style={{ flex: 1, color: tx, fontSize: 15, fontWeight: '600' }}>{m}</Text>
-                <TouchableOpacity onPress={() => remove(m)} style={{ padding: 6 }}>
-                  <Text style={{ color: '#FF3B30', fontSize: 18 }}>✕</Text>
-                </TouchableOpacity>
-              </View>
-            ))}
+              );
+            })}
           </ScrollView>
         </View>
       </View>

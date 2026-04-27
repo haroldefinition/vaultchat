@@ -338,6 +338,10 @@ export default function App() {
         // Phase MM: also publish this install's per-device key.
         // Best-effort; silently no-ops if Supabase is unreachable.
         const { publishMyDeviceKey } = require('./src/services/deviceKeys');
+        // Phase YY: publish this device's Double Ratchet pre-key
+        // bundle (identity_pub + signed_pre_pub). Lets peers
+        // bootstrap an X3DH session for forward-secret 1:1 chats.
+        const { publishMyRatchetPreKey } = require('./src/services/ratchetService');
         const { data: { session } } = await supabase.auth.getSession();
         if (session) {
           setIsLoggedIn(true);
@@ -345,6 +349,7 @@ export default function App() {
           if (session.user?.id) {
             publishMyPublicKey(session.user.id).catch(() => {});
             publishMyDeviceKey(session.user.id, session.user?.phone || null).catch(() => {});
+            publishMyRatchetPreKey(session.user.id).catch(() => {});
             bootstrapRealtime(session.user.id);
           }
         } else {
@@ -365,6 +370,7 @@ export default function App() {
           if (session?.user?.id) {
             publishMyPublicKey(session.user.id).catch(() => {});
             publishMyDeviceKey(session.user.id, session.user?.phone || null).catch(() => {});
+            publishMyRatchetPreKey(session.user.id).catch(() => {});
             bootstrapRealtime(session.user.id);
           } else {
             stopCallListener();

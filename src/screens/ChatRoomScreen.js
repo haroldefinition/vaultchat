@@ -58,6 +58,38 @@ import {
 import { getDeviceKeysForUser, publishMyDeviceKey } from '../services/deviceKeys';
 import { getDeviceId } from '../services/deviceIdentity';
 import { loadLatest, loadOlder } from '../services/messagePager';
+import {
+  publishMyRatchetPreKey,
+  canUseRatchet,
+  encryptForRatchet,
+  decryptForRatchet,
+  isRatchetEnvelope,
+} from '../services/ratchetService';
+
+// ── Phase YY: per-room sender-plaintext disk cache ────────────
+// Ratchet wires can't be self-decrypted (the chain key has been
+// rotated by the next send). To let the sender re-read their own
+// history after a cold restart we mirror plaintext to AsyncStorage
+// here. Wrapped in tiny try/catch helpers since this is best-effort.
+const _plainKey = (roomId) => `vaultchat_plain_${roomId}`;
+
+async function persistSenderPlaintext(roomId, msgId, plaintext) {
+  try {
+    const raw = await AsyncStorage.getItem(_plainKey(roomId));
+    const map = raw ? JSON.parse(raw) : {};
+    map[msgId] = plaintext;
+    await AsyncStorage.setItem(_plainKey(roomId), JSON.stringify(map));
+  } catch {}
+}
+
+async function hydrateSenderPlaintext(roomId, cacheRef) {
+  try {
+    const raw = await AsyncStorage.getItem(_plainKey(roomId));
+    if (!raw) return;
+    const map = JSON.parse(raw);
+    for (const [k, v] of Object.entries(map)) cacheRef.current.set(k, v);
+  } catch {}
+}
 
 // ── GIFs & Emojis ─────────────────────────────────────────────
 const GIFS = [
@@ -463,10 +495,21 @@ export default function ChatRoomScreen({ route, navigation }) {
   //   'error'     — timeout / network failure. Allow send as last-resort plaintext.
   // We hard-cap resolution at 3s so a slow Supabase never permanently blocks sends.
   const [encryptionStatus, setEncryptionStatus] = useState('resolving');
+  // Phase YY: Double Ratchet eligibility for THIS conversation. Set
+  // by the recipient-resolution effect once we know whether both
+  // sides are single-device + have published a ratchet bundle. When
+  // true, postMsg routes via encryptForRatchet (forward-secret);
+  // otherwise we keep using the multi-device (MD2) envelope.
+  const [ratchetReady,         setRatchetReady]         = useState(false);
+  const [ratchetPeerDeviceId,  setRatchetPeerDeviceId]  = useState(null);
   // Plaintext cache keyed by message id — lets the sender's own device render
   // history without re-hitting the crypto path for already-decrypted rows,
   // and lets optimistic (tempId) messages carry plaintext through to the
   // confirmed row once Supabase echoes it back encrypted.
+  // Phase YY: ALSO doubles as the persistence layer for sender-side
+  // ratchet plaintext — ratchet wires can't be self-decrypted (the
+  // chain key has rotated), so we mirror the cache to AsyncStorage
+  // under `vaultchat_plain_${roomId}` and hydrate it on screen mount.
   const plaintextCacheRef = useRef(new Map());
 
   // Staged media
@@ -492,13 +535,26 @@ export default function ChatRoomScreen({ route, navigation }) {
   async function decryptRow(row) {
     if (!row || typeof row.content !== 'string') return row;
     // Plaintext cache hit (e.g., we just sent this — avoid re-decrypting).
+    // For ratchet sender rows the cache IS the only path: the wire
+    // can't be self-decrypted because the chain key has rotated.
     const cached = plaintextCacheRef.current.get(row.id);
     if (cached != null) return { ...row, content: cached };
-    const isMulti = isMultiDeviceEnvelope(row.content);
-    if (!isMulti && !isEncryptedEnvelope(row.content)) return row;
+    const isRatchet = isRatchetEnvelope(row.content);
+    const isMulti   = isMultiDeviceEnvelope(row.content);
+    if (!isRatchet && !isMulti && !isEncryptedEnvelope(row.content)) return row;
     try {
       let plaintext;
-      if (row.sender_id && row.sender_id === myId) {
+      if (isRatchet) {
+        if (row.sender_id && row.sender_id === myId) {
+          // Sender path: chain key is gone, no recovery from the
+          // wire. The hydrated disk cache (vaultchat_plain_<roomId>)
+          // covers cold restart; if it missed, mark the row locked.
+          throw new Error('Ratchet sender plaintext not in local cache');
+        }
+        const peerDeviceId = row.metadata?.sender_device_id;
+        if (!peerDeviceId) throw new Error('Ratchet wire missing sender_device_id');
+        plaintext = await decryptForRatchet(row.sender_id, peerDeviceId, row.content);
+      } else if (row.sender_id && row.sender_id === myId) {
         // I sent this — try the self-seal first (works for both
         // single and multi-device wire formats since ct_self is
         // independent), then fall back to opening my slot.
@@ -554,6 +610,9 @@ export default function ChatRoomScreen({ route, navigation }) {
         // so a slow Supabase doesn't strand the user.
         publishMyPublicKey(myId).catch(() => {});
         publishMyDeviceKey(myId, recipientPhone).catch(() => {});
+        // Phase YY: publish my ratchet pre-key bundle alongside the
+        // device key so peers can bootstrap a Double Ratchet session.
+        publishMyRatchetPreKey(myId).catch(() => {});
         // Find the other member of this room. Pass recipientPhone so legacy
         // chats (no rooms row yet) can fall back to a profile lookup.
         const otherId = await resolveDirectRecipient(roomId, myId, { recipientPhone });
@@ -574,6 +633,21 @@ export default function ChatRoomScreen({ route, navigation }) {
           // legacy single). Otherwise plaintext gate fires.
           const ready = (devices && devices.length > 0) || !!pk;
           setEncryptionStatus(ready ? 'ready' : 'plaintext');
+          // Phase YY: kick off ratchet eligibility check in the
+          // background. We don't gate the UI on it — if it returns
+          // false the existing MD2 path takes over silently.
+          (async () => {
+            try {
+              const elig = await canUseRatchet(myId, otherId);
+              if (cancelled) return;
+              setRatchetReady(!!elig?.ok);
+              setRatchetPeerDeviceId(elig?.peerDeviceId || null);
+              if (__DEV__) {
+                console.log('[ratchet] eligibility for', otherId.slice(0, 8),
+                  '→', elig?.ok ? 'ENABLED' : `disabled (${elig?.reason})`);
+              }
+            } catch {}
+          })();
         } else {
           setEncryptionStatus('plaintext');
         }
@@ -621,7 +695,12 @@ export default function ChatRoomScreen({ route, navigation }) {
 
   useEffect(() => {
     loadUser();
-    fetchMessages();
+    // Phase YY: hydrate sender-plaintext disk cache BEFORE fetchMessages
+    // so freshly-decrypted ratchet sender rows hit the cache instead of
+    // tripping the "[Can't decrypt...]" placeholder.
+    hydrateSenderPlaintext(roomId, plaintextCacheRef).then(() => {
+      fetchMessages();
+    });
     // Flush any queued messages from offline period
     flushQueue().catch(() => {});
 
@@ -896,27 +975,44 @@ export default function ChatRoomScreen({ route, navigation }) {
     // inverted FlatList — new messages appear at bottom automatically
 
     // Build the insert payload.
-    // Phase MM: prefer multi-device envelope when peer has device
-    // keys published — encrypts once per device so all of their
-    // installs can decrypt with their own private key. Falls back to
-    // the legacy single-recipient envelope if peer is pre-Phase-MM
-    // (still has profiles.public_key but no user_device_keys rows).
+    // Phase YY: prefer the Double Ratchet path if both sides are
+    // single-device with a published bundle (forward-secret).
+    // Phase MM: otherwise prefer the multi-device envelope when peer
+    // has device keys published.
+    // Pre-Phase-MM peers fall through to the legacy single-recipient
+    // envelope.
     let insertPayload;
+    let usedRatchet = false;
     try {
-      let wireContent, metadataSelf;
-      if (hasDevices) {
-        ({ content: wireContent, metadataSelf } =
-          await encryptForDevicesAndSelf(content, recipientDevices));
+      if (ratchetReady && ratchetPeerDeviceId && recipientId) {
+        const wire = await encryptForRatchet(recipientId, ratchetPeerDeviceId, content);
+        const myDeviceId = await getDeviceId();
+        insertPayload = {
+          room_id:   roomId,
+          sender_id: myId,
+          content:   wire,
+          // No ct_self — ratchet wires can't be self-decrypted (the
+          // chain key has rotated). The sender persists their own
+          // plaintext to AsyncStorage instead (see below).
+          metadata: { encrypted: true, v: 'ratchet:v1', sender_device_id: myDeviceId },
+        };
+        usedRatchet = true;
       } else {
-        ({ content: wireContent, metadataSelf } =
-          await encryptMessageForPair(content, recipientPubKey));
+        let wireContent, metadataSelf;
+        if (hasDevices) {
+          ({ content: wireContent, metadataSelf } =
+            await encryptForDevicesAndSelf(content, recipientDevices));
+        } else {
+          ({ content: wireContent, metadataSelf } =
+            await encryptMessageForPair(content, recipientPubKey));
+        }
+        insertPayload = {
+          room_id:  roomId,
+          sender_id: myId,
+          content:  wireContent,
+          metadata: { ct_self: metadataSelf, encrypted: true, v: hasDevices ? 'multi:1' : 2 },
+        };
       }
-      insertPayload = {
-        room_id:  roomId,
-        sender_id: myId,
-        content:  wireContent,
-        metadata: { ct_self: metadataSelf, encrypted: true, v: hasDevices ? 'multi:1' : 2 },
-      };
     } catch (e) {
       if (__DEV__) console.warn('encrypt failed:', e?.message);
       try { Alert.alert('Send failed', 'Could not encrypt this message. Try again in a moment.'); } catch {}
@@ -935,6 +1031,13 @@ export default function ChatRoomScreen({ route, navigation }) {
         // Cache the plaintext under the confirmed row id so any future
         // re-render / realtime echo resolves instantly without re-decrypting.
         plaintextCacheRef.current.set(data.id, content);
+        // Phase YY: for ratchet sends, ALSO persist plaintext to disk
+        // so the sender can re-read their own history after a cold
+        // restart (the wire isn't self-decryptable). Best-effort —
+        // failure just means the sender sees a locked row next launch.
+        if (usedRatchet) {
+          persistSenderPlaintext(roomId, data.id, content).catch(() => {});
+        }
         // Replace the temp row with the confirmed one, but keep plaintext
         // `content` in the visible state (not the wire ciphertext).
         const confirmedForUI = { ...data, content };
