@@ -1,33 +1,35 @@
 // ============================================================
-//  voipPushService.js — task #103
-//  PushKit (VoIP) integration for cold-state incoming calls.
+//  voipPushService.js — tasks #103 (iOS) + #60 (Android)
 //
-//  Lifecycle:
+//  Cold-state incoming-call delivery for both platforms:
+//
+//  iOS (PushKit / APNs):
 //    1. App boot → register VoIP push handler with iOS via
 //       react-native-voip-push-notification.
-//    2. iOS hands us a PushKit token (hex string) on first launch
-//       AND any time it rotates the token.
-//    3. We POST the token to the Railway server's
-//       /pushkit/register endpoint, keyed by the current user id.
-//    4. When someone calls us, the server fans out a VoIP push to
-//       every registered token. iOS wakes our app from a fully-
-//       killed state and delivers the push to didReceiveIncomingPush.
-//    5. We MUST display CallKit within ~5 seconds or iOS penalises
-//       the app (eventually revoking VoIP entitlement).
-//       displayIncomingCall() is wired through callkit.js — same
-//       path the foreground socket flow uses, so the UI is identical.
+//    2. iOS hands us a PushKit token. We POST it to /pushkit/register
+//       with platform='ios'.
+//    3. Server fans out a VoIP push via APNs. iOS wakes the app
+//       and delivers to didReceiveIncomingPush. We MUST display
+//       CallKit within ~5 seconds or iOS revokes the entitlement.
 //
-//  Android:
-//    iOS-only. Android background calling is task #60 (FCM
-//    high-priority data messages → ConnectionService). This module
-//    is a no-op on Android.
+//  Android (FCM / ConnectionService):
+//    1. App boot → register Firebase messaging handler.
+//    2. Firebase hands us an FCM token. We POST it to /pushkit/register
+//       with platform='android'.
+//    3. Server fans out via FCM HTTP v1 high-priority data message.
+//       Android wakes the app — the BACKGROUND handler is registered
+//       in index.js (must be set up BEFORE App mounts so headless JS
+//       can pick it up from a fully-killed state).
+//    4. The handler immediately calls RNCallKeep.displayIncomingCall
+//       which binds to our self-managed ConnectionService and renders
+//       the OS-level incoming-call UI on the lock screen.
 //
 //  Dev note:
-//    react-native-voip-push-notification is a NATIVE module — it
-//    requires a development build (expo prebuild + native compile).
-//    Expo Go users will get an undefined module on import, which is
-//    why we wrap the require in try/catch and silently no-op when
-//    missing. This matches Harold's policy: expo-dev-client only.
+//    Both platforms require a development build (expo prebuild +
+//    native compile). Expo Go users get undefined module imports,
+//    which is why we wrap each native require in try/catch and
+//    silently no-op when missing. Matches Harold's policy:
+//    expo-dev-client only.
 // ============================================================
 
 import { Platform } from 'react-native';
@@ -68,7 +70,14 @@ let _myUserId = null;
  */
 export async function startVoipPush({ myUserId }) {
   if (_started || !myUserId) return;
-  if (Platform.OS !== 'ios') return;          // iOS-only for now (#60 covers Android)
+
+  // Android branch — Firebase Cloud Messaging + react-native-callkeep.
+  // Lives in a separate function so the module shape stays clean.
+  if (Platform.OS === 'android') {
+    return _startAndroidPush({ myUserId });
+  }
+
+  if (Platform.OS !== 'ios') return;
   if (!VoipPushNotification) {
     if (__DEV__) console.log('[voip] react-native-voip-push-notification not installed — skipping');
     return;
@@ -149,7 +158,7 @@ async function _getSupabaseAccessToken() {
   }
 }
 
-async function _postTokenToServer({ userId, token }) {
+async function _postTokenToServer({ userId, token, platform = 'ios' }) {
   try {
     const accessToken = await _getSupabaseAccessToken();
     if (!accessToken) {
@@ -167,7 +176,7 @@ async function _postTokenToServer({ userId, token }) {
       // server ignores it and uses the verified token instead.
       body: JSON.stringify({
         token,
-        platform: 'ios',
+        platform,
         bundleId: 'com.chatvault.vaultchat',
       }),
     });
@@ -221,3 +230,135 @@ function _onIncomingPush(payload) {
 export function isVoipReady() {
   return _started && !!VoipPushNotification;
 }
+
+// ── Android (Phase AAA / task #60) ─────────────────────────────
+// Firebase Cloud Messaging + react-native-callkeep.
+//
+// Lifecycle:
+//   1. Set up callkeep with PhoneAccount config — registers the
+//      VoiceConnectionService declared in AndroidManifest.xml.
+//   2. Request POST_NOTIFICATIONS perm (Android 13+) so heads-up
+//      incoming-call notifications can render.
+//   3. Get the FCM token + register it with the server under
+//      platform='android'. Listen for token rotations.
+//   4. Wire foreground messaging — when an FCM data message arrives
+//      while the app is foregrounded, route through the SAME
+//      _onIncomingPush so the call pipeline stays unified.
+//   5. Wire callkeep answer/end events so user actions propagate
+//      back to callPeer / roomCall.
+//
+// The BACKGROUND message handler — the one that wakes a killed
+// app — is registered separately in index.js (the Expo entry).
+// Firebase's headless JS runtime requires that handler be set
+// BEFORE App mounts.
+
+let _RNCallKeep = null;
+let _firebaseMessaging = null;
+try {
+  const ck = require('react-native-callkeep');
+  _RNCallKeep = ck.default || ck.RNCallKeep || ck;
+  if (__DEV__) {
+    console.log('[voip] callkeep module keys:', ck && Object.keys(ck));
+    console.log('[voip] callkeep default keys:', ck?.default && Object.keys(ck.default));
+    console.log('[voip] callkeep resolved type:', typeof _RNCallKeep,
+      'has setup:', typeof _RNCallKeep?.setup === 'function');
+  }
+} catch (e) {
+  if (__DEV__) console.warn('[voip] callkeep require threw:', e?.message);
+}
+try {
+  const fm = require('@react-native-firebase/messaging');
+  _firebaseMessaging = fm.default || fm;
+  if (__DEV__ && typeof _firebaseMessaging !== 'function') {
+    console.warn('[voip] firebase messaging not a function. typeof:', typeof _firebaseMessaging, 'keys:', Object.keys(fm));
+  }
+} catch (e) {
+  if (__DEV__) console.warn('[voip] firebase messaging require threw:', e?.message);
+}
+
+let _androidStarted = false;
+
+async function _startAndroidPush({ myUserId }) {
+  if (_androidStarted) return;
+  const hasCk = !!(_RNCallKeep && (typeof _RNCallKeep.setup === 'function'));
+  const hasFm = typeof _firebaseMessaging === 'function';
+  if (!hasCk || !hasFm) {
+    if (__DEV__) console.log('[voip] android: native modules missing — callkeep:', hasCk, 'firebase:', hasFm);
+    return;
+  }
+  _myUserId = myUserId;
+  _androidStarted = true;
+
+  // Set up callkeep. The PhoneAccount config below MUST be filled
+  // out — empty values cause the OS to silently reject the
+  // registration and incoming calls land in the void.
+  try {
+    await _RNCallKeep.setup({
+      ios: { appName: 'VaultChat' }, // ignored on Android but the API requires it
+      android: {
+        alertTitle:                   'Permissions required',
+        alertDescription:             'VaultChat needs Phone Account permission to ring incoming calls.',
+        cancelButton:                 'Cancel',
+        okButton:                     'OK',
+        imageName:                    'phone_account_icon',
+        additionalPermissions:        [],
+        // foregroundService keeps WebRTC alive once a call is connected.
+        foregroundService: {
+          channelId:        'com.chatvault.vaultchat.calls',
+          channelName:      'Active calls',
+          notificationTitle: 'VaultChat is on a call',
+          notificationIcon: 'ic_launcher',
+        },
+      },
+    });
+    _RNCallKeep.setAvailable(true);
+  } catch (e) {
+    if (__DEV__) console.warn('[voip] callkeep setup failed:', e?.message || e);
+  }
+
+  // Wire callkeep events — answer routes to the existing call
+  // pipeline; end-call cleans up.
+  try {
+    _RNCallKeep.addEventListener('answerCall', ({ callUUID }) => {
+      // The actual WebRTC connect happens when callPeer/roomCall
+      // receives the matching socket event. callkeep's role is
+      // purely UI: it surfaces the user's accept intent.
+      try { _RNCallKeep.setCurrentCallActive(callUUID); } catch {}
+    });
+    _RNCallKeep.addEventListener('endCall', ({ callUUID }) => {
+      try { callPeer.endActiveCall?.(callUUID); } catch {}
+      try { roomCall.endActiveCall?.(callUUID);  } catch {}
+    });
+  } catch {}
+
+  // Permission for heads-up notifications (Android 13+).
+  try {
+    await _firebaseMessaging().requestPermission();
+  } catch {}
+
+  // Token registration + rotation.
+  try {
+    const token = await _firebaseMessaging().getToken();
+    if (token) await _postTokenToServer({ userId: myUserId, token, platform: 'android' });
+  } catch (e) {
+    if (__DEV__) console.warn('[voip] android: getToken failed:', e?.message || e);
+  }
+  try {
+    _firebaseMessaging().onTokenRefresh(async (token) => {
+      try { await _postTokenToServer({ userId: myUserId, token, platform: 'android' }); }
+      catch {}
+    });
+  } catch {}
+
+  // Foreground FCM handler — when an FCM message arrives while the
+  // app is open, route it through the same path as the background
+  // handler in index.js so the call UI is consistent.
+  try {
+    _firebaseMessaging().onMessage(async (remoteMessage) => {
+      _onIncomingPush(remoteMessage?.data || {});
+    });
+  } catch {}
+}
+
+// (token POST helper now accepts `platform` directly — see
+// _postTokenToServer above.)
