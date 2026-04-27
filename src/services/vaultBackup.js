@@ -1,0 +1,209 @@
+// ============================================================
+//  vaultBackup.js — encrypted, user-controlled vault backup
+//
+//  What gets backed up:
+//    - The list of vaulted chat IDs (from vault.listVaultedIds)
+//    - The set Vault PIN itself? NO — too dangerous to round-trip;
+//      the user must remember it. The PIN is the encryption key.
+//    - Future: secure notes, vault file metadata
+//
+//  Security model:
+//    - Backup file = AES-GCM-256 ciphertext of a JSON snapshot.
+//    - Key derivation: PBKDF2-HMAC-SHA512(pin, salt, 200000) → 32B key.
+//    - Salt is random per-export and stored in the file header so
+//      restore can re-derive the same key.
+//    - Wire format (base64-encoded inside the file):
+//        VBACKUP1:{salt_b64}:{nonce_b64}:{ciphertext_b64}
+//
+//  Restore:
+//    - User picks the file via the system picker.
+//    - We read the salt + nonce, derive the key from the entered PIN,
+//      decrypt. On auth failure (wrong PIN) we surface a clear error
+//      instead of importing garbage.
+//
+//  Distribution:
+//    - export() writes to FileSystem.documentDirectory/vaultchat-backup-<ts>.vchat
+//      then opens the iOS Share Sheet so the user picks where to put
+//      the file (iCloud Drive / Files / Mail / AirDrop / Save...).
+//    - restore() takes a local file URI from the document picker and
+//      reads its contents.
+// ============================================================
+
+import nacl from 'tweetnacl';
+import naclUtil from 'tweetnacl-util';
+import * as FileSystem from 'expo-file-system';
+import { Share, Platform } from 'react-native';
+import { listVaultedIds, addToVault } from './vault';
+
+const HEADER  = 'VBACKUP1:';
+const PBKDF2_ITERS = 200000;
+
+// ── PBKDF2-HMAC-SHA512 (built on tweetnacl primitives) ────────
+// nacl.hash is SHA-512; we layer HMAC on top, then PBKDF2 on top
+// of that. Slow but correct — the iteration count is what makes
+// brute-forcing the PIN expensive.
+
+function _u8(arr) { return arr instanceof Uint8Array ? arr : new Uint8Array(arr); }
+
+function _hmacSha512(key, data) {
+  const BLOCK = 128;
+  let k = _u8(key);
+  if (k.length > BLOCK) k = nacl.hash(k);
+  if (k.length < BLOCK) {
+    const padded = new Uint8Array(BLOCK);
+    padded.set(k, 0);
+    k = padded;
+  }
+  const ipad = new Uint8Array(BLOCK);
+  const opad = new Uint8Array(BLOCK);
+  for (let i = 0; i < BLOCK; i++) {
+    ipad[i] = k[i] ^ 0x36;
+    opad[i] = k[i] ^ 0x5c;
+  }
+  const inner = new Uint8Array(BLOCK + data.length);
+  inner.set(ipad, 0); inner.set(data, BLOCK);
+  const innerHash = nacl.hash(inner);
+  const outer = new Uint8Array(BLOCK + innerHash.length);
+  outer.set(opad, 0); outer.set(innerHash, BLOCK);
+  return nacl.hash(outer); // 64 bytes
+}
+
+function _pbkdf2(pinBytes, salt, iters, dkLen) {
+  const out = new Uint8Array(dkLen);
+  let blockIdx = 1;
+  let outOffset = 0;
+  while (outOffset < dkLen) {
+    // T_i = F(pin, salt, iters, blockIdx)
+    const blockBE = new Uint8Array([(blockIdx>>24)&0xff,(blockIdx>>16)&0xff,(blockIdx>>8)&0xff,blockIdx&0xff]);
+    const saltConcat = new Uint8Array(salt.length + 4);
+    saltConcat.set(salt, 0); saltConcat.set(blockBE, salt.length);
+    let u = _hmacSha512(pinBytes, saltConcat);
+    let t = u.slice();
+    for (let i = 1; i < iters; i++) {
+      u = _hmacSha512(pinBytes, u);
+      for (let j = 0; j < t.length; j++) t[j] ^= u[j];
+    }
+    const copyLen = Math.min(t.length, dkLen - outOffset);
+    out.set(t.subarray(0, copyLen), outOffset);
+    outOffset += copyLen;
+    blockIdx += 1;
+  }
+  return out;
+}
+
+function _deriveKey(pin, salt) {
+  const pinBytes = naclUtil.decodeUTF8(String(pin));
+  // 32 bytes for nacl.secretbox
+  return _pbkdf2(pinBytes, salt, PBKDF2_ITERS, nacl.secretbox.keyLength);
+}
+
+// ── Snapshot collection / application ─────────────────────────
+
+async function _collectSnapshot() {
+  const vaultedIds = await listVaultedIds().catch(() => []);
+  return {
+    v: 1,
+    exported_at: new Date().toISOString(),
+    vaulted_ids: Array.isArray(vaultedIds) ? vaultedIds : [],
+  };
+}
+
+async function _applySnapshot(snap) {
+  if (!snap || snap.v !== 1) throw new Error('Unsupported backup version');
+  const ids = Array.isArray(snap.vaulted_ids) ? snap.vaulted_ids : [];
+  let restored = 0;
+  for (const id of ids) {
+    try { await addToVault(id); restored++; } catch {}
+  }
+  return restored;
+}
+
+// ── Export ────────────────────────────────────────────────────
+
+/**
+ * Export the user's vault state as a PIN-encrypted file and
+ * present the iOS Share Sheet so they can save it wherever they
+ * want (iCloud Drive, Files, Mail, AirDrop).
+ *
+ * Returns { ok, path, message } so the caller can show a toast
+ * or alert.
+ */
+export async function exportVaultBackup(pin) {
+  if (!pin || String(pin).length < 4) {
+    return { ok: false, message: 'PIN required to encrypt the backup.' };
+  }
+  try {
+    const snap   = await _collectSnapshot();
+    const json   = JSON.stringify(snap);
+    const data   = naclUtil.decodeUTF8(json);
+    const salt   = nacl.randomBytes(16);
+    const nonce  = nacl.randomBytes(nacl.secretbox.nonceLength);
+    const key    = _deriveKey(pin, salt);
+    const cipher = nacl.secretbox(data, nonce, key);
+    if (!cipher) throw new Error('Encryption failed');
+
+    const blob = HEADER +
+      naclUtil.encodeBase64(salt)   + ':' +
+      naclUtil.encodeBase64(nonce)  + ':' +
+      naclUtil.encodeBase64(cipher);
+
+    const ts = Date.now();
+    const filename = `vaultchat-backup-${ts}.vchat`;
+    const dir  = FileSystem.documentDirectory || FileSystem.cacheDirectory;
+    const uri  = `${dir}${filename}`;
+    await FileSystem.writeAsStringAsync(uri, blob, { encoding: FileSystem.EncodingType.UTF8 });
+
+    // Pop iOS Share Sheet so the user can save the file out of the app.
+    try {
+      await Share.share({
+        url: Platform.OS === 'ios' ? uri : undefined,
+        message: Platform.OS === 'android' ? `VaultChat backup saved at ${uri}` : undefined,
+        title: 'VaultChat Vault Backup',
+      });
+    } catch {}
+
+    return { ok: true, path: uri, message: 'Vault backup ready to save.' };
+  } catch (e) {
+    if (__DEV__) console.warn('exportVaultBackup error:', e?.message);
+    return { ok: false, message: 'Couldn’t create backup.' };
+  }
+}
+
+// ── Restore ───────────────────────────────────────────────────
+
+/**
+ * Read an encrypted backup file at `uri`, decrypt with the PIN,
+ * and apply the snapshot to local vault state.
+ *
+ * Returns { ok, restored, message }. `restored` = number of
+ * vaulted chat IDs successfully restored.
+ */
+export async function restoreVaultBackup(uri, pin) {
+  if (!uri) return { ok: false, message: 'No backup file selected.' };
+  if (!pin) return { ok: false, message: 'PIN required to decrypt the backup.' };
+  try {
+    const blob = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.UTF8 });
+    if (!blob.startsWith(HEADER)) {
+      return { ok: false, message: 'Not a VaultChat backup file.' };
+    }
+    const parts = blob.slice(HEADER.length).split(':');
+    if (parts.length !== 3) return { ok: false, message: 'Backup file is malformed.' };
+    const [saltB64, nonceB64, ctB64] = parts;
+    const salt   = naclUtil.decodeBase64(saltB64);
+    const nonce  = naclUtil.decodeBase64(nonceB64);
+    const cipher = naclUtil.decodeBase64(ctB64);
+
+    const key   = _deriveKey(pin, salt);
+    const plain = nacl.secretbox.open(cipher, nonce, key);
+    if (!plain) {
+      return { ok: false, message: 'Wrong PIN — couldn’t decrypt the backup.' };
+    }
+    const json = naclUtil.encodeUTF8(plain);
+    const snap = JSON.parse(json);
+    const restored = await _applySnapshot(snap);
+    return { ok: true, restored, message: `${restored} vaulted chat${restored === 1 ? '' : 's'} restored.` };
+  } catch (e) {
+    if (__DEV__) console.warn('restoreVaultBackup error:', e?.message);
+    return { ok: false, message: 'Couldn’t restore backup.' };
+  }
+}

@@ -731,7 +731,10 @@ export default function GroupChatScreen({ route, navigation }) {
       const resolved = await resolveAndCacheGroupMembers(groupId);
       const sendable = resolved.filter(m => m?.user_id && m?.public_key);
       if (sendable.length > 0) {
-        const enc = await encryptForGroup(text, sendable, currentUserId);
+        // Phase UU: pass roomId so encryptForGroup can fetch / generate
+        // the per-room secret and write HMAC-blinded envelope keys
+        // instead of the raw device_id map.
+        const enc = await encryptForGroup(text, sendable, currentUserId, { roomId: groupId });
         encryptedPayload = enc.insertPayload;
       }
     } catch (e) {

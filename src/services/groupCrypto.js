@@ -40,9 +40,28 @@ import { encryptMessage } from '../crypto/encryption';
 import { getPublicKey } from './keyExchange';
 import { findByHandleOrPhone } from './vaultHandle';
 import { ensureIdentityKeys } from '../crypto/encryption';
+import {
+  ensureRoomSecret,
+  getMyRoomSecret,
+  blindedIndex,
+  myBlindedIndexForMessage,
+} from './roomSecrets';
 
 const GROUPS_KEY = 'vaultchat_groups';
 const GRP_SENTINEL = 'GRPENC:v1';
+
+// RFC 4122-ish lightweight UUID4 — used as the per-message public
+// nonce that combines with the per-room secret to derive the
+// blinded envelope keys. Doesn't need cryptographic uniqueness, just
+// uniqueness within a room over time.
+function _uuid() {
+  const bytes = require('tweetnacl').randomBytes(16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  let hex = '';
+  for (let i = 0; i < 16; i++) hex += bytes[i].toString(16).padStart(2, '0');
+  return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20,32)}`;
+}
 
 /**
  * True if a stored group message is one of our group envelopes.
@@ -119,35 +138,67 @@ export async function resolveAndCacheGroupMembers(groupId) {
  * caller can decide whether to fall back to plaintext (e.g. when no
  * members have published keys yet) and how to message the user.
  */
-export async function encryptForGroup(plaintext, members, myUserId) {
-  // Phase MM upgrade: per-DEVICE per-recipient envelopes. Each
-  // member is fanned out to every device they've published a
-  // key for. Wire shape becomes:
-  //   metadata.ct_for_devices = { [device_id]: <ENC2 envelope>, ... }
+export async function encryptForGroup(plaintext, members, myUserId, opts = {}) {
+  // Phase UU upgrade: HMAC-blinded routing keys. Instead of
+  // exposing { device_id: ct } in metadata (which leaks group
+  // membership to anyone with DB read access), each envelope is
+  // keyed by HMAC(roomSecret, message_uuid || device_id) — a
+  // 128-bit hex blob with no link to the underlying identity.
   //
-  // We also keep the legacy ct_for_recipients map populated for
-  // peers still on Phase BB (single-recipient envelope) so they
-  // can decrypt during the rollout window. New clients prefer
-  // ct_for_devices when present.
+  // The room_secrets table holds one row per member, each
+  // encrypted to that member's pubkey, so only members can
+  // compute the HMAC keys.
+  //
+  // Backwards compat: ct_for_devices + ct_for_recipients are
+  // ALSO populated for clients that haven't shipped Phase UU.
+  // They get pruned in a follow-up release once telemetry shows
+  // adoption. New clients (group:3) prefer ct_blinded; older
+  // ones fall through to the legacy maps as before.
+  const { roomId } = opts;
   const ct_for_devices    = {};
   const ct_for_recipients = {};
+  const ct_blinded        = {};
   let recipientCount = 0;
   let deviceCount    = 0;
   let missingCount   = 0;
+
+  // Fetch / lazily create the room secret. Null = nobody on the
+  // roster could be encrypted to (very fresh group with zero
+  // resolvable members), in which case we fall back to plaintext
+  // upstream — same as before.
+  let roomSecret = null;
+  let messageUuid = null;
+  if (roomId) {
+    try {
+      roomSecret  = await ensureRoomSecret(roomId, members, myUserId);
+      messageUuid = _uuid();
+    } catch (e) {
+      if (__DEV__) console.warn('roomSecret fetch failed, falling back to legacy keys:', e?.message);
+    }
+  }
+
+  // Helper — encrypts plaintext to a device's pubkey AND writes
+  // the result under both the legacy device_id key and the new
+  // blinded HMAC key (when we have a roomSecret).
+  async function _addDeviceCt(deviceId, devicePub) {
+    if (!deviceId || !devicePub) return;
+    try {
+      const ct = await encryptMessage(plaintext, devicePub);
+      ct_for_devices[deviceId] = ct;
+      if (roomSecret && messageUuid) {
+        const idx = blindedIndex(roomSecret, `${messageUuid}|${deviceId}`);
+        if (idx) ct_blinded[idx] = ct;
+      }
+      deviceCount++;
+    } catch {}
+  }
 
   for (const m of members) {
     if (!m?.user_id) { missingCount++; continue; }
     if (m.user_id === myUserId) continue; // self handled below
     const devices = Array.isArray(m.device_keys) ? m.device_keys : [];
     if (devices.length > 0) {
-      // Multi-device path — encrypt once per published device.
-      for (const d of devices) {
-        if (!d?.device_id || !d?.public_key) continue;
-        try {
-          ct_for_devices[d.device_id] = await encryptMessage(plaintext, d.public_key);
-          deviceCount++;
-        } catch {}
-      }
+      for (const d of devices) await _addDeviceCt(d?.device_id, d?.public_key);
       recipientCount++;
     } else if (m.public_key) {
       // Legacy fallback — peer hasn't published per-device keys yet.
@@ -168,12 +219,7 @@ export async function encryptForGroup(plaintext, members, myUserId) {
       const { getDeviceKeysForUser } = require('./deviceKeys');
       const myDevices = await getDeviceKeysForUser(myUserId);
       if (Array.isArray(myDevices) && myDevices.length > 0) {
-        for (const d of myDevices) {
-          if (!d?.device_id || !d?.public_key) continue;
-          try {
-            ct_for_devices[d.device_id] = await encryptMessage(plaintext, d.public_key);
-          } catch {}
-        }
+        for (const d of myDevices) await _addDeviceCt(d?.device_id, d?.public_key);
       } else {
         const me = await ensureIdentityKeys();
         ct_for_recipients[myUserId] = await encryptMessage(plaintext, me.publicKey);
@@ -186,9 +232,15 @@ export async function encryptForGroup(plaintext, members, myUserId) {
       content:  GRP_SENTINEL,
       metadata: {
         encrypted: true,
-        v:        'group:2',          // bumped — devices map present
-        ct_for_devices,                // primary (new clients)
-        ct_for_recipients,             // legacy (Phase BB peers)
+        v:        roomSecret && messageUuid ? 'group:3' : 'group:2',
+        // group:3 blinded routing — primary for Phase UU+ readers
+        ...(roomSecret && messageUuid ? {
+          message_uuid: messageUuid,
+          ct_blinded,
+        } : {}),
+        // group:2 legacy maps — kept for Phase MM-only readers
+        ct_for_devices,
+        ct_for_recipients,
       },
     },
     recipientCount,
@@ -206,10 +258,32 @@ export async function encryptForGroup(plaintext, members, myUserId) {
 export async function decryptGroupMessageForMe(row, myUserId) {
   try {
     const { decryptMessage } = require('../crypto/encryption');
-    // Phase MM upgrade — prefer the per-DEVICE map written by
-    // group:2 senders. Look up THIS device's slot first; that
-    // gives a unique envelope per install of the same user.
-    const devMap = row?.metadata?.ct_for_devices;
+    const meta = row?.metadata || {};
+
+    // Phase UU upgrade — prefer the blinded routing map. Compute
+    // MY blinded index from the room secret + message_uuid + my
+    // device_id. If the sender wrote a slot under that index, that's
+    // my envelope.
+    const blinded = meta.ct_blinded;
+    const messageUuid = meta.message_uuid;
+    if (blinded && messageUuid && row?.group_id) {
+      try {
+        const secret = await getMyRoomSecret(row.group_id, myUserId);
+        if (secret) {
+          const { getDeviceId } = require('./deviceIdentity');
+          const myDeviceId = await getDeviceId();
+          const idx = myBlindedIndexForMessage(secret, messageUuid, myDeviceId);
+          if (idx && blinded[idx]) {
+            return await decryptMessage(blinded[idx]);
+          }
+        }
+      } catch {}
+      // Fall through to legacy maps if the secret isn't fetched
+      // yet or my device wasn't included in the blinded map.
+    }
+
+    // Phase MM legacy — per-device map keyed by raw device_id.
+    const devMap = meta.ct_for_devices;
     if (devMap && Object.keys(devMap).length > 0) {
       try {
         const { getDeviceId } = require('./deviceIdentity');
@@ -217,12 +291,10 @@ export async function decryptGroupMessageForMe(row, myUserId) {
         const env = devMap[myDeviceId];
         if (env) return await decryptMessage(env);
       } catch {}
-      // Fall through to the user-id map if device lookup misses
-      // (e.g., sender encrypted before this device's key was
-      // published — happens during the first multi-device send
-      // window).
     }
-    const env = row?.metadata?.ct_for_recipients?.[myUserId];
+
+    // Phase BB legacy — per-user map.
+    const env = meta.ct_for_recipients?.[myUserId];
     if (!env) return '🔒 Encrypted message';
     return await decryptMessage(env);
   } catch {
