@@ -1,6 +1,13 @@
 apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
+// Phase AAA: Firebase google-services. Reads google-services.json
+// from android/app/ and generates the per-package config used by FCM.
+// The plugin is only applied if the file is present so dev builds
+// without Firebase still compile.
+if (file("google-services.json").exists()) {
+    apply plugin: "com.google.gms.google-services"
+}
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
