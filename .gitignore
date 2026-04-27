@@ -1,2 +1,7 @@
 node_modules
 .expo/
+# Phase AAA: google-services.json must be committed so EAS Cloud
+# builds include it. Firebase API keys are designed to be public —
+# they're restricted by SHA-1 + package name in the Firebase console.
+# The actually-sensitive credential (the service-account JSON) lives
+# on Railway as FCM_SERVICE_ACCOUNT_JSON env var, never committed.

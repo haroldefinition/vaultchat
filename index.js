@@ -37,32 +37,31 @@ if (Platform.OS === 'android') {
   } catch {}
 
   if (messaging && RNCallKeep) {
-    messaging().setBackgroundMessageHandler(async (remoteMessage) => {
-      const data = remoteMessage?.data || {};
-      const callId     = data.callId;
-      const callerId   = data.callerId;
-      const callerName = data.callerName || 'VaultChat';
-      const type       = data.type || 'voice';
-      if (!callId || !callerId) return;
-
-      // displayIncomingCall MUST resolve before this handler returns
-      // or Android may suspend the JS runtime before the OS-level
-      // incoming-call UI is bound. The Promise it returns is fast —
-      // it's just the cross-process call into ConnectionService.
-      try {
-        await RNCallKeep.displayIncomingCall(
-          callId,
-          callerId,        // handle
-          callerName,      // displayed on the lock-screen
-          'generic',       // handleType
-          type === 'video',
-        );
-      } catch (e) {
-        // No console in headless JS — eat the error. The push will
-        // still surface as a normal heads-up notification via the
-        // FCM default channel.
-      }
-    });
+    // Wrap the registration itself in try/catch — Firebase throws
+    // synchronously if no [DEFAULT] app exists (i.e., the build was
+    // produced without google-services.json). We don't want a missing
+    // FCM config to keep the entire app from booting.
+    try {
+      messaging().setBackgroundMessageHandler(async (remoteMessage) => {
+        const data = remoteMessage?.data || {};
+        const callId     = data.callId;
+        const callerId   = data.callerId;
+        const callerName = data.callerName || 'VaultChat';
+        const type       = data.type || 'voice';
+        if (!callId || !callerId) return;
+        try {
+          await RNCallKeep.displayIncomingCall(
+            callId,
+            callerId,
+            callerName,
+            'generic',
+            type === 'video',
+          );
+        } catch (e) {}
+      });
+    } catch (e) {
+      console.warn('[index] setBackgroundMessageHandler failed:', e?.message);
+    }
   }
 }
 
