@@ -486,6 +486,10 @@ export default function ChatRoomScreen({ route, navigation }) {
   // (no rows in user_device_keys yet) — we then fall back to
   // recipientPubKey for the legacy single-recipient envelope.
   const [recipientDevices, setRecipientDevices] = useState([]);
+  // Phase ZZ: my OTHER devices (excluding this install). Included in
+  // by_dev at send time so any of my installs can decrypt the row,
+  // not just the one whose identity priv key matches ct_self.
+  const [mySenderDevices, setMySenderDevices] = useState([]);
   // encryptionStatus gates the send button until we know whether we can
   // encrypt to the peer. States:
   //   'resolving' — useEffect still running (publish + lookup). Send blocked.
@@ -635,16 +639,25 @@ export default function ChatRoomScreen({ route, navigation }) {
         if (cancelled) return;
         setRecipientId(otherId);
         if (otherId) {
-          // Resolve BOTH the multi-device list (preferred) and the
-          // legacy single pubkey (fallback) in parallel. Whichever
-          // returns usable data drives encryptionStatus.
-          const [devices, pk] = await Promise.all([
+          // Resolve BOTH the multi-device list (preferred), the
+          // legacy single pubkey (fallback), AND my own other
+          // devices (so by_dev can fan out to them — Phase ZZ) in
+          // parallel. Whichever returns usable data drives
+          // encryptionStatus.
+          const [devices, pk, myDevs, myThisDeviceId] = await Promise.all([
             getDeviceKeysForUser(otherId),
             getPublicKey(otherId),
+            getDeviceKeysForUser(myId),
+            getDeviceId(),
           ]);
           if (cancelled) return;
           setRecipientDevices(devices);
           setRecipientPubKey(pk);
+          // Filter out THIS install (ct_self handles it more
+          // efficiently). Anything left is another install of mine
+          // that should also be able to read what I send here.
+          const others = (myDevs || []).filter(d => d.device_id && d.device_id !== myThisDeviceId);
+          setMySenderDevices(others);
           // Ready if peer has at least one published key (device or
           // legacy single). Otherwise plaintext gate fires.
           const ready = (devices && devices.length > 0) || !!pk;
@@ -1016,8 +1029,11 @@ export default function ChatRoomScreen({ route, navigation }) {
       } else {
         let wireContent, metadataSelf;
         if (hasDevices) {
+          // Phase ZZ: include my OTHER devices in by_dev so any of
+          // my installs can read this row (not just the one whose
+          // identity priv key matches ct_self).
           ({ content: wireContent, metadataSelf } =
-            await encryptForDevicesAndSelf(content, recipientDevices));
+            await encryptForDevicesAndSelf(content, recipientDevices, mySenderDevices));
         } else {
           ({ content: wireContent, metadataSelf } =
             await encryptMessageForPair(content, recipientPubKey));

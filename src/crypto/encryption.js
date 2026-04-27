@@ -305,15 +305,43 @@ export async function decryptForMyDevice(wire, myDeviceId) {
 }
 
 /**
- * Convenience: encrypt to a recipient's device list AND a self-
- * envelope so the sender can read their own history back. Mirrors
- * encryptMessageForPair but for the multi-device era.
+ * Convenience: encrypt to a recipient's device list AND seal a
+ * "for myself" copy so the sender can read their own history back.
+ *
+ * `senderDevices` (optional) is the sender's OTHER devices —
+ * including them in by_dev means any of the sender's installs can
+ * decrypt by opening their own slot, not just the install whose
+ * identity priv key matches ct_self. Pass an empty array (or omit)
+ * for legacy single-device sender behavior.
+ *
+ * `ct_self` is kept around for backwards compat: clients that
+ * predate sender-fanout can still open their own history through
+ * that path.
  *
  * Returns { content, metadataSelf } in the same shape so call
  * sites swap one in for the other with no other changes.
  */
-export async function encryptForDevicesAndSelf(plaintext, deviceList) {
-  const content = await encryptForDevices(plaintext, deviceList);
+export async function encryptForDevicesAndSelf(plaintext, recipientDevices, senderDevices = []) {
+  // Combine recipient + sender devices into one list, dedup by
+  // device_id (defensive — usually disjoint in practice).
+  const merged = [];
+  const seen = new Set();
+  for (const list of [recipientDevices || [], senderDevices || []]) {
+    for (const d of list) {
+      if (!d?.device_id || !d?.public_key) continue;
+      if (seen.has(d.device_id)) continue;
+      seen.add(d.device_id);
+      merged.push(d);
+    }
+  }
+  if (!merged.length) {
+    throw new Error('encryptForDevicesAndSelf: no usable device keys');
+  }
+  const content = await encryptForDevices(plaintext, merged);
+
+  // Self-seal copy — opens with the SENDING device's identity keys.
+  // Useful as a fast-path on the sending device (no by_dev lookup)
+  // and as a safety net for old-client cross-device scenarios.
   const me = await ensureIdentityKeys();
   const nonce = nacl.randomBytes(nacl.box.nonceLength);
   const myPubBytes  = naclUtil.decodeBase64(me.publicKey);
