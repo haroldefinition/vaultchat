@@ -17,6 +17,23 @@
   <uses-permission android:name="android.permission.VIBRATE"/>
   <uses-permission android:name="android.permission.WRITE_CONTACTS"/>
   <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
+  <!-- Phase AAA: Android calling stack -->
+  <!-- ConnectionService backbone — lets us register a self-managed phone account via react-native-callkeep -->
+  <uses-permission android:name="android.permission.MANAGE_OWN_CALLS"/>
+  <uses-permission android:name="android.permission.READ_PHONE_STATE"/>
+  <uses-permission android:name="android.permission.READ_PHONE_NUMBERS"/>
+  <uses-permission android:name="android.permission.CALL_PHONE"/>
+  <uses-permission android:name="android.permission.BIND_TELECOM_CONNECTION_SERVICE"/>
+  <!-- Background WebRTC + foreground service for in-call audio/video -->
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL"/>
+  <uses-permission android:name="android.permission.WAKE_LOCK"/>
+  <!-- Heads-up incoming-call notification while ConnectionService is binding -->
+  <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+  <!-- Bluetooth headsets for in-call audio routing (Android 12+ runtime perm) -->
+  <uses-permission android:name="android.permission.BLUETOOTH"/>
+  <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
   <queries>
     <intent>
       <action android:name="android.intent.action.VIEW"/>
@@ -25,8 +42,17 @@
     </intent>
   </queries>
   <application android:name=".MainApplication" android:label="@string/app_name" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:allowBackup="true" android:theme="@style/AppTheme" android:supportsRtl="true" android:enableOnBackInvokedCallback="false" android:requestLegacyExternalStorage="true">
-    <meta-data android:name="com.google.firebase.messaging.default_notification_color" android:resource="@color/notification_icon_color"/>
-    <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/notification_icon"/>
+    <!-- Phase AAA: tools:replace forces our values to win the manifest merge.
+         react-native-firebase_messaging declares default_notification_color
+         with a different default (@color/white), and the merger refuses to
+         pick a side without an explicit override. Same defensive fix for
+         the icon to prevent future conflicts. -->
+    <meta-data android:name="com.google.firebase.messaging.default_notification_color"
+               android:resource="@color/notification_icon_color"
+               tools:replace="android:resource"/>
+    <meta-data android:name="com.google.firebase.messaging.default_notification_icon"
+               android:resource="@drawable/notification_icon"
+               tools:replace="android:resource"/>
     <meta-data android:name="expo.modules.notifications.default_notification_color" android:resource="@color/notification_icon_color"/>
     <meta-data android:name="expo.modules.notifications.default_notification_icon" android:resource="@drawable/notification_icon"/>
     <meta-data android:name="expo.modules.updates.ENABLED" android:value="false"/>
@@ -50,5 +76,31 @@
         <category android:name="android.intent.category.DEFAULT"/>
       </intent-filter>
     </activity>
+
+    <!-- Phase AAA: react-native-callkeep ConnectionService.
+         Required for self-managed PhoneAccount registration so
+         incoming-call UI shows on the lock screen. The
+         BIND_TELECOM_CONNECTION_SERVICE permission is what tells
+         the OS that VaultChat is allowed to host a managed call. -->
+    <service
+        android:name="io.wazo.callkeep.VoiceConnectionService"
+        android:label="VaultChat Calls"
+        android:permission="android.permission.BIND_TELECOM_CONNECTION_SERVICE"
+        android:foregroundServiceType="phoneCall"
+        android:exported="true">
+      <intent-filter>
+        <action android:name="android.telecom.ConnectionService"/>
+      </intent-filter>
+    </service>
+
+    <!-- Phase AAA: callkeep's headless background-message bridge.
+         Wakes the JS bundle from a fully-killed state when an FCM
+         data message arrives so we can synchronously call
+         RNCallKeep.displayIncomingCall() before Android kills the
+         process. -->
+    <service
+        android:name="io.wazo.callkeep.RNCallKeepBackgroundMessagingService"
+        android:foregroundServiceType="phoneCall"
+        android:exported="false"/>
   </application>
 </manifest>
