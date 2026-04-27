@@ -558,14 +558,30 @@ export default function ChatRoomScreen({ route, navigation }) {
         // I sent this — try the self-seal first (works for both
         // single and multi-device wire formats since ct_self is
         // independent), then fall back to opening my slot.
+        //
+        // ct_self is sealed with the SENDING DEVICE's identity priv
+        // key. If the row was sent from a different install (or
+        // before a key regen) the self-seal won't open on this
+        // device — but the multi-device by_dev[<thisDeviceId>]
+        // slot still will. So we treat ct_self as best-effort and
+        // fall through to the per-device path on failure.
         const selfEnv = row.metadata?.ct_self;
+        let opened = false;
         if (selfEnv) {
-          plaintext = await decryptSelfEnvelope(selfEnv);
-        } else if (isMulti) {
-          const myDeviceId = await getDeviceId();
-          plaintext = await decryptForMyDevice(row.content, myDeviceId);
-        } else {
-          plaintext = await decryptMessage(row.content);
+          try {
+            plaintext = await decryptSelfEnvelope(selfEnv);
+            opened = true;
+          } catch (selfErr) {
+            if (__DEV__) console.log('ct_self failed, falling back to by_dev:', selfErr?.message);
+          }
+        }
+        if (!opened) {
+          if (isMulti) {
+            const myDeviceId = await getDeviceId();
+            plaintext = await decryptForMyDevice(row.content, myDeviceId);
+          } else {
+            plaintext = await decryptMessage(row.content);
+          }
         }
       } else if (isMulti) {
         // Peer sent a multi-device envelope — open the slot for
