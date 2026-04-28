@@ -853,6 +853,48 @@ export default function ChatRoomScreen({ route, navigation }) {
     });
   }, [recipientName, recipientPhone, recipientPhoto]);
 
+  // Override route-param recipientName with the LIVE local-contacts
+  // entry when one exists. Lets a contact rename propagate to the
+  // chat header without requiring a re-navigate. Match is by
+  // last-10-digits of the phone since the route param is sometimes
+  // raw and sometimes E.164.
+  useEffect(() => {
+    if (!recipientPhone) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem('vaultchat_contacts');
+        if (!raw) return;
+        const list = JSON.parse(raw);
+        if (!Array.isArray(list)) return;
+        const norm = String(recipientPhone).replace(/\D/g, '').slice(-10);
+        if (!norm) return;
+        const match = list.find(c => {
+          const p = String(c.phone || c.mobile || '').replace(/\D/g, '').slice(-10);
+          return p && p === norm;
+        });
+        if (cancelled || !match) return;
+        const merged = (match.name && match.name.trim())
+          || `${match.firstName || ''} ${match.lastName || ''}`.trim()
+          || recipientName;
+        setContactData(prev => ({
+          ...(prev || {}),
+          firstName: match.firstName || merged?.split(' ')[0] || '',
+          lastName:  match.lastName  || merged?.split(' ').slice(1).join(' ') || '',
+          name:      merged,
+          phone:     recipientPhone,
+          photo:     match.photo  || prev?.photo  || null,
+          email:     match.email  || prev?.email  || '',
+          address:   match.address|| prev?.address|| '',
+          birthday:  match.birthday|| prev?.birthday|| '',
+          url:       match.url    || prev?.url    || '',
+          notes:     match.notes  || prev?.notes  || '',
+        }));
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [recipientPhone]);
+
   async function loadUser() {
     const { data } = await supabase.auth.getUser();
     if (data?.user) {

@@ -21,6 +21,15 @@ platform :ios, podfile_properties['ios.deploymentTarget'] || '15.1'
 prepare_react_native_project!
 
 target 'VaultChat' do
+  # Phase AAA: required for @react-native-firebase/messaging on iOS
+  # — its Swift pods (FirebaseCoreInternal, FirebaseMessaging) need
+  # GoogleUtilities to expose modules. Without this we get
+  # "The following Swift pods cannot yet be integrated as static
+  # libraries" at pod install time. Setting use_modular_headers!
+  # globally makes every pod expose modules; safe across the rest
+  # of the dep graph.
+  use_modular_headers!
+
   use_expo_modules!
 
   if ENV['EXPO_USE_COMMUNITY_AUTOLINKING'] == '1'

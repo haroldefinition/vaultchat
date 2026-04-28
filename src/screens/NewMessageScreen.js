@@ -205,7 +205,27 @@ export default function NewMessageScreen({ navigation, route }) {
     if (!cleaned) { Alert.alert('To:', 'Enter a phone number or @handle.'); return; }
 
     // Must be logged in — we need our own userId to build the rooms row.
-    const myUserId = user?.id;
+    // Fetch the session fresh instead of relying on the cached `user` state,
+    // which can be null if the user taps Start before the useEffect's
+    // getSession() promise resolves. Falls back to AsyncStorage user blob
+    // if the auth client is briefly unreachable (works in offline-first dev).
+    let myUserId = user?.id;
+    if (!myUserId) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        myUserId = session?.user?.id;
+        if (myUserId && !user) setUser(session.user);
+      } catch {}
+    }
+    if (!myUserId) {
+      try {
+        const raw = await AsyncStorage.getItem('vaultchat_user');
+        if (raw) {
+          const u = JSON.parse(raw);
+          if (u?.id && /^[0-9a-f-]{36}$/.test(u.id)) myUserId = u.id;
+        }
+      } catch {}
+    }
     if (!myUserId) {
       Alert.alert('Not signed in', 'Please sign in again before starting a chat.');
       return;

@@ -350,10 +350,40 @@ export default function SettingsScreen({ navigation }) {
             <Text style={[st.vaultIdInCard, { color: accent }]}>{vaultId}</Text>
           </View>
 
-          <Field label="BIO" value={bio} onChange={setBio} placeholder="Write something about yourself..." multiline />
-          <Field label="PHONE NUMBER" value={`+${user?.phone || 'Not available'}`} editable={false} />
+          {/* Inlined TextInputs (NOT the <Field> wrapper) — defining a
+              React component inside the parent makes a new identity on
+              every render, which causes RN to unmount the TextInput on
+              every keystroke and lose focus. The address rows below
+              were always inline, so they didn't suffer the bug. We
+              match that pattern here. */}
+          <Text style={[st.fieldLabel, { color: sub }]}>BIO</Text>
+          <TextInput
+            style={[st.fieldBox, { backgroundColor: inputBg, color: tx, borderColor: border, minHeight: 70, textAlignVertical: 'top', marginBottom: 4 }]}
+            placeholder="Write something about yourself..."
+            placeholderTextColor={sub}
+            value={bio}
+            onChangeText={setBio}
+            multiline
+            autoCapitalize="sentences"
+          />
+
+          <Text style={[st.fieldLabel, { color: sub }]}>PHONE NUMBER</Text>
+          <View style={[st.fieldBox, { backgroundColor: inputBg, borderColor: border, justifyContent: 'center', marginBottom: 4 }]}>
+            <Text style={{ color: sub, fontSize: 15 }}>{`+${user?.phone || 'Not available'}`}</Text>
+          </View>
           <Text style={[st.hint, { color: sub }]}>Phone number cannot be changed</Text>
-          <Field label="EMAIL" value={email} onChange={setEmail} placeholder="your@email.com" keyboardType="email-address" />
+
+          <Text style={[st.fieldLabel, { color: sub }]}>EMAIL</Text>
+          <TextInput
+            style={[st.fieldBox, { backgroundColor: inputBg, color: tx, borderColor: border, marginBottom: 4 }]}
+            placeholder="your@email.com"
+            placeholderTextColor={sub}
+            value={email}
+            onChangeText={setEmail}
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
 
           <Text style={[st.fieldLabel, { color: sub, marginTop: 16 }]}>ADDRESS</Text>
           <TextInput style={[st.fieldBox, { backgroundColor: inputBg, color: tx, borderColor: border, marginBottom: 8 }]} placeholder="Address Line 1" placeholderTextColor={sub} value={addr1} onChangeText={setAddr1} />
