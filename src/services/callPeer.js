@@ -109,9 +109,24 @@ export async function startOutgoing({ callId, roomId, callerId, callerName, peer
   // Idempotent: if we're already running THIS call (same callId), no-op.
   // Guards against React StrictMode double-mount of ActiveCallScreen, which
   // would otherwise throw "busy (state=ringing)" on the second effect run.
+  //
+  // Stale-state recovery: pre-connect states (incoming/ringing/placing) can
+  // get stuck when the prior call was abandoned without a clean cleanup —
+  // e.g. caller hung up without firing call:end, network blip dropped the
+  // cancel signal, or React unmount didn't finish before the user tapped
+  // call again. The user explicitly initiating a NEW call is a strong
+  // signal that the prior pre-connect state is no longer wanted, so we
+  // force-clean and proceed instead of refusing with "callPeer busy".
+  // Only refuse when we're actively in a connected call.
   if (_state !== 'idle') {
     if (_callId && _callId === callId) return;
-    throw new Error(`callPeer busy (state=${_state})`);
+    if (_state === 'connected' || _state === 'accepted') {
+      throw new Error(`callPeer busy (state=${_state})`);
+    }
+    if (__DEV__) {
+      console.warn('[callPeer] stale state', _state, '— force-cleaning to start new call');
+    }
+    _cleanup();
   }
   _state = 'placing';
   _callId = callId;
