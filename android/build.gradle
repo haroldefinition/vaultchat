@@ -20,6 +20,12 @@ allprojects {
     google()
     mavenCentral()
     maven { url 'https://www.jitpack.io' }
+    // @notifee/react-native ships its own AAR locally in node_modules
+    // instead of publishing to a remote Maven repo. Without this entry,
+    // gradle can't resolve `app.notifee:core:+` and the debug build fails.
+    // We use notifee for the high-priority "incoming_calls" notification
+    // channel — see src/services/voipPushService.js + index.js.
+    maven { url "$rootDir/../node_modules/@notifee/react-native/android/libs" }
   }
 }
 

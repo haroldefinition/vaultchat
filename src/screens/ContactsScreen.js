@@ -248,31 +248,15 @@ export default function ContactsScreen({ navigation }) {
     );
   };
 
-  // Header above the SectionList — search, quick actions, premium
-  // section, and the "All Contacts" divider. Lives inside the list
-  // header so it scrolls with the content (sticky letters still
-  // pin at the top of their respective groups).
-  const ListHeader = () => (
+  // ListHeader covers the quick-actions row + "All Contacts" divider
+  // ONLY — the search TextInput is rendered separately above the
+  // SectionList so a fresh ListHeader function reference on every
+  // keystroke doesn't unmount/remount the input and steal focus.
+  //
+  // Wrapped in useCallback so the SectionList sees the same function
+  // reference across renders and doesn't churn the header subtree.
+  const ListHeader = useCallback(() => (
     <View>
-      {/* Search */}
-      <View style={[s.searchRow, { backgroundColor: inputBg, borderColor: border }]}>
-        <Text style={{ color: sub, marginRight: 8 }}>🔍</Text>
-        <TextInput
-          style={[s.searchInput, { color: tx }]}
-          placeholder="Search contacts…"
-          placeholderTextColor={sub}
-          value={search}
-          onChangeText={setSearch}
-          autoCorrect={false}
-          autoCapitalize="none"
-        />
-        {search.length > 0 && (
-          <TouchableOpacity onPress={() => setSearch('')}>
-            <Text style={{ color: sub, fontSize: 16, paddingHorizontal: 8 }}>✕</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-
       {/* Quick actions row */}
       <View style={s.quickRow}>
         <QuickAction icon="🛡" label="Secure Invite" accent={accent} card={card} tx={tx} onPress={onSecureInvite} />
@@ -292,7 +276,7 @@ export default function ContactsScreen({ navigation }) {
         <View style={[s.allDividerLine, { backgroundColor: border }]} />
       </View>
     </View>
-  );
+  ), [accent, card, tx, sub, border, onSecureInvite, onInviteLink]);
 
   return (
     <View style={[s.container, { backgroundColor: bg }]}>
@@ -315,6 +299,28 @@ export default function ContactsScreen({ navigation }) {
             ? <ActivityIndicator size="small" color={accent} />
             : <Text style={[s.addTx, { color: accent }]}>＋ Add</Text>}
         </TouchableOpacity>
+      </View>
+
+      {/* Search bar lives ABOVE the SectionList — pinning it here
+          (rather than inside ListHeaderComponent) keeps the TextInput
+          mounted across re-renders so focus is retained on every
+          keystroke. Same fix mirrored on the Android build. */}
+      <View style={[s.searchRow, { backgroundColor: inputBg, borderColor: border }]}>
+        <Text style={{ color: sub, marginRight: 8 }}>🔍</Text>
+        <TextInput
+          style={[s.searchInput, { color: tx }]}
+          placeholder="Search contacts…"
+          placeholderTextColor={sub}
+          value={search}
+          onChangeText={setSearch}
+          autoCorrect={false}
+          autoCapitalize="none"
+        />
+        {search.length > 0 && (
+          <TouchableOpacity onPress={() => setSearch('')}>
+            <Text style={{ color: sub, fontSize: 16, paddingHorizontal: 8 }}>✕</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {loading && contacts.length === 0 ? (

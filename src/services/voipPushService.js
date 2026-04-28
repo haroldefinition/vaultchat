@@ -412,7 +412,9 @@ async function _startAndroidPush({ myUserId }) {
   // Token registration + rotation.
   try {
     const token = await _firebaseMessaging().getToken();
-    if (token) await _postTokenToServer({ userId: myUserId, token, platform: 'android' });
+    if (token) {
+      await _postTokenToServer({ userId: myUserId, token, platform: 'android' });
+    }
   } catch (e) {
     if (__DEV__) console.warn('[voip] android: getToken failed:', e?.message || e);
   }

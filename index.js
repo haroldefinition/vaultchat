@@ -81,6 +81,8 @@ if (Platform.OS === 'android') {
         const callerName = data.callerName || 'VaultChat';
         const type       = data.type || 'voice';
         if (!callId || !callerId) return;
+        // Primary path: bind via ConnectionService for the OS-level
+        // incoming-call UI (lock-screen ring, full-screen, etc.).
         try {
           await RNCallKeep.displayIncomingCall(
             callId,
@@ -90,9 +92,33 @@ if (Platform.OS === 'android') {
             type === 'video',
           );
         } catch (e) {}
+        // Belt-and-suspenders fallback: also show a high-priority
+        // notifee notification on the incoming_calls channel. If
+        // RNCallKeep silently fails (PhoneAccount not enabled, etc.),
+        // this still gives the user a heads-up notification with
+        // a full-screen intent. Tapping it opens the app, where the
+        // foreground call:incoming socket event routes them to
+        // ActiveCall normally.
+        if (notifee) {
+          try {
+            await notifee.displayNotification({
+              id: `incoming-${callId}`,
+              title: callerName,
+              body:  type === 'video' ? 'Incoming video call…' : 'Incoming voice call…',
+              data:  { callId, callerId, callerName, type },
+              android: {
+                channelId: 'incoming_calls',
+                category:  'call',
+                importance: AndroidImportance.HIGH,
+                pressAction:      { id: 'default', launchActivity: 'default' },
+                fullScreenAction: { id: 'default', launchActivity: 'default' },
+              },
+            });
+          } catch (e) {}
+        }
       });
     } catch (e) {
-      console.warn('[index] setBackgroundMessageHandler failed:', e?.message);
+      if (__DEV__) console.warn('[index] setBackgroundMessageHandler failed:', e?.message);
     }
   }
 }
