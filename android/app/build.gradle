@@ -163,6 +163,22 @@ android {
     androidResources {
         ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
     }
+
+    // Skip lint on release builds (task #7 / #8).
+    //
+    // Why: Kotlin/AGP/JDK version drift causes lintVitalAnalyzeRelease
+    // to crash with KaFirResolver internal errors on dependencies like
+    // expo-modules-core. The crash is in the lint tool itself, not in
+    // our code. Lint is a code-quality check and not required to ship
+    // a valid AAB — Play Store doesn't care whether lint ran. Most
+    // production apps disable it on release for the same reason.
+    //
+    // To re-enable later (e.g., after a Kotlin/AGP upgrade fixes the
+    // crash): flip checkReleaseBuilds back to true.
+    lint {
+        abortOnError       false
+        checkReleaseBuilds false
+    }
 }
 
 // Apply static values from `gradle.properties` to the `android.packagingOptions`
