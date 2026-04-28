@@ -27,6 +27,8 @@ if (Platform.OS === 'android') {
   // (which lack the native modules) don't crash on import.
   let messaging   = null;
   let RNCallKeep  = null;
+  let notifee     = null;
+  let AndroidImportance = null;
   try {
     messaging = require('@react-native-firebase/messaging').default
              || require('@react-native-firebase/messaging');
@@ -35,6 +37,36 @@ if (Platform.OS === 'android') {
     RNCallKeep = require('react-native-callkeep').default
               || require('react-native-callkeep');
   } catch {}
+  try {
+    const notifeeModule = require('@notifee/react-native');
+    notifee           = notifeeModule.default || notifeeModule;
+    AndroidImportance = notifeeModule.AndroidImportance;
+  } catch {}
+
+  // ── High-priority "Incoming Calls" channel (task #4) ──────────
+  // Android 8+ requires every notification to declare its channel.
+  // The incoming-call channel needs IMPORTANCE_HIGH so it shows as
+  // a heads-up alert and bypasses ambient sound restrictions, plus
+  // a ringtone + vibration so it's audible from a locked phone.
+  //
+  // Why register it here, at module-eval time:
+  //   When an FCM data message wakes the app from a fully-killed
+  //   state, the headless JS context runs THIS file BEFORE any
+  //   React component mounts. Channel creation is idempotent — if
+  //   it already exists, this is a no-op. Done early ensures the
+  //   channel exists before displayIncomingCall is invoked.
+  if (notifee && AndroidImportance) {
+    notifee.createChannel({
+      id:          'incoming_calls',
+      name:        'Incoming Calls',
+      description: 'Ring tone for incoming VaultChat calls.',
+      importance:  AndroidImportance.HIGH,
+      sound:       'default',
+      vibration:   true,
+      vibrationPattern: [300, 500, 300, 500],
+      bypassDnd:   true,
+    }).catch(() => {});
+  }
 
   if (messaging && RNCallKeep) {
     // Wrap the registration itself in try/catch — Firebase throws

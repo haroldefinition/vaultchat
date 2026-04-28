@@ -32,7 +32,7 @@
 //    expo-dev-client only.
 // ============================================================
 
-import { Platform } from 'react-native';
+import { Platform, PermissionsAndroid } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as callPeer from './callPeer';
 import * as roomCall from './roomCall';
@@ -276,6 +276,38 @@ try {
   if (__DEV__) console.warn('[voip] firebase messaging require threw:', e?.message);
 }
 
+// Notifee for the high-importance "incoming_calls" channel (task #4).
+// Channel creation is duplicated in index.js so it exists in headless
+// FCM contexts; here we re-create on normal app launch as a safety net
+// for cases where index.js didn't run (hot reload, expo dev client).
+let _notifee = null;
+let _AndroidImportance = null;
+try {
+  const n = require('@notifee/react-native');
+  _notifee = n.default || n;
+  _AndroidImportance = n.AndroidImportance;
+} catch (e) {
+  if (__DEV__) console.warn('[voip] notifee require threw:', e?.message);
+}
+
+async function _ensureIncomingCallsChannel() {
+  if (!_notifee || !_AndroidImportance) return;
+  try {
+    await _notifee.createChannel({
+      id:          'incoming_calls',
+      name:        'Incoming Calls',
+      description: 'Ring tone for incoming VaultChat calls.',
+      importance:  _AndroidImportance.HIGH,
+      sound:       'default',
+      vibration:   true,
+      vibrationPattern: [300, 500, 300, 500],
+      bypassDnd:   true,
+    });
+  } catch (e) {
+    if (__DEV__) console.warn('[voip] createChannel failed:', e?.message);
+  }
+}
+
 let _androidStarted = false;
 
 async function _startAndroidPush({ myUserId }) {
@@ -288,6 +320,11 @@ async function _startAndroidPush({ myUserId }) {
   }
   _myUserId = myUserId;
   _androidStarted = true;
+
+  // Make sure the high-priority "incoming_calls" channel exists
+  // BEFORE any FCM message can arrive. Idempotent — a no-op if
+  // index.js already created it at module-eval time.
+  await _ensureIncomingCallsChannel();
 
   // Set up callkeep. The PhoneAccount config below MUST be filled
   // out — empty values cause the OS to silently reject the
@@ -331,10 +368,37 @@ async function _startAndroidPush({ myUserId }) {
     });
   } catch {}
 
-  // Permission for heads-up notifications (Android 13+).
-  try {
-    await _firebaseMessaging().requestPermission();
-  } catch {}
+  // Permission for heads-up notifications (task #5).
+  //
+  // Two layers, both required:
+  //   1. POST_NOTIFICATIONS — runtime permission introduced in
+  //      Android 13 (API 33). Without it, the OS silently drops
+  //      every notification we post including the high-priority
+  //      "incoming_calls" channel — meaning a backgrounded user
+  //      gets no ring at all. The manifest declares the permission;
+  //      this is the user-facing prompt that actually grants it.
+  //   2. messaging().requestPermission() — Firebase's own
+  //      cross-platform shim. On Android 13+ it largely overlaps
+  //      with #1 but it ALSO sets the in-app notifications-enabled
+  //      flag that some Firebase code paths key off of. Cheap to
+  //      call — keep both.
+  if (Platform.Version >= 33) {
+    try {
+      const result = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
+        {
+          title:           'Allow incoming-call alerts',
+          message:         'VaultChat needs notification permission to ring you when someone calls.',
+          buttonPositive:  'Allow',
+          buttonNegative:  'Not now',
+        },
+      );
+      if (__DEV__) console.log('[voip] POST_NOTIFICATIONS:', result);
+    } catch (e) {
+      if (__DEV__) console.warn('[voip] POST_NOTIFICATIONS request failed:', e?.message);
+    }
+  }
+  try { await _firebaseMessaging().requestPermission(); } catch {}
 
   // Token registration + rotation.
   try {
