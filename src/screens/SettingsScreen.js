@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, Alert, Image, TextInput, Modal } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, Alert, Image, TextInput, Modal, Linking } from 'react-native';
 import { supabase } from '../services/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
@@ -782,6 +782,21 @@ export default function SettingsScreen({ navigation }) {
             <Row icon="ℹ️" label="Version" value="1.0.0" />
             <Row icon="🔐" label="Encryption Protocol" value="NaCl box (Curve25519 + XSalsa20)" />
             <Row icon="🏢" label="Made by" value="AUXXILUS MEDIA LLC" />
+          </Section>
+          <Section title="LEGAL">
+            <Row
+              icon="📄"
+              label="Privacy Policy"
+              subText="Read how VaultChat handles your information"
+              onPress={() => {
+                // Opens the hosted privacy policy in the system browser.
+                // Required for App Store + Play Store compliance and gives
+                // users an in-app entry point to the same document we link
+                // from the store listings.
+                Linking.openURL('https://vaultchat.co/android-privacy.html')
+                  .catch(() => Alert.alert('Could not open link', 'Visit https://vaultchat.co/android-privacy.html in a browser.'));
+              }}
+            />
           </Section>
         </ScrollView>
       </View>
