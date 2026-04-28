@@ -103,8 +103,12 @@ export default function SettingsScreen({ navigation }) {
     const d = Object.fromEntries(vals.map(([k,v]) => [k,v]));
     if (d.vaultchat_display_name) setDisplayName(d.vaultchat_display_name);
     if (d.vaultchat_bio) setBio(d.vaultchat_bio);
+    // Vault ID and @handle are the SAME thing — one user-chosen public
+    // identifier. Source it from the cached handle so the Vault ID
+    // field always matches what the user picked at signup (or in the
+    // VAULT HANDLE editor below). Falls through to the @handle lookup
+    // a few lines down if the cache isn't seeded yet (fresh signup).
     if (d.vaultchat_vault_id) setVaultId(d.vaultchat_vault_id);
-    else { const id = 'vault_' + Math.random().toString(36).slice(2,10); setVaultId(id); await AsyncStorage.setItem('vaultchat_vault_id', id); }
     if (d.vaultchat_email) setEmail(d.vaultchat_email);
     if (d.vaultchat_addr1) setAddr1(d.vaultchat_addr1);
     if (d.vaultchat_addr2) setAddr2(d.vaultchat_addr2);
@@ -123,10 +127,19 @@ export default function SettingsScreen({ navigation }) {
     if (d.vaultchat_notif_sound !== null) setNotifSound(JSON.parse(d.vaultchat_notif_sound ?? 'true'));
     if (d.vaultchat_blocked) setBlockedContacts(JSON.parse(d.vaultchat_blocked));
     const handle = await getMyHandle();
-    if (handle) setVaultHandle(handle);
-    else if (d.vaultchat_display_name) {
+    if (handle) {
+      setVaultHandle(handle);
+      // Keep the Vault ID display in sync with the @handle. If they
+      // somehow drifted (older builds wrote a random vault_xyz), prefer
+      // the handle so the user sees ONE canonical identifier.
+      setVaultId(handle);
+      if (d.vaultchat_vault_id !== handle) {
+        try { await AsyncStorage.setItem('vaultchat_vault_id', handle); } catch {}
+      }
+    } else if (d.vaultchat_display_name) {
       const newHandle = await generateHandle(d.vaultchat_display_name);
       setVaultHandle(newHandle);
+      setVaultId(newHandle);
       await saveHandle(newHandle);
     }
     const bio = await AsyncStorage.getItem('vaultchat_biometric');
@@ -422,6 +435,10 @@ export default function SettingsScreen({ navigation }) {
                   return;
                 }
                 await AsyncStorage.setItem('vaultchat_vault_id', vaultHandle);
+                // Keep the in-memory Vault ID display in sync so the
+                // user sees the new handle reflected in the VAULT ID
+                // field immediately, without re-opening the screen.
+                setVaultId(vaultHandle);
                 Alert.alert('Handle Updated! ✓', `Your handle is now ${vaultHandle}`);
               }}>
                 <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>Save</Text>

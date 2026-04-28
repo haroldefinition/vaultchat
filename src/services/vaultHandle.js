@@ -77,9 +77,15 @@ export async function getMyDisplayName() {
 }
 
 /**
- * Persist the handle both locally AND to Supabase profiles.vault_handle
- * so other users can look us up by it. Normalizes (strips '@') before
- * writing to the DB; the local copy keeps whatever form the caller passed.
+ * Persist the handle locally AND to Supabase. Both `vault_handle` and
+ * `vault_id` columns get the SAME value — the Vault ID and @handle are
+ * the user's single public identifier and we keep them in sync so the
+ * Settings screen, blocked-users list, contact rows, and any future
+ * surface that reads either column show the same thing.
+ *
+ * Normalizes (strips '@', lowercases) before writing to the DB; the
+ * local AsyncStorage copy keeps the leading '@' so display surfaces
+ * can read it without prepending.
  *
  * Returns { ok, reason } — reason = 'taken' | 'invalid' | 'network' | null.
  */
@@ -92,14 +98,20 @@ export async function saveHandle(handle) {
     const myUserId = session?.user?.id;
     if (!myUserId) {
       // Not logged in — still cache locally, but flag failure.
-      try { await AsyncStorage.setItem(LOCAL_KEY, `@${norm}`); } catch {}
+      try {
+        await AsyncStorage.setItem(LOCAL_KEY, `@${norm}`);
+        await AsyncStorage.setItem('vaultchat_vault_id', `@${norm}`);
+      } catch {}
       return { ok: false, reason: 'network' };
     }
 
     // Attempt to claim. Case-insensitive unique index will reject collisions.
+    // Write to both vault_handle (used for handle search/lookup) and
+    // vault_id (legacy column read by blocks list + backup) so they
+    // never drift apart.
     const { error } = await supabase
       .from('profiles')
-      .update({ vault_handle: norm })
+      .update({ vault_handle: norm, vault_id: norm })
       .eq('id', myUserId);
 
     if (error) {
@@ -111,7 +123,13 @@ export async function saveHandle(handle) {
       return { ok: false, reason: 'network' };
     }
 
-    try { await AsyncStorage.setItem(LOCAL_KEY, `@${norm}`); } catch {}
+    try {
+      await AsyncStorage.setItem(LOCAL_KEY, `@${norm}`);
+      // Sync the local Vault ID cache the SettingsScreen reads from on
+      // load so the field shows the chosen handle immediately and the
+      // copy-button text matches what other users see.
+      await AsyncStorage.setItem('vaultchat_vault_id', `@${norm}`);
+    } catch {}
     return { ok: true, reason: null };
   } catch {
     return { ok: false, reason: 'network' };
