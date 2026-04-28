@@ -37,6 +37,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as callPeer from './callPeer';
 import * as roomCall from './roomCall';
 import { displayIncomingCall, setupCallKit } from './callkit';
+import { maybePromptBatteryOptimizationExemption } from './batteryOptimization';
 
 // Lazy native-module require — Expo Go and tests don't have it.
 //
@@ -399,6 +400,14 @@ async function _startAndroidPush({ myUserId }) {
     }
   }
   try { await _firebaseMessaging().requestPermission(); } catch {}
+
+  // Battery-optimization opt-out (task #9). Shown once per install.
+  // Without this, FCM call wake-ups can be silently dropped while
+  // the app is backgrounded or killed — the OS treats VaultChat as
+  // a "background app" eligible for aggressive killing.
+  try { await maybePromptBatteryOptimizationExemption(); } catch (e) {
+    if (__DEV__) console.warn('[voip] battery opt-out prompt failed:', e?.message);
+  }
 
   // Token registration + rotation.
   try {

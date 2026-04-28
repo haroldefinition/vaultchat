@@ -31,6 +31,10 @@
   <!-- Heads-up incoming-call notification while ConnectionService is binding -->
   <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+  <!-- Required to open the per-app battery-optimization settings dialog
+       so users can whitelist VaultChat from aggressive background killing.
+       Without the whitelist, FCM call wake-ups can be silently dropped. -->
+  <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
   <!-- Bluetooth headsets for in-call audio routing (Android 12+ runtime perm) -->
   <uses-permission android:name="android.permission.BLUETOOTH"/>
   <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
