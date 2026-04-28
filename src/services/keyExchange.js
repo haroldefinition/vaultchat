@@ -87,6 +87,7 @@ export async function publishMyPublicKey(myUserId) {
   if (!myUserId) return null;
   try {
     const { publicKey } = await ensureIdentityKeys();
+    // (Phase debug log removed — verified the dev-shortcut fix works.)
 
     // Check current value — avoid a write if unchanged.
     const { data: existing } = await supabase

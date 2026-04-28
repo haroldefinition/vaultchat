@@ -117,26 +117,16 @@ export default function RegisterScreen({ route, onLoginCallback }) {
     }
     setLoading(true);
 
-    // Dev shortcut — works for both phone and email
-    if (otp === '123456') {
-      const seed = sentTo.method === 'phone'
-        ? phone.padStart(12, '0')
-        : email.replace(/[^a-z0-9]/gi, '').padStart(12, '0').slice(0, 12);
-      const testId = '550e8400-e29b-41d4-a716-' + seed;
-      setUserId(testId);
-      await AsyncStorage.setItem(
-        'vaultchat_user',
-        JSON.stringify(
-          sentTo.method === 'phone'
-            ? { phone: sentTo.value, id: testId }
-            : { email: sentTo.value, id: testId }
-        )
-      );
-      setLoading(false);
-      setHandle(prev => prev || suggestHandle());
-      setStep('handle');
-      return;
-    }
+    // Phase ZZ-bugfix: dev shortcut REMOVED.
+    // The old code accepted OTP=123456 and synthesized a fake user_id
+    // ('550e8400-e29b-41d4-a716-<seed>') without calling Supabase's
+    // verifyOtp. Result: no real auth session, no JWT, every RLS-gated
+    // call (publish_public_key upsert, message inserts, etc.) silently
+    // failed. To accept OTP=123456 in dev, configure Supabase →
+    // Authentication → Phone → Test Phone Numbers. The real verifyOtp
+    // call below now handles whitelisted test numbers cleanly AND
+    // establishes a real Supabase auth session that JWT-gated paths
+    // can rely on.
 
     // Real Supabase OTP verification — branches on method
     try {
