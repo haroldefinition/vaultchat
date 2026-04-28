@@ -14,3 +14,11 @@ local.properties
 
 # Bundle artifacts
 *.jsbundle
+
+# Play Store signing — NEVER commit upload key or its passwords.
+# keystore.properties.example IS committed as a template; the real
+# keystore.properties holds the actual passwords and stays local.
+*.keystore
+*.jks
+keystore.properties
+!debug.keystore

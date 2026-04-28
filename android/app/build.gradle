@@ -9,6 +9,19 @@ if (file("google-services.json").exists()) {
     apply plugin: "com.google.gms.google-services"
 }
 
+// ── Play Store upload signing (task #7) ───────────────────────
+// Read keystore credentials from android/keystore.properties (gitignored).
+// If the file is missing, release builds fall back to the debug keystore
+// so local dev/EAS-no-credentials builds still compile, but `bundleRelease`
+// for Play Store upload should always be run with the real properties
+// file in place.
+def keystorePropertiesFile = rootProject.file("keystore.properties")
+def keystoreProperties = new Properties()
+def hasReleaseSigning = keystorePropertiesFile.exists()
+if (hasReleaseSigning) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
 /**
@@ -111,15 +124,28 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        // Real Play Store upload key. Only registered when
+        // android/keystore.properties exists; otherwise we leave it
+        // undefined and buildTypes.release falls back to debug.
+        if (hasReleaseSigning) {
+            release {
+                storeFile     file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias      keystoreProperties['keyAlias']
+                keyPassword   keystoreProperties['keyPassword']
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            // Use the real upload key when keystore.properties is present;
+            // fall back to debug for local "release-flavored" smoke builds
+            // without credentials. Play Store rejects debug-signed AABs,
+            // which is the safety net we want.
+            signingConfig hasReleaseSigning ? signingConfigs.release : signingConfigs.debug
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds
