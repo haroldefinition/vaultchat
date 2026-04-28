@@ -218,11 +218,18 @@ export default function NewMessageScreen({ navigation, route }) {
       } catch {}
     }
     if (!myUserId) {
+      // AsyncStorage fallback — works for the dev-shortcut signup path
+      // (OTP=123456) which produces a synthetic id like
+      // '550e8400-e29b-41d4-a716-<email-or-phone-seed>' that isn't a
+      // valid hex UUID. Just trust any non-empty id; the rest of the
+      // app will reject it downstream if it's actually invalid.
       try {
         const raw = await AsyncStorage.getItem('vaultchat_user');
         if (raw) {
           const u = JSON.parse(raw);
-          if (u?.id && /^[0-9a-f-]{36}$/.test(u.id)) myUserId = u.id;
+          if (u?.id && typeof u.id === 'string' && u.id.length >= 8) {
+            myUserId = u.id;
+          }
         }
       } catch {}
     }
