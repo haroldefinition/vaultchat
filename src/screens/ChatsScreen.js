@@ -369,14 +369,27 @@ export default function ChatsScreen({ navigation }) {
   // Folder filter — applied BEFORE the archived split so a folder
   // can show its members from either pile. selectedFolderId === null
   // means "All", which is the unfiltered view.
-  const folderChatIds = selectedFolderId
+  const folderChatIds = (selectedFolderId && selectedFolderId !== '__unread')
     ? new Set((folders.find(f => f.id === selectedFolderId)?.chatIds) || [])
     : null;
   const inSelectedFolder = (c) => {
+    // Special-case "__unread" — show only chats with unread > 0 OR
+    // the user-marked-unread flag. Matches the mockup's Unread chip
+    // behavior. Other folders use the existing chatIds set.
+    if (selectedFolderId === '__unread') {
+      return (c.unread > 0) || !!c.markedUnread;
+    }
     if (!folderChatIds) return true;
     const id = c.id || c.roomId || c.handle;
     return folderChatIds.has(id);
   };
+  // Unread count for the chip badge — simple count of non-archived
+  // chats with unread > 0 or markedUnread. Doesn't filter by vault
+  // mode (the badge stays accurate whether vault is locked or not).
+  const unreadCount = chats.reduce((acc, c) => {
+    if (c.archived) return acc;
+    return acc + ((c.unread > 0 || c.markedUnread) ? 1 : 0);
+  }, 0);
 
   // Vault filter — the inverse of selectedFolderId. When the vault is
   // LOCKED (default), vaulted chats are hidden entirely; when UNLOCKED,
@@ -498,12 +511,19 @@ export default function ChatsScreen({ navigation }) {
           </View>
           {myHandle ? <Text style={[s.handle, { color: headerHandleC }]}>{displayHandle(myHandle)}</Text> : null}
         </TouchableOpacity>
-        <TouchableOpacity
-          style={[s.iconBtn, { backgroundColor: headerBtnBg, borderColor: headerBtnBd }]}
-          onPress={() => { taptic(); navigation.navigate('Contacts'); }}>
-          <Text style={{ fontSize: 15 }}>👤</Text>
-          <Text style={[s.iconBtnPlus, { color: headerIconC }]}>+</Text>
-        </TouchableOpacity>
+        {/* Premium consolidates the two header icons into a single
+            edit/new-message button to match the mockup's cleaner
+            top-right. Free users keep both buttons (Contacts + new
+            message) since they don't have the bottom-tab Vault entry
+            point and need quicker access to Contacts. */}
+        {!premium && (
+          <TouchableOpacity
+            style={[s.iconBtn, { backgroundColor: headerBtnBg, borderColor: headerBtnBd }]}
+            onPress={() => { taptic(); navigation.navigate('Contacts'); }}>
+            <Text style={{ fontSize: 15 }}>👤</Text>
+            <Text style={[s.iconBtnPlus, { color: headerIconC }]}>+</Text>
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
           style={[s.iconBtn, { backgroundColor: headerBtnBg, borderColor: headerBtnBd }]}
           onPress={() => { taptic(); navigation.navigate('NewMessage'); }}>
@@ -575,11 +595,43 @@ export default function ChatsScreen({ navigation }) {
       ]}>
         <FlatList
           horizontal
-          data={[{ id: null, name: 'All', emoji: null }, { id: '__groups', name: 'Groups', emoji: '👥' }, ...folders, { id: '__vault', name: 'Vault', emoji: '🔒' }, { id: '__manage', name: 'Manage', emoji: '⚙️' }]}
+          data={[
+            { id: null,        name: 'All',    emoji: null },
+            { id: '__unread',  name: 'Unread', emoji: null, badge: unreadCount },
+            { id: '__groups',  name: 'Groups', emoji: '👥' },
+            ...folders,
+            { id: '__vault',   name: 'Vault',  emoji: '🔒' },
+            { id: '__manage',  name: 'Manage', emoji: '⚙️' },
+          ]}
           keyExtractor={f => f.id || 'all'}
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={{ paddingHorizontal: 16, gap: 8, alignItems: 'center' }}
           renderItem={({ item }) => {
+            if (item.id === '__unread') {
+              const active = selectedFolderId === '__unread';
+              return (
+                <TouchableOpacity
+                  onPress={() => { taptic(); setSelectedFolderId(active ? null : '__unread'); }}
+                  style={[
+                    s.folderPill,
+                    { backgroundColor: active ? accent : inputBg, borderColor: active ? accent : border },
+                  ]}>
+                  <Text style={{ color: active ? '#fff' : tx, fontSize: 13, fontWeight: '600' }}>Unread</Text>
+                  {item.badge > 0 && (
+                    <View style={{
+                      backgroundColor: active ? 'rgba(255,255,255,0.25)' : accent,
+                      borderRadius: 10, minWidth: 20, height: 20,
+                      paddingHorizontal: 6,
+                      alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>
+                        {item.badge > 99 ? '99+' : item.badge}
+                      </Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              );
+            }
             if (item.id === '__groups') {
               // Groups shortcut — jumps to the Groups bottom tab.
               // Lives next to All so users can pivot between 1:1
