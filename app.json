@@ -68,7 +68,8 @@
         }
       ],
       "expo-video",
-      "expo-audio"
+      "expo-audio",
+      "./plugins/with-pushkit.js"
     ],
     "extra": {
       "serverUrl": "https://vaultchat-server-production.up.railway.app",

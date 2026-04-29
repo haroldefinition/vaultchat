@@ -39,24 +39,21 @@ import * as roomCall from './roomCall';
 import { displayIncomingCall, setupCallKit } from './callkit';
 import { maybePromptBatteryOptimizationExemption } from './batteryOptimization';
 
-// Lazy native-module require — Expo Go and tests don't have it.
+// Lazy native-module require — Expo Go and tests don't have it,
+// and we wrap in try/catch so the app boots cleanly even if the
+// native module link is missing in some build configuration.
 //
-// TEMPORARILY DISABLED (TODO: re-enable after wiring AppDelegate):
-// react-native-voip-push-notification requires native AppDelegate
-// methods (pushRegistry:didUpdatePushCredentials:forType: etc.) that
-// Expo prebuild doesn't auto-generate. Without those methods, iOS
-// crashes the app on launch when the PKPushRegistry tries to deliver
-// the VoIP token. We disable the whole module here until a proper
-// Expo config plugin is wired to inject the AppDelegate code.
-//
-// To re-enable: write a config plugin OR manually add the four
-// PushKit methods to ios/VaultChat/AppDelegate.swift, then revert
-// this comment and re-run npx expo run:ios.
+// Native side: AppDelegate.swift sets up PKPushRegistry and forwards
+// the three required PKPushRegistryDelegate callbacks to
+// RNVoipPushNotificationManager. See ios/VaultChat/AppDelegate.swift
+// for the wiring; that file is also restored automatically by the
+// Expo config plugin at plugins/with-pushkit.js so prebuild --clean
+// doesn't blow away the edits.
 let VoipPushNotification = null;
-// try {
-//   VoipPushNotification = require('react-native-voip-push-notification').default
-//                        || require('react-native-voip-push-notification');
-// } catch (e) {}
+try {
+  VoipPushNotification = require('react-native-voip-push-notification').default
+                       || require('react-native-voip-push-notification');
+} catch (e) {}
 
 const BACKEND       = 'https://vaultchat-production-3a96.up.railway.app';
 const TOKEN_KEY     = 'vaultchat_pushkit_token';
