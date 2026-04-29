@@ -174,23 +174,31 @@ export async function findByHandle(handle) {
 
 /**
  * Resolve a phone number to a profile row. Accepts any common format;
- * normalizes to '+1…' (US-only for now, matches placeCall.normalizePhone).
+ * normalizes to the Supabase profiles.phone format (digits only,
+ * country-code prefixed, NO leading '+') so it matches what auth +
+ * profile upserts actually wrote.
+ *
+ * A previous version normalized to '+1…' — but profiles.phone stores
+ * bare digits ("15555550101"), so the .eq('phone', '+15555550101')
+ * lookup always missed and "find by phone" silently failed. Same
+ * normalization shape now lives in placeCall.normalizePhone.
+ *
  * Returns { id, vault_handle, display_name, phone } or null.
  */
 export async function findByPhone(phoneRaw) {
   if (typeof phoneRaw !== 'string') return null;
-  const trimmed = phoneRaw.trim();
-  if (!trimmed) return null;
-  const e164 = trimmed.startsWith('+')
-    ? trimmed
-    : `+1${trimmed.replace(/\D/g, '')}`;
-  if (e164.length < 8) return null;
+  const digits = phoneRaw.replace(/\D/g, '');
+  if (!digits) return null;
+  // 10-digit US national → prepend country code; otherwise assume
+  // the input already includes country code or is international.
+  const normalized = digits.length === 10 ? `1${digits}` : digits;
+  if (normalized.length < 8) return null;
 
   try {
     const { data, error } = await supabase
       .from('profiles')
       .select('id, vault_handle, display_name, phone')
-      .eq('phone', e164)
+      .eq('phone', normalized)
       .maybeSingle();
     if (error) return null;
     return data || null;

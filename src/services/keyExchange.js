@@ -252,16 +252,16 @@ async function backfillDirectRoom(roomId, myUserId, otherUserId) {
   }
 }
 
-// Minimal phone normalizer — matches how RegisterScreen stores phone as "+1<digits>".
-// If `recipientPhone` already starts with '+', keep it. Otherwise assume US and prefix.
+// Phone normalizer aligned with profiles.phone (Supabase stores
+// digits-only with country code, NO leading '+'). Same shape as
+// services/contacts.normalizePhone + placeCall.normalizePhone +
+// vaultHandle.findByPhone — they all need to agree or lookups miss.
 function normalizePhone(raw) {
   if (typeof raw !== 'string') return null;
-  const t = raw.trim();
-  if (!t) return null;
-  if (t.startsWith('+')) return t;
-  const digits = t.replace(/\D/g, '');
-  if (!digits) return null;
-  return `+1${digits}`;
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length < 10) return null;
+  if (digits.length === 10) return `1${digits}`;
+  return digits;
 }
 
 /** Convenience: do I already have local identity keys? */

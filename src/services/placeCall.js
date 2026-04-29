@@ -54,14 +54,26 @@ export function makeCallId() {
   return `${rnd.slice(0,8)}-${rnd.slice(8,12)}-4${t.slice(-3)}-a${rnd.slice(12,15)}-${rnd.slice(0,12)}`;
 }
 
+// Normalize a phone string to the format Supabase stores in
+// profiles.phone (digits only, country-code prefixed, NO leading '+').
+//
+// Supabase Auth's phone column stores values like "15555550101"
+// (e.g. US toll-free with country code 1, no plus). Our profile
+// upserts mirror that. A previous version of this helper returned
+// "+1${digits}" — which produced "+115555550101" when given input
+// that already had a leading '1' (e.g. "15555550101" from a synced
+// address-book entry). That double-1 + the unwanted '+' meant the
+// downstream lookup always missed and calls silently fell through
+// to the mock UX. Standardizing on the bare-digit form here keeps
+// every caller (placeCall, findByPhone, syncContacts) speaking the
+// same dialect.
 function normalizePhone(raw) {
   if (typeof raw !== 'string') return null;
-  const t = raw.trim();
-  if (!t) return null;
-  if (t.startsWith('+')) return t;
-  const digits = t.replace(/\D/g, '');
+  const digits = raw.replace(/\D/g, '');
   if (!digits) return null;
-  return `+1${digits}`;
+  // 10-digit US national number → prepend country code.
+  if (digits.length === 10) return `1${digits}`;
+  return digits;
 }
 
 async function getMyIdentity() {

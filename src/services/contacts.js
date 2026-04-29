@@ -11,25 +11,28 @@ export async function requestContactsPermission() {
 
 // Normalize a raw phone string to E.164 (+1XXXXXXXXXX). Returns null
 // if the input doesn't have enough digits to be a real phone number.
-// Profiles.phone in Supabase is already stored in E.164, so matching is
-// a direct equality check once both sides are normalized.
+// Normalize a raw phone string to the format Supabase stores in
+// profiles.phone: digits only, country-code prefixed, NO leading '+'.
+// Examples:
+//   "(555) 555-0101"   → "15555550101"
+//   "+15555550101"     → "15555550101"
+//   "15555550101"      → "15555550101"
+//   "5555550101"       → "15555550101"
+//
+// The whole codebase used to disagree — placeCall produced "+1…",
+// vaultHandle produced "+1…", and we shipped contact-sync queries
+// against profiles.phone with the leading-plus form. profiles.phone
+// stores the bare-digit form (mirroring Supabase auth.users.phone),
+// so every lookup missed and "find by phone" silently failed across
+// the app. This single source-of-truth keeps the three call sites
+// in lockstep.
 export function normalizePhone(raw) {
   if (typeof raw !== 'string') return null;
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-  if (trimmed.startsWith('+')) {
-    // Already E.164-ish — strip non-digits except the leading +
-    const digits = trimmed.slice(1).replace(/\D/g, '');
-    return digits.length >= 7 ? `+${digits}` : null;
-  }
-  // US-only fallback for now (matches placeCall.normalizePhone). Strip
-  // everything non-numeric and prepend +1. International handling will
-  // need country-code detection later.
-  const digits = trimmed.replace(/\D/g, '');
+  const digits = raw.replace(/\D/g, '');
   if (digits.length < 10) return null;
-  // If 11 digits and starts with 1, treat as already including country code
-  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
-  return `+1${digits.slice(-10)}`;
+  // 10 digits → US national, prepend country code 1
+  if (digits.length === 10) return `1${digits}`;
+  return digits;
 }
 
 export async function getPhoneContacts() {
