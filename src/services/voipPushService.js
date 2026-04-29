@@ -357,15 +357,53 @@ async function _startAndroidPush({ myUserId }) {
   // Wire callkeep events — answer routes to the existing call
   // pipeline; end-call cleans up.
   try {
-    _RNCallKeep.addEventListener('answerCall', ({ callUUID }) => {
-      // The actual WebRTC connect happens when callPeer/roomCall
-      // receives the matching socket event. callkeep's role is
-      // purely UI: it surfaces the user's accept intent.
+    _RNCallKeep.addEventListener('answerCall', async ({ callUUID }) => {
+      // 1. Flip the OS-managed call to "active" so the call timer
+      //    starts and the user sees the active-call UI immediately.
       try { _RNCallKeep.setCurrentCallActive(callUUID); } catch {}
+
+      // 2. CRITICAL — emit `call:accept` to the server so the caller
+      //    (e.g. iPhone) gets notified that we picked up. Without this,
+      //    callkeep flips its own UI to "connected" but the iPhone
+      //    keeps ringing because the server never sees our accept.
+      //
+      //    On a cold-wake from FCM, the call:incoming socket event was
+      //    fired BEFORE this device's app booted, so callPeer's normal
+      //    socket-based staging didn't run. We re-stage from the
+      //    AsyncStorage record that index.js's FCM background handler
+      //    saved when it received the data message.
+      try {
+        const raw = await AsyncStorage.getItem('vaultchat_pending_incoming_call');
+        if (!raw) return;
+        const pending = JSON.parse(raw);
+        // Only consume if the callUUID matches what FCM delivered —
+        // otherwise we might mis-accept a different call.
+        if (pending?.callId !== callUUID) return;
+
+        // Stage the call so callPeer.accept knows the params.
+        callPeer.handleIncomingInvite?.({
+          callId:    pending.callId,
+          roomId:    pending.roomId,
+          callerId:  pending.callerId,
+          type:      pending.type || 'voice',
+        });
+
+        // Fire call:accept (opens mic, builds peer connection, emits
+        // socket event so the caller side starts the WebRTC offer).
+        await callPeer.accept?.(_myUserId);
+
+        // Clear the pending record — next call will write a fresh one.
+        await AsyncStorage.removeItem('vaultchat_pending_incoming_call');
+      } catch (e) {
+        if (__DEV__) console.warn('[voip] answerCall accept-flow failed:', e?.message || e);
+      }
     });
     _RNCallKeep.addEventListener('endCall', ({ callUUID }) => {
       try { callPeer.endActiveCall?.(callUUID); } catch {}
       try { roomCall.endActiveCall?.(callUUID);  } catch {}
+      // If user declined before accepting, drop the staged record
+      // so a future call doesn't accidentally consume it.
+      AsyncStorage.removeItem('vaultchat_pending_incoming_call').catch(() => {});
     });
   } catch {}
 

@@ -29,6 +29,7 @@ if (Platform.OS === 'android') {
   let RNCallKeep  = null;
   let notifee     = null;
   let AndroidImportance = null;
+  let AsyncStorageModule = null;
   try {
     messaging = require('@react-native-firebase/messaging').default
              || require('@react-native-firebase/messaging');
@@ -41,6 +42,10 @@ if (Platform.OS === 'android') {
     const notifeeModule = require('@notifee/react-native');
     notifee           = notifeeModule.default || notifeeModule;
     AndroidImportance = notifeeModule.AndroidImportance;
+  } catch {}
+  try {
+    AsyncStorageModule = require('@react-native-async-storage/async-storage').default
+                      || require('@react-native-async-storage/async-storage');
   } catch {}
 
   // ── High-priority "Incoming Calls" channel (task #4) ──────────
@@ -80,7 +85,22 @@ if (Platform.OS === 'android') {
         const callerId   = data.callerId;
         const callerName = data.callerName || 'VaultChat';
         const type       = data.type || 'voice';
+        const roomId     = data.roomId || data.callRoomId || null;
         if (!callId || !callerId) return;
+        // Stash the call params in AsyncStorage so the answerCall
+        // event handler in voipPushService can pick them up when the
+        // user taps Accept on the OS-level call UI. Without this,
+        // callkeep flips its own state to "active" but the JS side
+        // never knows which call to send `call:accept` for, so the
+        // caller's iPhone keeps ringing forever.
+        if (AsyncStorageModule) {
+          try {
+            await AsyncStorageModule.setItem(
+              'vaultchat_pending_incoming_call',
+              JSON.stringify({ callId, callerId, callerName, type, roomId, ts: Date.now() }),
+            );
+          } catch {}
+        }
         // Primary path: bind via ConnectionService for the OS-level
         // incoming-call UI (lock-screen ring, full-screen, etc.).
         try {
