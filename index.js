@@ -20,7 +20,7 @@
 //  level.
 // ============================================================
 
-import { Platform } from 'react-native';
+import { Platform, AppRegistry } from 'react-native';
 
 if (Platform.OS === 'android') {
   // Wrap each native require in try/catch so dev/Expo Go builds
@@ -203,6 +203,54 @@ if (Platform.OS === 'android') {
     }
   }
 }
+
+// Register the callkeep HeadlessJS task BEFORE registering the React
+// root. callkeep's RNCallKeepBackgroundMessagingService dispatches
+// answer/end events to this task name when the app is killed — it's
+// the ONLY reliable way to receive the answerCall signal on a fully-
+// cold-wake. Plain RNCallKeep.addEventListener registrations only
+// work when a JS context is alive at the moment the event fires;
+// after `am kill`, no context exists, so the listener never sees
+// the answer tap.
+//
+// Task contract (callkeep): receives { name, callUUID, ... } where
+// name === 'answer' for accept, 'endCall' for decline/end.
+AppRegistry.registerHeadlessTask('RNCallKeepBackgroundMessage', () => async ({ name, callUUID }) => {
+  console.warn('[voip] headless RNCallKeepBackgroundMessage', name, callUUID);
+  if (name !== 'answer') return;
+  try {
+    const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+    const raw = await AsyncStorage.getItem('vaultchat_pending_incoming_call');
+    if (!raw) {
+      console.warn('[voip] headless: no pending call');
+      return;
+    }
+    const pending = JSON.parse(raw);
+    if (pending?.callId !== callUUID) {
+      console.warn('[voip] headless: callId mismatch', pending?.callId, 'vs', callUUID);
+      return;
+    }
+    const { supabase: sb } = require('./src/services/supabase');
+    const callPeer = require('./src/services/callPeer');
+    const { data: sess } = await sb.auth.getSession();
+    const myUid = sess?.session?.user?.id;
+    if (!myUid) {
+      console.warn('[voip] headless: no Supabase session');
+      return;
+    }
+    callPeer.handleIncomingInvite?.({
+      callId:   pending.callId,
+      roomId:   pending.roomId,
+      callerId: pending.callerId,
+      type:     pending.type || 'voice',
+    });
+    await callPeer.accept?.(myUid);
+    await AsyncStorage.removeItem('vaultchat_pending_incoming_call');
+    console.warn('[voip] headless: call:accept emitted');
+  } catch (e) {
+    console.warn('[voip] headless task failed:', e?.message || e);
+  }
+});
 
 // Hand control to Expo's standard registration after the FCM
 // handler is in place. registerRootComponent is what Expo's
