@@ -243,9 +243,45 @@ export default function ContactsScreen({ navigation }) {
   }, [filtered]);
 
   // ── Renderers ───────────────────────────────────────────
+  // Premium users get rounded card rows (matches the Vault dark
+  // mockup styling) with a small shield badge on premium peers and
+  // the @handle promoted next to the name. Free users keep the
+  // existing flat-bordered list to avoid surprising the legacy UX.
   const renderRow = ({ item }) => {
-    const name = `${item.firstName || ''} ${item.lastName || ''}`.trim() || item.name || item.phone || 'Unknown';
+    const name   = `${item.firstName || ''} ${item.lastName || ''}`.trim() || item.name || item.phone || 'Unknown';
     const isPrem = !!(item.phone && premiumByPhone.get(item.phone));
+    const handle = item.vault_handle || item.handle;
+
+    if (premium) {
+      return (
+        <TouchableOpacity
+          style={[s.cardRow, { backgroundColor: card, borderColor: border }]}
+          activeOpacity={0.85}
+          onPress={() => navigation.navigate('ContactView', { contact: { ...item, name } })}>
+          <View style={{ position: 'relative' }}>
+            <Avatar contact={{ ...item, name }} accent={premiumTint} />
+            {isPrem && (
+              <View style={[s.shieldBadge, { backgroundColor: premiumTint, borderColor: card }]}>
+                <Text style={s.shieldBadgeTx}>🛡</Text>
+              </View>
+            )}
+          </View>
+          <View style={{ flex: 1, marginLeft: 14 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Text style={[s.contactName, { color: tx }]} numberOfLines={1}>{name}</Text>
+              <PremiumCrown isPremium={isPrem} size={13} />
+            </View>
+            {handle
+              ? <Text style={[s.contactHandle, { color: premiumTint }]} numberOfLines={1}>{displayHandle(handle)}</Text>
+              : item.phone
+                ? <Text style={[s.contactPhone, { color: sub }]} numberOfLines={1}>{item.phone}</Text>
+                : null}
+          </View>
+          <Text style={{ color: sub, fontSize: 22, fontWeight: '300' }}>›</Text>
+        </TouchableOpacity>
+      );
+    }
+
     return (
       <TouchableOpacity
         style={[s.row, { borderBottomColor: border }]}
@@ -271,28 +307,42 @@ export default function ContactsScreen({ navigation }) {
   //
   // Wrapped in useCallback so the SectionList sees the same function
   // reference across renders and doesn't churn the header subtree.
+  //
+  // Premium polish (matches the dark-mode mockup):
+  //   - Hide the 3 quick-action cards (those paths still live in
+  //     the Add bottom sheet, so we lose nothing functionally).
+  //   - Drop the "All Contacts" divider — with no header tiles above
+  //     it, the divider just adds noise.
+  //   - Show a tiny "🛡 End-to-end encrypted" hint at the very top
+  //     so the premium feel carries through.
   const ListHeader = useCallback(() => (
     <View>
-      {/* Quick actions row */}
-      <View style={s.quickRow}>
-        <QuickAction icon="🛡" label="Secure Invite" accent={accent} card={card} tx={tx} onPress={onSecureInvite} />
-        <QuickAction icon="⟳"  label="Sync Contacts" accent={accent} card={card} tx={tx} onPress={syncPhoneContacts} />
-        <QuickAction icon="🔗" label="Invite Link"   accent={accent} card={card} tx={tx} onPress={onInviteLink} />
-      </View>
+      {!premium && (
+        <View style={s.quickRow}>
+          <QuickAction icon="🛡" label="Secure Invite" accent={accent} card={card} tx={tx} onPress={onSecureInvite} />
+          <QuickAction icon="⟳"  label="Sync Contacts" accent={accent} card={card} tx={tx} onPress={syncPhoneContacts} />
+          <QuickAction icon="🔗" label="Invite Link"   accent={accent} card={card} tx={tx} onPress={onInviteLink} />
+        </View>
+      )}
 
-      {/* (Premium Contacts section was removed per Harold's review —
-          individual premium peers still get a 👑 next to their name
-          in the All Contacts list below, so the signal stays without
-          the dedicated section.) */}
+      {premium && (
+        <View style={[s.premiumHint, { backgroundColor: premiumTint + '14', borderColor: premiumTint + '33' }]}>
+          <Text style={[s.premiumHintIcon, { color: premiumTint }]}>🛡</Text>
+          <Text style={[s.premiumHintText, { color: sub }]}>
+            All conversations are end-to-end encrypted.
+          </Text>
+        </View>
+      )}
 
-      {/* All Contacts divider */}
-      <View style={s.allDivider}>
-        <View style={[s.allDividerLine, { backgroundColor: border }]} />
-        <Text style={[s.allDividerText, { color: sub }]}>All Contacts</Text>
-        <View style={[s.allDividerLine, { backgroundColor: border }]} />
-      </View>
+      {!premium && (
+        <View style={s.allDivider}>
+          <View style={[s.allDividerLine, { backgroundColor: border }]} />
+          <Text style={[s.allDividerText, { color: sub }]}>All Contacts</Text>
+          <View style={[s.allDividerLine, { backgroundColor: border }]} />
+        </View>
+      )}
     </View>
-  ), [accent, card, tx, sub, border, onSecureInvite, onInviteLink]);
+  ), [premium, premiumTint, accent, card, tx, sub, border, onSecureInvite, onInviteLink]);
 
   return (
     <View style={[s.container, { backgroundColor: bg }]}>
@@ -438,6 +488,30 @@ const s = StyleSheet.create({
   emptyTitle:     { fontSize: 20, fontWeight: '700' },
   emptySub:       { fontSize: 14, textAlign: 'center' },
   emptySyncBtn:   { paddingHorizontal: 24, paddingVertical: 14, borderRadius: 16, marginTop: 8 },
+
+  // ── Premium-only styles ─────────────────────────────────────
+  premiumHint:    {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    marginHorizontal: 16, marginBottom: 10,
+    paddingVertical: 10, paddingHorizontal: 14,
+    borderRadius: 12, borderWidth: 1,
+  },
+  premiumHintIcon:{ fontSize: 16 },
+  premiumHintText:{ flex: 1, fontSize: 12, fontWeight: '600' },
+
+  cardRow:        {
+    flexDirection: 'row', alignItems: 'center',
+    marginHorizontal: 16, marginBottom: 8,
+    paddingVertical: 12, paddingHorizontal: 12,
+    borderRadius: 14, borderWidth: 1,
+  },
+  shieldBadge:    {
+    position: 'absolute', right: -2, bottom: -2,
+    width: 18, height: 18, borderRadius: 9,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1.5,
+  },
+  shieldBadgeTx:  { fontSize: 9, color: '#fff' },
 
   // Add-contact bottom sheet
   sheetBackdrop:  { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
