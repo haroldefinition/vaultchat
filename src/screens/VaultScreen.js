@@ -134,7 +134,7 @@ export default function VaultScreen({ navigation }) {
             countLabel={stats.chats === 1 ? 'conversation' : 'conversations'}
             onPress={() => {
               if (!premium) { setPremiumModalVis(true); return; }
-              navigation.navigate('Chats', { focusVault: true });
+              navigation.navigate('LockedChats');
             }}
             accent={accent} card={card} border={border} tx={tx} sub={sub}
           />

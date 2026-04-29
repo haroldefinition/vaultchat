@@ -515,8 +515,28 @@ export default function ChatsScreen({ navigation }) {
           user's custom folders + a "+" pill that opens FoldersScreen.
           Custom folders are gated behind premium (handled by
           onFolderPillPress); the pills are visible either way so
-          non-premium users discover the upsell naturally. */}
-      <View style={[s.folderRow, { borderBottomColor: border }]}>
+          non-premium users discover the upsell naturally.
+
+          Premium: the row gets a rounded-top white surface pulled up
+          into the purple header so it reads as a tab pulled forward
+          from the band — matches the mockup's "premium tab" look. */}
+      <View style={[
+        s.folderRow,
+        { borderBottomColor: border },
+        // Premium pulled-tab effect: white container with rounded top
+        // corners that just barely cuts into the purple header band.
+        // Tuned to keep the chip row + search bar fully visible — only
+        // the corner curve overlaps the purple. -8 marginTop is the
+        // "kiss" amount; larger values eat the chip row.
+        premium && {
+          backgroundColor: bg,
+          borderTopLeftRadius: 24,
+          borderTopRightRadius: 24,
+          marginTop: -8,
+          paddingTop: 14,
+          borderBottomWidth: 0,
+        },
+      ]}>
         <FlatList
           horizontal
           data={[{ id: null, name: 'All', emoji: null }, { id: '__groups', name: 'Groups', emoji: '👥' }, ...folders, { id: '__vault', name: 'Vault', emoji: '🔒' }, { id: '__manage', name: 'Manage', emoji: '⚙️' }]}

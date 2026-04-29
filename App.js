@@ -66,6 +66,7 @@ import FoldersScreen       from './src/screens/FoldersScreen';
 import BlockedUsersScreen  from './src/screens/BlockedUsersScreen';
 import ThemePickerScreen   from './src/screens/ThemePickerScreen';
 import VaultScreen         from './src/screens/VaultScreen';
+import LockedChatsScreen   from './src/screens/LockedChatsScreen';
 
 // ── Premium Modal (accessed everywhere) ──────────────────────
 import PremiumModal from './src/components/PremiumModal';
@@ -187,7 +188,15 @@ function MainTabs() {
           tabBarLabel: 'Contacts',
           tabBarIcon:({focused})=><Text style={{fontSize:26,opacity:focused?1:0.85}}>👤</Text>,
         }}/>
-      <Tab.Screen name="Groups"   component={GroupScreen}    options={{ tabBarIcon:({focused})=><Text style={{fontSize:26,opacity:focused?1:0.85}}>👥</Text> }}/>
+      {/* Vault replaces the dedicated "Groups" bottom tab (per the
+          premium mockup design refresh). Groups is still reachable
+          via the chip row on the Chats screen + the existing Stack
+          registration further below — no functionality is lost. */}
+      <Tab.Screen name="VaultTab" component={VaultScreen}
+        options={{
+          tabBarLabel: 'Vault',
+          tabBarIcon:({focused})=><Text style={{fontSize:24,opacity:focused?1:0.85}}>🛡️</Text>,
+        }}/>
       {/* "Settings" replaces the old "More" tab. The MoreScreen overflow
           (Business, AI Assistant, Nearby, Discover, legal pages) is now
           reachable from a row inside SettingsScreen, so this tab leads
@@ -464,6 +473,7 @@ export default function App() {
               <Stack.Screen name="BlockedUsers"  component={BlockedUsersScreen} />
               <Stack.Screen name="ThemePicker"   component={ThemePickerScreen} />
               <Stack.Screen name="Vault"         component={VaultScreen} />
+              <Stack.Screen name="LockedChats"   component={LockedChatsScreen} />
               <Stack.Screen name="Premium"       component={({navigation}) => {
                 const [vis,setVis] = useState(true);
                 return <PremiumModal visible={vis} onClose={() => navigation.goBack()} onUpgraded={() => navigation.goBack()} />;
