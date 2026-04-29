@@ -101,25 +101,27 @@ public class AppDelegate: ExpoAppDelegate, PKPushRegistryDelegate {
     for type: PKPushType,
     completion: @escaping () -> Void
   ) {
-    // Hand off to RN module — it bridges the payload to JS where
-    // voipPushService's _onIncomingPush handler is invoked. JS must
-    // call CallKit (RNCallKeep.displayIncomingCall) before this
-    // completion handler fires, OR iOS revokes our VoIP entitlement.
-    // The 3-arg variant of didReceiveIncomingPushWith forwards a
-    // completion callback so RN can call it from JS once CallKit
-    // has been displayed.
-    RNVoipPushNotificationManager.didReceiveIncomingPush(
-      with: payload,
-      forType: type.rawValue,
-      andCompletion: completion
-    )
+    // iOS PushKit contract: the completion handler MUST fire within
+    // ~30 seconds of receiving the push, or iOS revokes our VoIP
+    // entitlement. react-native-voip-push-notification stores the
+    // handler keyed by call UUID via addCompletionHandler, then JS
+    // calls onVoipNotificationCompleted(uuid) after CallKit display
+    // is up. We extract the uuid from the payload (which our server
+    // includes as `uuid` in the data dict) and register the handler.
+    let uuid = (payload.dictionaryPayload["uuid"] as? String) ?? UUID().uuidString
+    RNVoipPushNotificationManager.addCompletionHandler(uuid, completionHandler: completion)
+    RNVoipPushNotificationManager.didReceiveIncomingPush(with: payload, forType: type.rawValue)
   }
 
   public func pushRegistry(
     _ registry: PKPushRegistry,
     didInvalidatePushTokenFor type: PKPushType
   ) {
-    RNVoipPushNotificationManager.didInvalidatePushToken(forType: type.rawValue)
+    // No-op. react-native-voip-push-notification@3.3.3 doesn't expose
+    // a static handler for token invalidation; iOS will issue a fresh
+    // token on next launch via didUpdate, and our /pushkit/register
+    // endpoint upserts on `token` (see server.js with on_conflict=token)
+    // so the stale token is naturally replaced when the new one POSTs.
   }
 }
 

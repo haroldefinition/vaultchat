@@ -62,28 +62,24 @@ const PUSHKIT_DELEGATE_METHODS = `
     for type: PKPushType,
     completion: @escaping () -> Void
   ) {
-    RNVoipPushNotificationManager.didReceiveIncomingPush(
-      with: payload,
-      forType: type.rawValue,
-      andCompletion: completion
-    )
+    let uuid = (payload.dictionaryPayload["uuid"] as? String) ?? UUID().uuidString
+    RNVoipPushNotificationManager.addCompletionHandler(uuid, completionHandler: completion)
+    RNVoipPushNotificationManager.didReceiveIncomingPush(with: payload, forType: type.rawValue)
   }
   public func pushRegistry(
     _ registry: PKPushRegistry,
     didInvalidatePushTokenFor type: PKPushType
   ) {
-    RNVoipPushNotificationManager.didInvalidatePushToken(forType: type.rawValue)
+    // No-op — package 3.3.3 doesn't expose a static invalidate handler.
+    // iOS will issue a fresh token on next launch via didUpdate.
   }`;
 
 const BRIDGING_HEADER_BLOCK = `
 // react-native-voip-push-notification — exposes
 // RNVoipPushNotificationManager so AppDelegate.swift can forward
-// PKPushRegistry callbacks into JS.
-#if __has_include(<RNVoipPushNotification/RNVoipPushNotificationManager.h>)
-  #import <RNVoipPushNotification/RNVoipPushNotificationManager.h>
-#elif __has_include("RNVoipPushNotificationManager.h")
-  #import "RNVoipPushNotificationManager.h"
-#endif
+// PKPushRegistry callbacks into JS. Quoted import because the pod
+// is a static library (use_frameworks! is off in RN projects).
+#import "RNVoipPushNotificationManager.h"
 `;
 
 function withPushKitAppDelegate(config) {

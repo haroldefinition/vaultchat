@@ -3,11 +3,9 @@
 //
 
 // react-native-voip-push-notification — exposes
-// RNVoipPushNotificationManager.didUpdate / didReceiveIncomingPush /
-// didInvalidatePushToken so AppDelegate.swift can forward PKPushRegistry
-// callbacks into JS via the React Native bridge.
-#if __has_include(<RNVoipPushNotification/RNVoipPushNotificationManager.h>)
-  #import <RNVoipPushNotification/RNVoipPushNotificationManager.h>
-#elif __has_include("RNVoipPushNotificationManager.h")
-  #import "RNVoipPushNotificationManager.h"
-#endif
+// RNVoipPushNotificationManager static class methods so AppDelegate.swift
+// can forward PKPushRegistry callbacks into JS via the React Native
+// bridge. Quoted import (NOT framework-style) because the pod is built
+// as a static library with `use_frameworks!` disabled — that's the
+// default for React Native projects.
+#import "RNVoipPushNotificationManager.h"
