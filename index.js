@@ -140,6 +140,67 @@ if (Platform.OS === 'android') {
     } catch (e) {
       if (__DEV__) console.warn('[index] setBackgroundMessageHandler failed:', e?.message);
     }
+
+    // Register the callkeep `answerCall` listener at MODULE-EVAL TIME
+    // so it's wired up the moment any JS context starts — including
+    // the headless context FCM uses to wake the app. Without this,
+    // when a user taps Accept on the OS-level call UI from a cold
+    // (killed) state, the event fires before voipPushService's
+    // listener (which only registers after sign-in via _startAndroidPush)
+    // exists, so the call:accept signal never reaches the server and
+    // the caller keeps ringing forever.
+    //
+    // The handler is fully self-contained: it reads the pending call
+    // (stashed by setBackgroundMessageHandler), resolves myUserId from
+    // the live Supabase session, stages callPeer, and emits call:accept.
+    try {
+      RNCallKeep.addEventListener('answerCall', async ({ callUUID }) => {
+        console.warn('[voip] answerCall (index.js) callUUID=', callUUID);
+        try { RNCallKeep.setCurrentCallActive(callUUID); } catch {}
+        try {
+          if (!AsyncStorageModule) return;
+          const raw = await AsyncStorageModule.getItem('vaultchat_pending_incoming_call');
+          if (!raw) {
+            console.warn('[voip] no pending call in storage');
+            return;
+          }
+          const pending = JSON.parse(raw);
+          if (pending?.callId !== callUUID) {
+            console.warn('[voip] pending callId mismatch', pending?.callId, 'vs', callUUID);
+            return;
+          }
+          const { supabase: sb } = require('./src/services/supabase');
+          const callPeer = require('./src/services/callPeer');
+          const { data: sess } = await sb.auth.getSession();
+          const myUid = sess?.session?.user?.id;
+          if (!myUid) {
+            console.warn('[voip] no Supabase session — skipping accept');
+            return;
+          }
+          callPeer.handleIncomingInvite?.({
+            callId:   pending.callId,
+            roomId:   pending.roomId,
+            callerId: pending.callerId,
+            type:     pending.type || 'voice',
+          });
+          await callPeer.accept?.(myUid);
+          console.warn('[voip] callPeer.accept resolved — call:accept emitted');
+          await AsyncStorageModule.removeItem('vaultchat_pending_incoming_call');
+        } catch (e) {
+          console.warn('[voip] index.js answerCall failed:', e?.message || e);
+        }
+      });
+      RNCallKeep.addEventListener('endCall', async ({ callUUID }) => {
+        console.warn('[voip] endCall (index.js) callUUID=', callUUID);
+        try {
+          if (AsyncStorageModule) {
+            await AsyncStorageModule.removeItem('vaultchat_pending_incoming_call');
+          }
+        } catch {}
+      });
+    } catch (e) {
+      if (__DEV__) console.warn('[index] callkeep listener registration failed:', e?.message);
+    }
   }
 }
 

@@ -354,81 +354,14 @@ async function _startAndroidPush({ myUserId }) {
     if (__DEV__) console.warn('[voip] callkeep setup failed:', e?.message || e);
   }
 
-  // Wire callkeep events — answer routes to the existing call
-  // pipeline; end-call cleans up.
+  // Note: `answerCall` and `endCall` listeners are registered at
+  // module-eval time in index.js so they're wired up the moment ANY
+  // JS context starts — including the headless FCM context. We only
+  // add the per-call cleanup hooks here (callPeer/roomCall teardown).
   try {
-    _RNCallKeep.addEventListener('answerCall', async ({ callUUID }) => {
-      // 1. Flip the OS-managed call to "active" so the call timer
-      //    starts and the user sees the active-call UI immediately.
-      try { _RNCallKeep.setCurrentCallActive(callUUID); } catch {}
-
-      // 2. CRITICAL — emit `call:accept` to the server so the caller
-      //    (e.g. iPhone) gets notified that we picked up. Without this,
-      //    callkeep flips its own UI to "connected" but the iPhone
-      //    keeps ringing because the server never sees our accept.
-      //
-      //    On a cold-wake from FCM, the call:incoming socket event was
-      //    fired BEFORE this device's app booted, so callPeer's normal
-      //    socket-based staging didn't run. We re-stage from the
-      //    AsyncStorage record that index.js's FCM background handler
-      //    saved when it received the data message.
-      console.warn('[voip] answerCall fired, callUUID=', callUUID);
-      try {
-        const raw = await AsyncStorage.getItem('vaultchat_pending_incoming_call');
-        console.warn('[voip] pending raw=', raw ? raw.slice(0, 200) : 'NULL');
-        if (!raw) return;
-        const pending = JSON.parse(raw);
-        // Only consume if the callUUID matches what FCM delivered —
-        // otherwise we might mis-accept a different call.
-        if (pending?.callId !== callUUID) {
-          console.warn('[voip] callUUID mismatch — pending=', pending?.callId, 'got=', callUUID);
-          return;
-        }
-
-        // Resolve myUserId fresh from Supabase. The cached _myUserId
-        // may not be populated yet on a cold-wake — the listener can
-        // fire BEFORE _startAndroidPush sets _myUserId. Falling back
-        // to the live session avoids accept(null) silent failures.
-        let myUid = _myUserId;
-        if (!myUid) {
-          try {
-            const { supabase: sb } = require('./supabase');
-            const { data } = await sb.auth.getSession();
-            myUid = data?.session?.user?.id || null;
-            if (myUid) _myUserId = myUid;
-          } catch {}
-        }
-        console.warn('[voip] accepting with myUid=', myUid, 'pending.callId=', pending.callId);
-        if (!myUid) {
-          console.warn('[voip] no myUserId available — cannot emit call:accept');
-          return;
-        }
-
-        // Stage the call so callPeer.accept knows the params.
-        callPeer.handleIncomingInvite?.({
-          callId:    pending.callId,
-          roomId:    pending.roomId,
-          callerId:  pending.callerId,
-          type:      pending.type || 'voice',
-        });
-
-        // Fire call:accept (opens mic, builds peer connection, emits
-        // socket event so the caller side starts the WebRTC offer).
-        await callPeer.accept?.(myUid);
-        console.warn('[voip] callPeer.accept resolved, call:accept emitted');
-
-        // Clear the pending record — next call will write a fresh one.
-        await AsyncStorage.removeItem('vaultchat_pending_incoming_call');
-      } catch (e) {
-        console.warn('[voip] answerCall accept-flow failed:', e?.message || e);
-      }
-    });
     _RNCallKeep.addEventListener('endCall', ({ callUUID }) => {
       try { callPeer.endActiveCall?.(callUUID); } catch {}
       try { roomCall.endActiveCall?.(callUUID);  } catch {}
-      // If user declined before accepting, drop the staged record
-      // so a future call doesn't accidentally consume it.
-      AsyncStorage.removeItem('vaultchat_pending_incoming_call').catch(() => {});
     });
   } catch {}
 
