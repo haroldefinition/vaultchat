@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, Alert, ScrollView,
+  View, Text, Image, StyleSheet, TouchableOpacity, Alert, ScrollView,
   TextInput, Animated, Modal, KeyboardAvoidingView, Platform, Vibration,
 } from 'react-native';
 // Pinch-to-zoom on the remote video (task #120). RNGH 2.x still ships
@@ -806,7 +806,11 @@ export default function ActiveCallScreen({ route, navigation }) {
               speed={status === 'Ringing...' ? 'ringing' : 'calm'}
               shape={isPremium ? 'arc' : 'line'}
             />
-            {/* Glow ring + avatar (centered) */}
+            {/* Glow ring + avatar (centered).
+                Bottom-right badge = the VaultChat shield, so users see
+                clear app branding during every call (the OS-level call
+                UI on Android can't carry our logo from killed-state, so
+                we surface it here once the call is in-app). */}
             <Animated.View
               style={[
                 s.avatarGlow,
@@ -815,6 +819,13 @@ export default function ActiveCallScreen({ route, navigation }) {
               ]}>
               <View style={[s.avatar, { backgroundColor: accent }]}>
                 <Text style={s.avatarTx}>{(recipientName || '?')[0]?.toUpperCase()}</Text>
+              </View>
+              <View style={s.brandBadge}>
+                <Image
+                  source={require('../../assets/icon.png')}
+                  style={s.brandBadgeImg}
+                  resizeMode="contain"
+                />
               </View>
             </Animated.View>
             {/* Right disperse waveform dots */}
@@ -1121,6 +1132,23 @@ const s = StyleSheet.create({
     shadowOpacity: 0.55, shadowRadius: 30, shadowOffset: { width: 0, height: 0 },
   },
   avatar:         { width: 154, height: 154, borderRadius: 77, alignItems: 'center', justifyContent: 'center' },
+  // VaultChat shield badge — sits at the bottom-right of the avatar
+  // glow ring like a verified-account checkmark. Sized so it reads as
+  // a brand mark, not as the primary subject of the avatar. White
+  // background ring matches the icon's own card edge so the badge
+  // looks intentional against any wallpaper / theme.
+  brandBadge:     {
+    position: 'absolute',
+    bottom: 4,
+    right: 4,
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: '#ffffff',
+    alignItems: 'center', justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.25, shadowRadius: 4, shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+  },
+  brandBadgeImg:  { width: 36, height: 36, borderRadius: 18 },
 
   // Controls 3x2 grid
   controls:       { paddingHorizontal: 20, paddingVertical: 28, gap: 28, alignItems: 'center' },
