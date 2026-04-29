@@ -81,12 +81,19 @@ if (Platform.OS === 'android') {
     try {
       messaging().setBackgroundMessageHandler(async (remoteMessage) => {
         const data = remoteMessage?.data || {};
-        const callId     = data.callId;
-        const callerId   = data.callerId;
-        const callerName = data.callerName || 'VaultChat';
-        const type       = data.type || 'voice';
-        const roomId     = data.roomId || data.callRoomId || null;
+        const callId       = data.callId;
+        const callerId     = data.callerId;
+        const callerName   = data.callerName || 'VaultChat';
+        const callerHandle = data.callerHandle || '';
+        const type         = data.type || 'voice';
+        const roomId       = data.roomId || data.callRoomId || null;
         if (!callId || !callerId) return;
+        // Compose the Telecom "address" line — what shows under the
+        // caller's name in the OS-level incoming call UI. Prefer the
+        // @handle if we have it (clean, like "@jon"), otherwise fall
+        // back to a generic label so the user_id UUID never leaks
+        // into the user-facing UI.
+        const displayHandle = callerHandle ? `@${callerHandle}` : 'VaultChat';
         // Stash the call params in AsyncStorage so the answerCall
         // event handler in voipPushService can pick them up when the
         // user taps Accept on the OS-level call UI. Without this,
@@ -97,16 +104,18 @@ if (Platform.OS === 'android') {
           try {
             await AsyncStorageModule.setItem(
               'vaultchat_pending_incoming_call',
-              JSON.stringify({ callId, callerId, callerName, type, roomId, ts: Date.now() }),
+              JSON.stringify({ callId, callerId, callerHandle, callerName, type, roomId, ts: Date.now() }),
             );
           } catch {}
         }
         // Primary path: bind via ConnectionService for the OS-level
         // incoming-call UI (lock-screen ring, full-screen, etc.).
+        // Pass `displayHandle` (the @handle) as the Telecom address so
+        // the call UI shows "@jon" under the name, never the raw UUID.
         try {
           await RNCallKeep.displayIncomingCall(
             callId,
-            callerId,
+            displayHandle,
             callerName,
             'generic',
             type === 'video',

@@ -162,7 +162,7 @@ export default function RegisterScreen({ route, onLoginCallback }) {
       }
     } catch {}
     setLoading(false);
-    Alert.alert('Invalid Code', 'Check the code and try again. In dev mode use 123456.');
+    Alert.alert('Invalid Code', 'The code didn\'t match. Double-check the SMS we sent and try again.');
   }
 
   // ── Save handle & enter app ───────────────────────────────────

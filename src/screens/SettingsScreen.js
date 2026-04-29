@@ -109,6 +109,33 @@ export default function SettingsScreen({ navigation }) {
     // VAULT HANDLE editor below). Falls through to the @handle lookup
     // a few lines down if the cache isn't seeded yet (fresh signup).
     if (d.vaultchat_vault_id) setVaultId(d.vaultchat_vault_id);
+
+    // First-launch / new-device fallback: if AsyncStorage doesn't have
+    // a display_name or bio yet but we DO have a Supabase session, pull
+    // the values from the profiles row and seed the local cache. This
+    // makes "switch phones / reinstall" Just Work — without it, users
+    // see an empty profile after re-signing in even though their data
+    // is safe in Supabase.
+    if (!d.vaultchat_display_name || !d.vaultchat_bio) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user?.id) {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('display_name, bio')
+            .eq('id', session.user.id)
+            .maybeSingle();
+          if (profile?.display_name && !d.vaultchat_display_name) {
+            setDisplayName(profile.display_name);
+            try { await AsyncStorage.setItem('vaultchat_display_name', profile.display_name); } catch {}
+          }
+          if (profile?.bio && !d.vaultchat_bio) {
+            setBio(profile.bio);
+            try { await AsyncStorage.setItem('vaultchat_bio', profile.bio); } catch {}
+          }
+        }
+      } catch {}
+    }
     if (d.vaultchat_email) setEmail(d.vaultchat_email);
     if (d.vaultchat_addr1) setAddr1(d.vaultchat_addr1);
     if (d.vaultchat_addr2) setAddr2(d.vaultchat_addr2);
