@@ -76,62 +76,75 @@ export function ThemeProvider({ children }) {
     await AsyncStorage.setItem('vaultchat_light_mode', JSON.stringify(val));
   }
 
-  // Color strategy (2026-04 refresh to match premium mockups):
-  //  - DARK MODE  → near-black canvases + violet accent (premium / "vault" feel)
-  //  - LIGHT MODE → bright white canvases + Fiji blue accent (clean / tropical)
-  //  - PREMIUM + DARK → deeper royal purple accent, warm gold secondary,
-  //    and a subtle gradient backdrop tuple for hero surfaces.
+  // Color strategy (2026-04-29 refresh — premium gets a dedicated light
+  // variant, NOT a darker dark mode):
+  //
+  //  - FREE + DARK   → near-black canvases + violet accent
+  //  - FREE + LIGHT  → bright white canvases + Fiji blue accent (clean / tropical)
+  //  - PREMIUM       → ALWAYS uses the light/white layout with PURPLE accents
+  //                    (deep purple gradient header, pure white message rows,
+  //                     navy-ink primary text). The `lightMode` toggle is
+  //                     ignored for premium users — premium is its own
+  //                     branded look that signals paid status visually.
   //
   // The `accent` token drives outgoing chat bubbles, tab-bar highlights,
   // avatar fallback backgrounds, unread badges, the shield mark next to the
   // app name, and the glowing ring around call avatars — so one value
   // ripples through the whole UI.
-  const premiumDark = isPremium && !lightMode;
+  //
+  // `premiumLight` is the new "always-on" premium look. `premiumDark` is
+  // kept around for screens that haven't been retrofitted yet, but new
+  // screens should branch on `isPremium` and use the premiumLight palette.
+  const premiumLight = isPremium;
+  const useWhiteCanvas = lightMode || premiumLight;
 
   const theme = {
     lightMode,
     toggleLight,
     isPremium,
 
-    // Canvases
-    bg:         lightMode ? '#f6faff' : (premiumDark ? '#0c0816' : '#0a0a0f'),
-    card:       lightMode ? '#ffffff' : (premiumDark ? '#1a1325' : '#17171f'),
-    sectionBg:  lightMode ? '#eaf3ff' : (premiumDark ? '#0c0816' : '#0a0a0f'),
+    // Canvases — premium ALWAYS gets the white/light surfaces, regardless
+    // of lightMode toggle. Free dark users keep the dark palette.
+    bg:         useWhiteCanvas ? (premiumLight ? '#ffffff' : '#f6faff') : '#0a0a0f',
+    card:       useWhiteCanvas ? '#ffffff' : '#17171f',
+    sectionBg:  useWhiteCanvas ? (premiumLight ? '#ffffff' : '#eaf3ff') : '#0a0a0f',
 
-    // Text
-    tx:         lightMode ? '#0b2545' : '#ffffff',
-    sub:        lightMode ? '#5b7793' : '#9296a0',
+    // Text — premium uses the same navy ink as light mode for max contrast
+    tx:         useWhiteCanvas ? '#0b2545' : '#ffffff',
+    sub:        useWhiteCanvas ? '#5b7793' : '#9296a0',
 
-    // Lines & fills
-    border:     lightMode ? '#d4e4f5' : (premiumDark ? '#2b1f3d' : '#23232d'),
-    inputBg:    lightMode ? '#eaf3ff' : (premiumDark ? '#1f1730' : '#1c1c26'),
+    // Lines & fills — softer borders for premium so the white cards feel
+    // light and airy, not like they have heavy outlines.
+    border:     premiumLight ? '#ece6f7' : (lightMode ? '#d4e4f5' : '#23232d'),
+    inputBg:    premiumLight ? '#f5f0fc' : (lightMode ? '#eaf3ff' : '#1c1c26'),
 
-    // Accent — brand color (changes the whole app's vibe)
-    //   Light  → Fiji blue
-    //   Dark   → Violet-500
-    //   Premium dark → richer royal purple
-    accent:     lightMode
-                  ? '#0EA5E9'
-                  : (premiumDark ? '#A855F7' : '#8B5CF6'),
+    // Accent — brand color
+    //   Free + Light  → Fiji blue
+    //   Free + Dark   → Violet-500
+    //   PREMIUM       → Royal purple (regardless of lightMode toggle —
+    //                   premium IS the purple brand)
+    accent:     premiumLight
+                  ? '#7C3AED'
+                  : (lightMode ? '#0EA5E9' : '#8B5CF6'),
 
     // Chat bubble colors — split from accent so we can tune contrast later
-    bubbleOut:  lightMode ? '#0EA5E9' : (premiumDark ? '#A855F7' : '#8B5CF6'),
-    bubbleIn:   lightMode ? '#f0f4f9' : (premiumDark ? '#221833' : '#20202b'),
+    bubbleOut:  premiumLight ? '#7C3AED' : (lightMode ? '#0EA5E9' : '#8B5CF6'),
+    bubbleIn:   useWhiteCanvas ? '#f3f0fa' : '#20202b',
     bubbleOutTx:'#ffffff',
-    bubbleInTx: lightMode ? '#0b2545' : '#ffffff',
+    bubbleInTx: useWhiteCanvas ? '#0b2545' : '#ffffff',
 
     // ── Premium polish tokens ──────────────────────────────
     // Gold — used for the verified shield, the crown highlight,
     // "Premium Member" tags, and the Vault hero ring. Falls back
     // to accent for non-premium surfaces so screens that read
     // `gold` don't have to branch.
-    gold:       premiumDark ? '#FFD166' : (isPremium ? '#B8860B' : (lightMode ? '#0EA5E9' : '#8B5CF6')),
+    gold:       isPremium ? '#FFD166' : (lightMode ? '#0EA5E9' : '#8B5CF6'),
 
     // Subtle gradient tuple for hero cards. [start, end].
-    // Free + dark → flat single color; premium + dark → deep
-    // purple → near-black so cards feel sunken-into-velvet.
-    gradientBg: premiumDark
-                  ? ['#2B1856', '#0c0816']
+    // Premium → deep purple gradient like the screenshot header band.
+    // Free dark → flat single color, free light → soft blue gradient.
+    gradientBg: premiumLight
+                  ? ['#5B2FB8', '#7C3AED']
                   : (lightMode ? ['#ffffff', '#eaf3ff'] : ['#17171f', '#0a0a0f']),
   };
 
