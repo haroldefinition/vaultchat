@@ -164,6 +164,9 @@ export default function SettingsScreen({ navigation }) {
   }
 
   async function saveProfile() {
+    // Local cache first — these are read on the next app launch before
+    // the Supabase round-trip lands, so writing them locally makes the
+    // edits feel instant.
     await save('vaultchat_display_name', displayName);
     await save('vaultchat_bio', bio);
     await save('vaultchat_email', email);
@@ -174,14 +177,27 @@ export default function SettingsScreen({ navigation }) {
     await save('vaultchat_zip', zip);
     await save('vaultchat_country', country);
 
-    // Also persist the @handle (and Vault ID, which is the same value)
-    // when the user taps the top "Save" button. Without this, the handle
-    // editor's own inline Save button is the ONLY path to commit a handle
-    // change — easy to miss and a frequent source of "I changed it but
-    // nothing happened" reports. We compare against the cached handle so
-    // we only call saveHandle when the value actually changed; a no-op
-    // call would still write the same value, but skipping it avoids a
-    // pointless network hop.
+    // Push the public-facing fields to Supabase profiles so other users
+    // see the latest display_name when they sync contacts or open a
+    // chat header. Address/email/bio stay device-local for now (nobody
+    // else needs them server-side and they're more sensitive than the
+    // handle/name).
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const myUserId = session?.user?.id;
+      if (myUserId) {
+        await supabase
+          .from('profiles')
+          .update({ display_name: displayName || null, bio: bio || null })
+          .eq('id', myUserId);
+      }
+    } catch {}
+
+    // Persist the @handle (and Vault ID, which is the same value) when
+    // the user taps the top "Save" button. Without this, the handle
+    // editor's own inline Save button is the ONLY path to commit a
+    // handle change — easy to miss. Compare against cached value so we
+    // only fire the network call when the handle actually changed.
     try {
       const cachedHandle = await AsyncStorage.getItem('vaultchat_handle');
       if (vaultHandle && vaultHandle !== cachedHandle && vaultHandle.replace('@','').length >= 3) {
@@ -189,7 +205,7 @@ export default function SettingsScreen({ navigation }) {
         if (result?.ok) {
           // saveHandle already wrote vault_handle + vault_id to Supabase
           // and updated AsyncStorage. Bump the local React state so the
-          // VAULT ID display below the handle editor refreshes too.
+          // VAULT ID display refreshes too.
           setVaultId(vaultHandle);
         } else {
           const msg = result?.reason === 'taken'   ? `${vaultHandle} is already taken. Pick another handle.`

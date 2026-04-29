@@ -445,9 +445,13 @@ export default function RegisterScreen({ route, onLoginCallback }) {
                 : <Text style={s.btnTx}>Create Handle →</Text>}
             </TouchableOpacity>
 
-            <TouchableOpacity style={s.backBtn} onPress={skipHandle}>
-              <Text style={s.backTx}>Skip for now</Text>
-            </TouchableOpacity>
+            {/* "Skip for now" was removed — every user must pick their
+                own @handle at signup so it's the same on iPhone and
+                Android, drives contact discovery (other users find them
+                by typing @handle), and keeps the Vault ID = @handle
+                invariant. Auto-suffixed handles like @user1234 made
+                the system feel sloppy and produced duplicate handles
+                via collision-resolution. */}
 
             <Text style={s.badge}>
               🔒 End-to-end encrypted · Metadata private · No ads
