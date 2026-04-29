@@ -906,6 +906,33 @@ export default function SettingsScreen({ navigation }) {
           <Text style={[st.header, { color: accent, paddingHorizontal: 0, paddingTop: 0 }]}>Settings</Text>
         </View>
 
+        {/* TEMPORARY dev toggle — remove before public launch.
+            Lets us preview the premium light theme without going through
+            the IAP purchase flow on emulator (which can't talk to real
+            Google Play billing). Tap to flip the local premium flag and
+            the entire app re-renders with white-canvas + purple-accent
+            premium look. Tap again to switch back to free dark/light. */}
+        <TouchableOpacity
+          style={{
+            marginHorizontal: 16, marginBottom: 12, padding: 14, borderRadius: 12,
+            backgroundColor: '#7C3AED', alignItems: 'center',
+          }}
+          onPress={async () => {
+            try {
+              const { setPremiumUser, isPremiumUser } = require('../services/adsService');
+              const current = await isPremiumUser();
+              await setPremiumUser(!current);
+              Alert.alert(
+                'Premium Toggle (Dev)',
+                `Premium is now ${!current ? 'ON — white-purple theme active' : 'OFF — back to free dark/light'}.\n\nClose and re-open Settings (or backout to Chats and back) to see the change.`,
+              );
+            } catch (e) {
+              Alert.alert('Toggle failed', e?.message || String(e));
+            }
+          }}>
+          <Text style={{ color: '#fff', fontWeight: '700' }}>🧪 Toggle Premium UI (dev)</Text>
+        </TouchableOpacity>
+
         {/* TEMPORARY — task #50 verification. Places a real 1:1 call to the
             other hardcoded test peer, bypassing phone/profile resolution.
             Gated behind __DEV__ so it's stripped from production bundles. */}
