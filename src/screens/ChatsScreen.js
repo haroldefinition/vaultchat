@@ -519,14 +519,14 @@ export default function ChatsScreen({ navigation }) {
         <View style={{
           backgroundColor: headerBg,           // purple, extends header band down
           paddingHorizontal: 16,
-          paddingBottom: 14,
+          paddingBottom: 28,                   // breathing room so the tab below doesn't kiss the search bar
           paddingTop: 4,
         }}>
           <View style={{
             flexDirection: 'row', alignItems: 'center',
             backgroundColor: 'rgba(255,255,255,0.18)',
             borderRadius: 14,
-            paddingHorizontal: 14, paddingVertical: 10,
+            paddingHorizontal: 14, paddingVertical: 12,
           }}>
             <Text style={{ fontSize: 14, marginRight: 8, color: 'rgba(255,255,255,0.85)' }}>🔍</Text>
             <TextInput
@@ -554,18 +554,19 @@ export default function ChatsScreen({ navigation }) {
           non-premium users discover the upsell naturally.
 
           Premium: this row IS the pulled white tab. Larger corner
-          radius (36) gives the deep curve sliding inward from the
-          purple band that the mockup calls for. */}
+          radius (44) gives the deep "sliding inward" curve from the
+          mockup. marginTop=0 means the tab sits flush against the
+          purple band — no overlap with the search bar above it. */}
       <View style={[
         s.folderRow,
         { borderBottomColor: border },
         premium && {
           backgroundColor: bg,
-          borderTopLeftRadius: 36,
-          borderTopRightRadius: 36,
-          marginTop: -16,
-          paddingTop: 18,
-          paddingBottom: 8,
+          borderTopLeftRadius: 44,
+          borderTopRightRadius: 44,
+          marginTop: 0,
+          paddingTop: 20,
+          paddingBottom: 10,
           borderBottomWidth: 0,
         },
       ]}>
