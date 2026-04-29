@@ -109,10 +109,19 @@ export async function saveHandle(handle) {
     // Write to both vault_handle (used for handle search/lookup) and
     // vault_id (legacy column read by blocks list + backup) so they
     // never drift apart.
-    const { error } = await supabase
+    //
+    // .select() at the tail forces Supabase to return the updated rows
+    // so we can detect RLS silent rejections. Without it, supabase-js
+    // returns { error: null } even when the row-level security policy
+    // refused to mutate any row — saveHandle would then erroneously
+    // report success, the local cache would update, and the user would
+    // see their new @handle in the UI while Supabase silently kept the
+    // old value (the exact failure mode we hit on 2026-04-28).
+    const { data: updatedRows, error } = await supabase
       .from('profiles')
       .update({ vault_handle: norm, vault_id: norm })
-      .eq('id', myUserId);
+      .eq('id', myUserId)
+      .select();
 
     if (error) {
       // 23505 = unique_violation → already taken by someone else.
@@ -121,6 +130,13 @@ export async function saveHandle(handle) {
         return { ok: false, reason: 'taken' };
       }
       return { ok: false, reason: 'network' };
+    }
+    if (!Array.isArray(updatedRows) || updatedRows.length === 0) {
+      // RLS rejected the update without raising an error. Either the
+      // profiles table is missing an UPDATE policy, or the policy's
+      // USING clause excludes this row. Treat as a failure so the UI
+      // doesn't lie to the user.
+      return { ok: false, reason: 'rls' };
     }
 
     try {

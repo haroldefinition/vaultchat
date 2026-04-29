@@ -210,6 +210,7 @@ export default function SettingsScreen({ navigation }) {
         } else {
           const msg = result?.reason === 'taken'   ? `${vaultHandle} is already taken. Pick another handle.`
                     : result?.reason === 'invalid' ? 'Handle must be 3–32 characters, letters/numbers/underscore only.'
+                    : result?.reason === 'rls'     ? 'Server rejected the update. Add an UPDATE policy to the profiles table in Supabase (USING auth.uid() = id).'
                     :                                'Couldn\'t save handle. Check your connection and try again.';
           Alert.alert('Handle not saved', msg);
           // Don't bail — the rest of the profile fields are already
