@@ -211,9 +211,25 @@ export default function ContactsScreen({ navigation }) {
   }, [navigation, onInviteLink]);
 
   // ── Filter / group ──────────────────────────────────────
-  const filtered = useMemo(() => contacts.filter(c =>
-    !search || c.name?.toLowerCase().includes(search.toLowerCase()) || c.phone?.includes(search)
-  ), [contacts, search]);
+  // Search matches against name, phone, vault_handle, and the
+  // legacy `handle` field. Strips a leading '@' from the query so
+  // typing "@sam" matches a contact whose vault_handle is stored as
+  // "sam" (without the prefix). Case-insensitive across the board.
+  const filtered = useMemo(() => {
+    if (!search) return contacts;
+    const q       = search.toLowerCase().trim();
+    const qNoAt   = q.replace(/^@+/, '');
+    const qDigits = q.replace(/\D/g, '');
+    return contacts.filter(c => {
+      const name   = (c.name || `${c.firstName || ''} ${c.lastName || ''}`).toLowerCase();
+      const phone  = (c.phone || '').replace(/\D/g, '');
+      const handle = (c.vault_handle || c.handle || '').toLowerCase().replace(/^@+/, '');
+      if (name.includes(q))                                return true;
+      if (qDigits && phone.includes(qDigits))              return true;
+      if (qNoAt && handle.includes(qNoAt))                 return true;
+      return false;
+    });
+  }, [contacts, search]);
 
   const sections = useMemo(() => {
     return filtered.reduce((acc, c) => {
