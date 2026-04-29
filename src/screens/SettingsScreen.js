@@ -173,6 +173,35 @@ export default function SettingsScreen({ navigation }) {
     await save('vaultchat_state', stateRegion);
     await save('vaultchat_zip', zip);
     await save('vaultchat_country', country);
+
+    // Also persist the @handle (and Vault ID, which is the same value)
+    // when the user taps the top "Save" button. Without this, the handle
+    // editor's own inline Save button is the ONLY path to commit a handle
+    // change — easy to miss and a frequent source of "I changed it but
+    // nothing happened" reports. We compare against the cached handle so
+    // we only call saveHandle when the value actually changed; a no-op
+    // call would still write the same value, but skipping it avoids a
+    // pointless network hop.
+    try {
+      const cachedHandle = await AsyncStorage.getItem('vaultchat_handle');
+      if (vaultHandle && vaultHandle !== cachedHandle && vaultHandle.replace('@','').length >= 3) {
+        const result = await saveHandle(vaultHandle);
+        if (result?.ok) {
+          // saveHandle already wrote vault_handle + vault_id to Supabase
+          // and updated AsyncStorage. Bump the local React state so the
+          // VAULT ID display below the handle editor refreshes too.
+          setVaultId(vaultHandle);
+        } else {
+          const msg = result?.reason === 'taken'   ? `${vaultHandle} is already taken. Pick another handle.`
+                    : result?.reason === 'invalid' ? 'Handle must be 3–32 characters, letters/numbers/underscore only.'
+                    :                                'Couldn\'t save handle. Check your connection and try again.';
+          Alert.alert('Handle not saved', msg);
+          // Don't bail — the rest of the profile fields are already
+          // persisted; only the handle change failed.
+        }
+      }
+    } catch {}
+
     Alert.alert('Saved ✓', 'Profile updated!');
     setPage('main');
   }
