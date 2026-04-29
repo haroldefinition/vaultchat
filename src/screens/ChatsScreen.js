@@ -511,37 +511,28 @@ export default function ChatsScreen({ navigation }) {
         </TouchableOpacity>
       </View>
 
-      {/* Premium order = search bar BEFORE chip row (matches mockup
-          where search sits inside the pulled-tab band, chips below).
-          Free order = chip row first, then search (existing layout).
-          Both pieces are JSX defined inline below; we just choose
-          which to render first depending on `premium`. */}
+      {/* Premium-only: floating search bar that sits on the purple
+          header background, BETWEEN the title row and the pulled-tab
+          white area below. Translucent white-on-purple look matches
+          the mockup. */}
       {premium && (
-        <View style={[
-          s.searchBar,
-          { backgroundColor: inputBg, borderColor: border,
-            // Premium pulled-tab: rounded top corners on the search bar
-            // wrapper (which is the first thing under the purple header
-            // when premium), nudged up so the curve cuts into the band.
-            borderTopLeftRadius: 24,
-            borderTopRightRadius: 24,
-            marginTop: -8,
-            paddingTop: 12,
-            paddingBottom: 12,
-            marginHorizontal: 0,
-            paddingHorizontal: 24,
-            borderWidth: 0,
-            backgroundColor: bg,
-          },
-        ]}>
-          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center',
-                         backgroundColor: inputBg, borderRadius: 14, paddingHorizontal: 14,
-                         paddingVertical: 10, borderWidth: 1, borderColor: border }}>
-            <Text style={s.searchIcon}>🔍</Text>
+        <View style={{
+          backgroundColor: headerBg,           // purple, extends header band down
+          paddingHorizontal: 16,
+          paddingBottom: 14,
+          paddingTop: 4,
+        }}>
+          <View style={{
+            flexDirection: 'row', alignItems: 'center',
+            backgroundColor: 'rgba(255,255,255,0.18)',
+            borderRadius: 14,
+            paddingHorizontal: 14, paddingVertical: 10,
+          }}>
+            <Text style={{ fontSize: 14, marginRight: 8, color: 'rgba(255,255,255,0.85)' }}>🔍</Text>
             <TextInput
-              style={[s.searchInput, { color: tx }]}
-              placeholder="Search chats..."
-              placeholderTextColor={sub}
+              style={{ flex: 1, color: '#ffffff', fontSize: 14 }}
+              placeholder="Search"
+              placeholderTextColor="rgba(255,255,255,0.6)"
               value={search}
               onChangeText={setSearch}
               autoCapitalize="none"
@@ -549,7 +540,7 @@ export default function ChatsScreen({ navigation }) {
             />
             {search.length > 0 && (
               <TouchableOpacity onPress={() => setSearch('')}>
-                <Text style={[s.clearBtn, { color: sub }]}>✕</Text>
+                <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 16, paddingHorizontal: 6 }}>✕</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -560,11 +551,23 @@ export default function ChatsScreen({ navigation }) {
           user's custom folders + a "+" pill that opens FoldersScreen.
           Custom folders are gated behind premium (handled by
           onFolderPillPress); the pills are visible either way so
-          non-premium users discover the upsell naturally. */}
+          non-premium users discover the upsell naturally.
+
+          Premium: this row IS the pulled white tab. Larger corner
+          radius (36) gives the deep curve sliding inward from the
+          purple band that the mockup calls for. */}
       <View style={[
         s.folderRow,
         { borderBottomColor: border },
-        premium && { borderBottomWidth: 0 },
+        premium && {
+          backgroundColor: bg,
+          borderTopLeftRadius: 36,
+          borderTopRightRadius: 36,
+          marginTop: -16,
+          paddingTop: 18,
+          paddingBottom: 8,
+          borderBottomWidth: 0,
+        },
       ]}>
         <FlatList
           horizontal
