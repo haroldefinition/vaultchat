@@ -76,78 +76,78 @@ export function ThemeProvider({ children }) {
     await AsyncStorage.setItem('vaultchat_light_mode', JSON.stringify(val));
   }
 
-  // Color strategy (2026-04-29 refresh — premium gets a dedicated light
-  // variant, NOT a darker dark mode):
+  // Color strategy (2026-04-29 v2 — premium has BOTH light and dark
+  // variants now; the lightMode toggle works for premium users too):
   //
-  //  - FREE + DARK   → near-black canvases + violet accent
-  //  - FREE + LIGHT  → bright white canvases + Fiji blue accent (clean / tropical)
-  //  - PREMIUM       → ALWAYS uses the light/white layout with PURPLE accents
-  //                    (deep purple gradient header, pure white message rows,
-  //                     navy-ink primary text). The `lightMode` toggle is
-  //                     ignored for premium users — premium is its own
-  //                     branded look that signals paid status visually.
+  //  - FREE + DARK     → near-black canvas + violet accent
+  //  - FREE + LIGHT    → bright white canvas + Fiji blue accent
+  //  - PREMIUM + LIGHT → pure white canvas + royal purple (#7C3AED)
+  //  - PREMIUM + DARK  → deep navy/black canvas + royal purple
+  //                       (matches the dark-mode mockup — purple
+  //                        accents on dark surfaces, white text)
   //
-  // The `accent` token drives outgoing chat bubbles, tab-bar highlights,
-  // avatar fallback backgrounds, unread badges, the shield mark next to the
-  // app name, and the glowing ring around call avatars — so one value
-  // ripples through the whole UI.
-  //
-  // `premiumLight` is the new "always-on" premium look. `premiumDark` is
-  // kept around for screens that haven't been retrofitted yet, but new
-  // screens should branch on `isPremium` and use the premiumLight palette.
-  const premiumLight = isPremium;
-  const useWhiteCanvas = lightMode || premiumLight;
+  // Premium signals its status with the PURPLE accent regardless of
+  // light/dark mode. Free users get blue (light) or violet (dark).
+  const premiumLight = isPremium && lightMode;
+  const premiumDark  = isPremium && !lightMode;
 
   const theme = {
     lightMode,
     toggleLight,
     isPremium,
 
-    // Canvases — premium ALWAYS gets the white/light surfaces, regardless
-    // of lightMode toggle. Free dark users keep the dark palette.
-    bg:         useWhiteCanvas ? (premiumLight ? '#ffffff' : '#f6faff') : '#0a0a0f',
-    card:       useWhiteCanvas ? '#ffffff' : '#17171f',
-    sectionBg:  useWhiteCanvas ? (premiumLight ? '#ffffff' : '#eaf3ff') : '#0a0a0f',
+    // Canvases
+    bg:         lightMode
+                  ? (premiumLight ? '#ffffff' : '#f6faff')
+                  : (premiumDark  ? '#0c0816' : '#0a0a0f'),
+    card:       lightMode
+                  ? '#ffffff'
+                  : (premiumDark  ? '#1a1325' : '#17171f'),
+    sectionBg:  lightMode
+                  ? (premiumLight ? '#ffffff' : '#eaf3ff')
+                  : (premiumDark  ? '#0c0816' : '#0a0a0f'),
 
-    // Text — premium uses the same navy ink as light mode for max contrast
-    tx:         useWhiteCanvas ? '#0b2545' : '#ffffff',
-    sub:        useWhiteCanvas ? '#5b7793' : '#9296a0',
+    // Text — light mode uses navy ink, dark mode uses white
+    tx:         lightMode ? '#0b2545' : '#ffffff',
+    sub:        lightMode ? '#5b7793' : '#9296a0',
 
-    // Lines & fills — softer borders for premium so the white cards feel
-    // light and airy, not like they have heavy outlines.
-    border:     premiumLight ? '#ece6f7' : (lightMode ? '#d4e4f5' : '#23232d'),
-    inputBg:    premiumLight ? '#f5f0fc' : (lightMode ? '#eaf3ff' : '#1c1c26'),
+    // Lines & fills
+    border:     lightMode
+                  ? (premiumLight ? '#ece6f7' : '#d4e4f5')
+                  : (premiumDark  ? '#2b1f3d' : '#23232d'),
+    inputBg:    lightMode
+                  ? (premiumLight ? '#f5f0fc' : '#eaf3ff')
+                  : (premiumDark  ? '#1f1730' : '#1c1c26'),
 
-    // Accent — brand color
-    //   Free + Light  → Fiji blue
-    //   Free + Dark   → Violet-500
-    //   PREMIUM       → Royal purple (regardless of lightMode toggle —
-    //                   premium IS the purple brand)
-    accent:     premiumLight
+    // Accent — brand color, ROYAL PURPLE for any premium variant
+    accent:     isPremium
                   ? '#7C3AED'
                   : (lightMode ? '#0EA5E9' : '#8B5CF6'),
 
-    // Chat bubble colors — split from accent so we can tune contrast later
-    bubbleOut:  premiumLight ? '#7C3AED' : (lightMode ? '#0EA5E9' : '#8B5CF6'),
-    bubbleIn:   useWhiteCanvas ? '#f3f0fa' : '#20202b',
+    // Chat bubble colors
+    bubbleOut:  isPremium
+                  ? '#7C3AED'
+                  : (lightMode ? '#0EA5E9' : '#8B5CF6'),
+    bubbleIn:   lightMode
+                  ? '#f3f0fa'
+                  : (premiumDark ? '#221833' : '#20202b'),
     bubbleOutTx:'#ffffff',
-    bubbleInTx: useWhiteCanvas ? '#0b2545' : '#ffffff',
+    bubbleInTx: lightMode ? '#0b2545' : '#ffffff',
 
     // ── Premium polish tokens ──────────────────────────────
-    // "gold" is a misnomer kept for backwards-compat with screens
-    // that already read this token (Vault hero ring, verified shield,
-    // crown highlights, "Premium Member" tags). For premium users we
-    // route this to the SAME royal purple as `accent` — Harold's
-    // direction was "the purple feels more premium" so we kill the
-    // yellow/gold accent across the premium UI.
-    gold:       isPremium ? '#7C3AED' : (lightMode ? '#0EA5E9' : '#8B5CF6'),
+    // `gold` token (kept for backwards-compat — Vault hero ring,
+    // verified shield, crown highlights, "Premium Member" tags).
+    // Per Harold: route to royal purple for ALL premium variants.
+    gold:       isPremium
+                  ? '#7C3AED'
+                  : (lightMode ? '#0EA5E9' : '#8B5CF6'),
 
     // Subtle gradient tuple for hero cards. [start, end].
-    // Premium → deep purple gradient like the screenshot header band.
-    // Free dark → flat single color, free light → soft blue gradient.
     gradientBg: premiumLight
                   ? ['#5B2FB8', '#7C3AED']
-                  : (lightMode ? ['#ffffff', '#eaf3ff'] : ['#17171f', '#0a0a0f']),
+                  : premiumDark
+                    ? ['#2B1856', '#0c0816']
+                    : (lightMode ? ['#ffffff', '#eaf3ff'] : ['#17171f', '#0a0a0f']),
   };
 
   return <ThemeContext.Provider value={theme}>{children}</ThemeContext.Provider>;
