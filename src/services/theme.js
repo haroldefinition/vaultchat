@@ -134,11 +134,13 @@ export function ThemeProvider({ children }) {
     bubbleInTx: useWhiteCanvas ? '#0b2545' : '#ffffff',
 
     // ── Premium polish tokens ──────────────────────────────
-    // Gold — used for the verified shield, the crown highlight,
-    // "Premium Member" tags, and the Vault hero ring. Falls back
-    // to accent for non-premium surfaces so screens that read
-    // `gold` don't have to branch.
-    gold:       isPremium ? '#FFD166' : (lightMode ? '#0EA5E9' : '#8B5CF6'),
+    // "gold" is a misnomer kept for backwards-compat with screens
+    // that already read this token (Vault hero ring, verified shield,
+    // crown highlights, "Premium Member" tags). For premium users we
+    // route this to the SAME royal purple as `accent` — Harold's
+    // direction was "the purple feels more premium" so we kill the
+    // yellow/gold accent across the premium UI.
+    gold:       isPremium ? '#7C3AED' : (lightMode ? '#0EA5E9' : '#8B5CF6'),
 
     // Subtle gradient tuple for hero cards. [start, end].
     // Premium → deep purple gradient like the screenshot header band.

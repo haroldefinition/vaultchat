@@ -511,31 +511,60 @@ export default function ChatsScreen({ navigation }) {
         </TouchableOpacity>
       </View>
 
+      {/* Premium order = search bar BEFORE chip row (matches mockup
+          where search sits inside the pulled-tab band, chips below).
+          Free order = chip row first, then search (existing layout).
+          Both pieces are JSX defined inline below; we just choose
+          which to render first depending on `premium`. */}
+      {premium && (
+        <View style={[
+          s.searchBar,
+          { backgroundColor: inputBg, borderColor: border,
+            // Premium pulled-tab: rounded top corners on the search bar
+            // wrapper (which is the first thing under the purple header
+            // when premium), nudged up so the curve cuts into the band.
+            borderTopLeftRadius: 24,
+            borderTopRightRadius: 24,
+            marginTop: -8,
+            paddingTop: 12,
+            paddingBottom: 12,
+            marginHorizontal: 0,
+            paddingHorizontal: 24,
+            borderWidth: 0,
+            backgroundColor: bg,
+          },
+        ]}>
+          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center',
+                         backgroundColor: inputBg, borderRadius: 14, paddingHorizontal: 14,
+                         paddingVertical: 10, borderWidth: 1, borderColor: border }}>
+            <Text style={s.searchIcon}>🔍</Text>
+            <TextInput
+              style={[s.searchInput, { color: tx }]}
+              placeholder="Search chats..."
+              placeholderTextColor={sub}
+              value={search}
+              onChangeText={setSearch}
+              autoCapitalize="none"
+              returnKeyType="search"
+            />
+            {search.length > 0 && (
+              <TouchableOpacity onPress={() => setSearch('')}>
+                <Text style={[s.clearBtn, { color: sub }]}>✕</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+      )}
+
       {/* Folder pill row — Telegram-style. Always shows "All" + the
           user's custom folders + a "+" pill that opens FoldersScreen.
           Custom folders are gated behind premium (handled by
           onFolderPillPress); the pills are visible either way so
-          non-premium users discover the upsell naturally.
-
-          Premium: the row gets a rounded-top white surface pulled up
-          into the purple header so it reads as a tab pulled forward
-          from the band — matches the mockup's "premium tab" look. */}
+          non-premium users discover the upsell naturally. */}
       <View style={[
         s.folderRow,
         { borderBottomColor: border },
-        // Premium pulled-tab effect: white container with rounded top
-        // corners that just barely cuts into the purple header band.
-        // Tuned to keep the chip row + search bar fully visible — only
-        // the corner curve overlaps the purple. -8 marginTop is the
-        // "kiss" amount; larger values eat the chip row.
-        premium && {
-          backgroundColor: bg,
-          borderTopLeftRadius: 24,
-          borderTopRightRadius: 24,
-          marginTop: -8,
-          paddingTop: 14,
-          borderBottomWidth: 0,
-        },
+        premium && { borderBottomWidth: 0 },
       ]}>
         <FlatList
           horizontal
@@ -605,24 +634,28 @@ export default function ChatsScreen({ navigation }) {
         />
       </View>
 
-      {/* Search bar */}
-      <View style={[s.searchBar, { backgroundColor: inputBg, borderColor: border }]}>
-        <Text style={s.searchIcon}>🔍</Text>
-        <TextInput
-          style={[s.searchInput, { color: tx }]}
-          placeholder="Search chats..."
-          placeholderTextColor={sub}
-          value={search}
-          onChangeText={setSearch}
-          autoCapitalize="none"
-          returnKeyType="search"
-        />
-        {search.length > 0 && (
-          <TouchableOpacity onPress={() => setSearch('')}>
-            <Text style={[s.clearBtn, { color: sub }]}>✕</Text>
-          </TouchableOpacity>
-        )}
-      </View>
+      {/* Search bar — free-tier placement (below chip row). Premium
+          users get this same search above the chip row instead, so we
+          skip it here when premium is on. */}
+      {!premium && (
+        <View style={[s.searchBar, { backgroundColor: inputBg, borderColor: border }]}>
+          <Text style={s.searchIcon}>🔍</Text>
+          <TextInput
+            style={[s.searchInput, { color: tx }]}
+            placeholder="Search chats..."
+            placeholderTextColor={sub}
+            value={search}
+            onChangeText={setSearch}
+            autoCapitalize="none"
+            returnKeyType="search"
+          />
+          {search.length > 0 && (
+            <TouchableOpacity onPress={() => setSearch('')}>
+              <Text style={[s.clearBtn, { color: sub }]}>✕</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
 
       {/* Chat list */}
       <FlatList
