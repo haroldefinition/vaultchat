@@ -519,7 +519,7 @@ export default function ChatsScreen({ navigation }) {
         <View style={{
           backgroundColor: headerBg,           // purple, extends header band down
           paddingHorizontal: 16,
-          paddingBottom: 28,                   // breathing room so the tab below doesn't kiss the search bar
+          paddingBottom: 40,                   // generous purple "shoulder" below the search bar — the white tab overlaps INTO this 40px so the curve has purple to render against
           paddingTop: 4,
         }}>
           <View style={{
@@ -553,10 +553,13 @@ export default function ChatsScreen({ navigation }) {
           onFolderPillPress); the pills are visible either way so
           non-premium users discover the upsell naturally.
 
-          Premium: this row IS the pulled white tab. Larger corner
-          radius (44) gives the deep "sliding inward" curve from the
-          mockup. marginTop=0 means the tab sits flush against the
-          purple band — no overlap with the search bar above it. */}
+          Premium: this row IS the pulled white tab. The negative
+          marginTop is what makes the curve visible — without overlap
+          into the purple band above, rounded corners would just sit
+          on white-on-white and look flat. -24 carves a 24px-deep
+          arc into the purple "shoulder" above (which is 40px tall),
+          leaving 16px of clear purple between the search bar and
+          the start of the curve. */}
       <View style={[
         s.folderRow,
         { borderBottomColor: border },
@@ -564,8 +567,8 @@ export default function ChatsScreen({ navigation }) {
           backgroundColor: bg,
           borderTopLeftRadius: 44,
           borderTopRightRadius: 44,
-          marginTop: 0,
-          paddingTop: 20,
+          marginTop: -24,
+          paddingTop: 28,
           paddingBottom: 10,
           borderBottomWidth: 0,
         },
