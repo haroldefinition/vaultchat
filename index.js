@@ -61,12 +61,19 @@ if (Platform.OS === 'android') {
   //   it already exists, this is a no-op. Done early ensures the
   //   channel exists before displayIncomingCall is invoked.
   if (notifee && AndroidImportance) {
+    // sound: 'vaultchat_ring' references android/app/src/main/res/raw/vaultchat_ring.mp3.
+    // If the file doesn't exist (initial v1.0 ships without a custom MP3),
+    // notifee falls back to the system default ringtone gracefully.
+    // To brand the ring, drop a 5-15 second .mp3 at that path and bump
+    // the channel id (e.g. 'incoming_calls_v2') — Android caches channel
+    // settings forever once created, so renaming is the only way to
+    // update sound after install.
     notifee.createChannel({
       id:          'incoming_calls',
       name:        'Incoming Calls',
       description: 'Ring tone for incoming VaultChat calls.',
       importance:  AndroidImportance.HIGH,
-      sound:       'default',
+      sound:       'vaultchat_ring',
       vibration:   true,
       vibrationPattern: [300, 500, 300, 500],
       bypassDnd:   true,
@@ -81,6 +88,46 @@ if (Platform.OS === 'android') {
     try {
       messaging().setBackgroundMessageHandler(async (remoteMessage) => {
         const data = remoteMessage?.data || {};
+
+        // Branch on the FCM payload's `kind` so calls and messages
+        // route to different UI surfaces. v1.0 had only `kind` undefined
+        // (legacy call payload — falls through to the call branch
+        // below). v1.1 adds explicit kind='message' for offline message
+        // notifications.
+        if (data.kind === 'message') {
+          const senderName = data.senderName || 'Someone';
+          const messageId  = data.messageId  || `msg-${Date.now()}`;
+          const senderId   = data.senderId;
+          const roomId     = data.roomId;
+          if (notifee) {
+            try {
+              await notifee.createChannel({
+                id:          'messages',
+                name:        'Messages',
+                description: 'New incoming messages.',
+                importance:  AndroidImportance.HIGH,
+                sound:       'default',
+                vibration:   true,
+              });
+              await notifee.displayNotification({
+                id:    `msg-${messageId}`,
+                title: senderName,
+                body:  'New message',
+                data:  { kind: 'message', senderId, roomId, messageId },
+                android: {
+                  channelId:   'messages',
+                  importance:  AndroidImportance.HIGH,
+                  smallIcon:   'ic_launcher',
+                  pressAction: { id: 'default', launchActivity: 'default' },
+                },
+              });
+            } catch (e) {
+              if (__DEV__) console.warn('[fcm] message notification failed:', e?.message || e);
+            }
+          }
+          return;
+        }
+
         const callId       = data.callId;
         const callerId     = data.callerId;
         const callerName   = data.callerName || 'VaultChat';
