@@ -799,6 +799,21 @@ export default function SettingsScreen({ navigation }) {
               subText="View your vaulted chats, files, and media · Premium 👑"
               onPress={() => navigation.navigate('Vault')}
             />
+            {/* TEMP — Sentry smoke test. Remove this Row once we've
+                confirmed the test event arrives in the Sentry
+                dashboard. Throws a synthetic JS error that Sentry's
+                global handler catches and ships up. The app stays
+                running because React's error boundary swallows it. */}
+            {__DEV__ && (
+              <Row
+                icon="🧪"
+                label="Send Sentry Test Crash"
+                subText="Temporary — verifies crash reporting wiring"
+                onPress={() => {
+                  throw new Error('VaultChat Sentry smoke test — ' + new Date().toISOString());
+                }}
+              />
+            )}
             {/* Encrypted vault backup (Phase VV+XX). PIN is the
                 encryption key — same one that protects the live
                 vault — so we prompt for it, derive an AES key
