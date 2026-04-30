@@ -25,8 +25,11 @@
 
 import React, { useEffect, useRef } from 'react';
 import {
-  Modal, View, Text, StyleSheet, Animated, TouchableOpacity, Dimensions, StatusBar,
+  Modal, View, Text, Image, StyleSheet, Animated, TouchableOpacity, Dimensions, StatusBar,
 } from 'react-native';
+
+// Premium V+crown brand mark — saved by Harold to assets/.
+const PREMIUM_MARK = require('../../assets/vaultchat-premium-mark.png');
 
 const PURPLE = '#7C3AED';
 const GOLD   = '#F5C518';
@@ -73,11 +76,10 @@ export default function PremiumUpgradeSplash({ visible, onDone }) {
           },
         ]} />
 
-        {/* The mark — emoji+text fallback. Replace with Image when
-            assets/vaultchat-premium-mark.png is saved. */}
+        {/* The mark — real brand asset. Saved by Harold at
+            assets/vaultchat-premium-mark.png. */}
         <Animated.View style={[s.markWrap, { transform: [{ scale }] }]}>
-          <Text style={s.crown}>👑</Text>
-          <Text style={s.vMonogram}>V</Text>
+          <Image source={PREMIUM_MARK} style={s.markImg} resizeMode="contain" />
         </Animated.View>
 
         <Animated.Text style={[s.title, { opacity: fade }]}>You’re now Premium</Animated.Text>
@@ -110,19 +112,11 @@ const s = StyleSheet.create({
     top: undefined, // sits behind the mark — flex centering handles vertical
   },
   markWrap:   {
-    width: 180, height: 180,
+    width: 220, height: 220,
     alignItems: 'center', justifyContent: 'center',
     marginBottom: 36, position: 'relative',
   },
-  crown:      { position: 'absolute', top: -10, fontSize: 44 },
-  vMonogram:  {
-    color: PURPLE,
-    fontSize: 140, fontWeight: '900',
-    letterSpacing: -4, lineHeight: 150,
-    textShadowColor: 'rgba(124, 58, 237, 0.55)',
-    textShadowOffset: { width: 0, height: 4 },
-    textShadowRadius: 24,
-  },
+  markImg:    { width: '100%', height: '100%' },
   title:      { color: '#fff', fontSize: 26, fontWeight: '900', textAlign: 'center', marginBottom: 8, letterSpacing: 0.3 },
   tagline:    { color: 'rgba(255,255,255,0.65)', fontSize: 14, textAlign: 'center', marginBottom: 36 },
   doneBtn:    {

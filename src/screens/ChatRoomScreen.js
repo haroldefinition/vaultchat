@@ -2469,11 +2469,15 @@ const s = StyleSheet.create({
   header:      { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, borderBottomWidth: 1, gap: 8 },
   backBtn:     { padding: 4 },
   backTx:      { fontSize: 30, fontWeight: 'bold' },
-  hAvatar:     { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  hAvatarImg:  { width: 40, height: 40, borderRadius: 20 },
-  hAvatarTx:   { color: '#fff', fontWeight: 'bold', fontSize: 16 },
-  hName:       { fontWeight: 'bold', fontSize: 15 },
-  hSub:        { fontSize: 11 },
+  // Header tightened to match the premium mockup (~Apr 30 design):
+  // larger avatar, bolder name, slightly larger subtitle so the
+  // "🔒 Online" / "🔒 End-to-end encrypted" line reads cleanly even
+  // at arm's length. Numbers picked from measuring the mockup.
+  hAvatar:     { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  hAvatarImg:  { width: 44, height: 44, borderRadius: 22 },
+  hAvatarTx:   { color: '#fff', fontWeight: 'bold', fontSize: 17 },
+  hName:       { fontWeight: '800', fontSize: 17, letterSpacing: 0.1 },
+  hSub:        { fontSize: 12, marginTop: 1 },
   callBtn:     { padding: 4 },
   bWrap:       { marginBottom: 4, maxWidth: '80%' },
   myWrap:      { alignSelf: 'flex-end', alignItems: 'flex-end' },

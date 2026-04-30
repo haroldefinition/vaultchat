@@ -447,7 +447,10 @@ export default function SettingsScreen({ navigation }) {
   // tap target, tinted icon chip, single chevron — matches the design
   // reference. `last` removes the bottom hairline on the final row of
   // a card so the card has clean rounded corners.
-  const CatRow = ({ icon, label, onPress, tx, sub, border, accent, last }) => (
+  // CatRow — top-level Settings category row. Optional `value`
+  // renders an inline status (e.g. "Dark" / "Light" on Appearance)
+  // matching the mockup's "Appearance: Dark" pattern.
+  const CatRow = ({ icon, label, value, onPress, tx, sub, border, accent, last }) => (
     <TouchableOpacity
       onPress={onPress}
       activeOpacity={0.7}
@@ -466,6 +469,9 @@ export default function SettingsScreen({ navigation }) {
         <Text style={{ fontSize: 16 }}>{icon}</Text>
       </View>
       <Text style={{ flex: 1, color: tx, fontSize: 15, fontWeight: '500' }}>{label}</Text>
+      {value ? (
+        <Text style={{ color: sub, fontSize: 13, marginRight: 8, fontWeight: '600' }}>{value}</Text>
+      ) : null}
       <Text style={{ color: sub, fontSize: 18 }}>›</Text>
     </TouchableOpacity>
   );
@@ -1178,12 +1184,32 @@ export default function SettingsScreen({ navigation }) {
             actual settings (existing Section/Row/Toggle layout). Keeps
             the main page clean and "premium" while preserving every
             existing setting under one of the categories. */}
+        {/* Settings home — restructured per Harold's Apr 30 mockup
+            (Option A: surface-only, no functional changes).
+              - "Privacy" → "Privacy & Security" to match mockup copy
+              - Appearance row shows current theme value inline ("Dark"
+                / "Light") matching the mockup's "Appearance: Dark"
+              - "Chats" row added between Appearance and Data so the
+                ordering matches the mockup; it routes to the existing
+                notifications page since chat-level toggles
+                (notifications, message privacy) live there. We can
+                split into its own sub-page in v1.1 once we know which
+                toggles users want grouped together.
+              - "More" moved into its own card below About so the main
+                category card is cleaner. */}
         <View style={[st.categoryCard, { backgroundColor: card, borderColor: border }]}>
-          <CatRow icon="👤" label="Account"          onPress={() => setPage('account')}      tx={tx} sub={sub} border={border} accent={accent} />
-          <CatRow icon="🔒" label="Privacy"          onPress={() => setPage('privacy')}      tx={tx} sub={sub} border={border} accent={accent} />
-          <CatRow icon="🔔" label="Notifications"    onPress={() => setPage('notifications')} tx={tx} sub={sub} border={border} accent={accent} />
-          <CatRow icon="🎨" label="Appearance"       onPress={() => setPage('appearance')}   tx={tx} sub={sub} border={border} accent={accent} />
-          <CatRow icon="💾" label="Data and Storage" onPress={() => setPage('data-storage')} tx={tx} sub={sub} border={border} accent={accent} last />
+          <CatRow icon="👤" label="Account"            onPress={() => setPage('account')}       tx={tx} sub={sub} border={border} accent={accent} />
+          <CatRow icon="🔒" label="Privacy & Security" onPress={() => setPage('privacy')}       tx={tx} sub={sub} border={border} accent={accent} />
+          <CatRow icon="🔔" label="Notifications"      onPress={() => setPage('notifications')} tx={tx} sub={sub} border={border} accent={accent} />
+          <CatRow
+            icon="🎨"
+            label="Appearance"
+            value={lightMode ? 'Light' : 'Dark'}
+            onPress={() => setPage('appearance')}
+            tx={tx} sub={sub} border={border} accent={accent}
+          />
+          <CatRow icon="💬" label="Chats"              onPress={() => setPage('notifications')} tx={tx} sub={sub} border={border} accent={accent} />
+          <CatRow icon="💾" label="Data and Storage"   onPress={() => setPage('data-storage')}  tx={tx} sub={sub} border={border} accent={accent} last />
         </View>
 
         <View style={[st.categoryCard, { backgroundColor: card, borderColor: border, marginTop: 12 }]}>
@@ -1191,9 +1217,10 @@ export default function SettingsScreen({ navigation }) {
           <CatRow icon="ℹ️" label="About VaultChat"  onPress={() => setPage('about')}        tx={tx} sub={sub} border={border} accent={accent} last />
         </View>
 
-        {/* More — overflow page that holds Discover, Business, AI Assistant,
-            Nearby, and the legal docs. Lives here now that the bottom-tab
-            "More" was replaced by a direct Settings tab. */}
+        {/* More — overflow page (Discover, Business, AI Assistant,
+            Nearby, legal docs). Kept reachable but visually demoted
+            to its own card below About so it doesn't clutter the
+            main category list. */}
         <View style={[st.categoryCard, { backgroundColor: card, borderColor: border, marginTop: 12 }]}>
           <CatRow icon="⋯"  label="More"             onPress={() => navigation.navigate('More')}     tx={tx} sub={sub} border={border} accent={accent} last />
         </View>

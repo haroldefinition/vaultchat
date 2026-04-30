@@ -299,6 +299,12 @@ export default function ActiveCallScreen({ route, navigation }) {
   ]);
 
   const pulse = useRef(new Animated.Value(1)).current;
+  // Ring pulse — always-running 0→1 loop that drives the
+  // concentric audio-reactive rings around the call avatar
+  // (matches the premium mockup's circular waveform). Two rings
+  // stacked, each interpolating scale + opacity off this single
+  // value at slightly offset phases.
+  const ringPulse = useRef(new Animated.Value(0)).current;
   const timer = useRef(null);
   const hungUpRef = useRef(false); // guard against double-hangup in unmount
   const sawActiveStateRef = useRef(false); // true once we've seen any non-idle state (prevents initial-snapshot teardown)
@@ -325,6 +331,15 @@ export default function ActiveCallScreen({ route, navigation }) {
       Animated.timing(pulse, { toValue: 1,    duration: 800, useNativeDriver: true }),
     ]));
     anim.start();
+
+    // Continuous ring pulse for the circular waveform around the
+    // avatar. Slow enough that it reads as "ambient activity"
+    // rather than alarming — 1.6s round trip.
+    const ring = Animated.loop(Animated.sequence([
+      Animated.timing(ringPulse, { toValue: 1, duration: 1600, useNativeDriver: true }),
+      Animated.timing(ringPulse, { toValue: 0, duration: 0,    useNativeDriver: true }),
+    ]));
+    ring.start();
 
     // Mock-only path (no real peerUserId) — keep old UX for sample call
     // history entries until NewCall/Contacts route through the real path.
@@ -794,17 +809,33 @@ export default function ActiveCallScreen({ route, navigation }) {
         </View>
       ) : (
         <View style={s.top}>
+          {/* Premium voice-call avatar — concentric audio-reactive
+              rings around the photo, matching the dark mockup.
+              Replaced the side-mounted DisperseDots (still
+              imported/exported in case other call surfaces use it)
+              with two stacked Animated.View rings driven by ringPulse.
+              Each ring grows + fades from 0→1 at offset phases so
+              the effect reads as continuous expanding waves. */}
           <View style={s.avatarStage}>
-            {/* Left disperse waveform dots — faster cadence while
-                ringing so the energy reads as "outgoing call in
-                progress"; the calmer cadence is reserved for the
-                Connecting handshake. */}
-            <DisperseDots
-              accent={accent}
-              side="left"
-              active={status !== 'Connected'}
-              speed={status === 'Ringing...' ? 'ringing' : 'calm'}
-              shape={isPremium ? 'arc' : 'line'}
+            <Animated.View
+              style={[
+                s.ringOuter,
+                {
+                  borderColor: accent,
+                  opacity: ringPulse.interpolate({ inputRange: [0, 1], outputRange: [0.45, 0] }),
+                  transform: [{ scale: ringPulse.interpolate({ inputRange: [0, 1], outputRange: [1.02, 1.55] }) }],
+                },
+              ]}
+            />
+            <Animated.View
+              style={[
+                s.ringInner,
+                {
+                  borderColor: accent,
+                  opacity: ringPulse.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0, 0.35, 0] }),
+                  transform: [{ scale: ringPulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.32] }) }],
+                },
+              ]}
             />
             {/* Glow ring + avatar (centered) */}
             <Animated.View
@@ -826,14 +857,6 @@ export default function ActiveCallScreen({ route, navigation }) {
                 </View>
               )}
             </Animated.View>
-            {/* Right disperse waveform dots */}
-            <DisperseDots
-              accent={accent}
-              side="right"
-              active={status !== 'Connected'}
-              speed={status === 'Ringing...' ? 'ringing' : 'calm'}
-              shape={isPremium ? 'arc' : 'line'}
-            />
           </View>
 
           <Text style={[s.name, { color: tx }]}>{recipientName || 'Unknown'}</Text>
@@ -1120,9 +1143,27 @@ const s = StyleSheet.create({
   // sit to the left/right of the avatar as siblings; the row is
   // centered horizontally, which gives the dots room on both sides.
   avatarStage:    {
-    flexDirection: 'row',
+    // Stage is now a CENTERED stack (was flex-row) so the
+    // concentric audio-reactive rings can be absolutely
+    // positioned behind the avatar and pulse outward without
+    // pushing siblings around. width/height roughly matches the
+    // outermost ring's max scale (avatar 170 × 1.55 ≈ 264).
+    width: 280, height: 280,
     marginTop: 40, marginBottom: 22,
     alignItems: 'center', justifyContent: 'center',
+    alignSelf: 'center',
+  },
+  // Outer ring — wider, lower opacity, larger expansion
+  ringOuter:      {
+    position: 'absolute',
+    width: 170, height: 170, borderRadius: 85,
+    borderWidth: 2,
+  },
+  // Inner ring — second wave, offset phase via interpolation
+  ringInner:      {
+    position: 'absolute',
+    width: 170, height: 170, borderRadius: 85,
+    borderWidth: 1.5,
   },
   avatarGlow:     {
     width: 170, height: 170, borderRadius: 85,
