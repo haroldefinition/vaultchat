@@ -75,6 +75,11 @@ export default function VaultScreen({ navigation }) {
   // user is premium and has no PIN yet (so they don't have to hunt
   // for the Settings row). Tracked locally with `setupModalOpen`.
   const [setupModalOpen,  setSetupModalOpen]  = useState(false);
+  // Whether the current user has a Vault PIN set. Drives the
+  // permanent "Set up Vault PIN" CTA banner above the items list —
+  // even after the user dismisses the first-run modal, the banner
+  // stays so they always have a one-tap path to setup.
+  const [pinIsSet,        setPinIsSet]        = useState(true);
 
   // Refresh on every focus — vault state can change from elsewhere
   // (Settings PIN setup, chat list "Move to Vault" actions).
@@ -102,24 +107,24 @@ export default function VaultScreen({ navigation }) {
       setStats(prev => ({ ...prev, chats: ids.length, biometrics: bio }));
       setUnlocked(isVaultUnlocked());
 
-      // First-run Vault setup — premium users who don't have a PIN
-      // yet AND haven't seen the setup modal before get a friendly
-      // in-screen guide so they don't have to know about Settings →
-      // Vault PIN. We don't show it to free users (they can vault
-      // chats but the PIN is optional for the basic flow), and we
-      // never show it twice (the seen flag persists across launches).
-      if (isPrem) {
-        try {
-          const [hasPin, seenRaw] = await Promise.all([
-            hasVaultPin(),
-            AsyncStorage.getItem(SETUP_SEEN_KEY),
-          ]);
-          if (cancelled) return;
-          if (!hasPin && !seenRaw) {
-            setSetupModalOpen(true);
-          }
-        } catch {}
-      }
+      // Track PIN-set state on every focus so the banner appears /
+      // disappears immediately after the user creates or removes
+      // their PIN elsewhere (e.g., from Settings).
+      try {
+        const has = await hasVaultPin();
+        if (cancelled) return;
+        setPinIsSet(!!has);
+        // First-run popup — premium users with no PIN who haven't
+        // seen the modal before get a friendly in-screen guide.
+        // After they dismiss it once we don't auto-pop again, but the
+        // permanent banner below still gives them a one-tap path.
+        if (isPrem && !has) {
+          try {
+            const seenRaw = await AsyncStorage.getItem(SETUP_SEEN_KEY);
+            if (!cancelled && !seenRaw) setSetupModalOpen(true);
+          } catch {}
+        }
+      } catch {}
     })();
     return () => { cancelled = true; };
   }, []));
@@ -242,6 +247,30 @@ export default function VaultScreen({ navigation }) {
         </View>
 
         <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
+          {/* Permanent "Set up Vault PIN" CTA banner — shows when no
+              PIN exists. Always visible (not gated on first-run flag)
+              so a user who dismissed the popup still has a one-tap
+              path to setup right where they need it. */}
+          {!pinIsSet && (
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => setSetupModalOpen(true)}
+              style={[s.setupBanner, { backgroundColor: accent + '14', borderColor: accent + '55' }]}>
+              <View style={[s.setupBannerIcon, { backgroundColor: accent + '22' }]}>
+                <Lock size={20} color={accent} strokeWidth={2.5} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[s.setupBannerTitle, { color: tx }]}>Set up your Vault PIN</Text>
+                <Text style={[s.setupBannerBody,  { color: sub }]} numberOfLines={2}>
+                  Choose a 4–8 digit PIN to lock chats away. You’ll need it every time you open the vault.
+                </Text>
+              </View>
+              <View style={[s.setupBannerBtn, { backgroundColor: accent }]}>
+                <Text style={s.setupBannerBtnTx}>Set up</Text>
+              </View>
+            </TouchableOpacity>
+          )}
+
           {/* Categorized items */}
           <View style={[s.itemsList, { marginTop: 6 }]}>
             {filtered.map(it => (
@@ -321,6 +350,7 @@ export default function VaultScreen({ navigation }) {
           }}
           onCreated={async () => {
             setSetupModalOpen(false);
+            setPinIsSet(true); // hide the CTA banner immediately
             try { await AsyncStorage.setItem(SETUP_SEEN_KEY, '1'); } catch {}
             Alert.alert(
               'Vault PIN created',
@@ -461,6 +491,18 @@ const s = StyleSheet.create({
   pItemRight:       { fontSize: 14, fontWeight: '700', marginRight: 6 },
 
   emptyText:        { textAlign: 'center', fontSize: 13, paddingVertical: 24 },
+
+  setupBanner:      {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    marginHorizontal: 16, marginTop: 8, marginBottom: 6,
+    paddingVertical: 12, paddingHorizontal: 14,
+    borderRadius: 14, borderWidth: 1,
+  },
+  setupBannerIcon:  { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  setupBannerTitle: { fontSize: 14, fontWeight: '800', marginBottom: 2 },
+  setupBannerBody:  { fontSize: 12, lineHeight: 16 },
+  setupBannerBtn:   { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10 },
+  setupBannerBtnTx: { color: '#fff', fontWeight: '800', fontSize: 13 },
 
   protectBanner:    {
     flexDirection: 'row', alignItems: 'center', gap: 12,

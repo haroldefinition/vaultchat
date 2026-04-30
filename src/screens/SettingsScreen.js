@@ -11,6 +11,7 @@ import { checkBiometricSupport } from '../services/biometric';
 import { generateHandle, getMyHandle, saveHandle } from '../services/vaultHandle';
 import { shareMyInvite } from '../services/inviteLink';
 import { hasVaultPin, setVaultPin, clearVaultPin } from '../services/vault';
+import VaultPinSetupModal from '../components/VaultPinSetupModal';
 import { getPin, setPin, clearPin, PIN_KEY_REAL, PIN_KEY_DECOY } from '../services/securePinStore';
 import { createBackup, restoreBackup } from '../services/backup';
 import { placeCall } from '../services/placeCall';
@@ -60,6 +61,10 @@ export default function SettingsScreen({ navigation }) {
   const [realPin, setRealPin] = useState('');
   const [decoyPin, setDecoyPin] = useState('');
   const [pinModal, setPinModal] = useState(false);
+  // Inline Vault PIN setup modal — replaces the 6-digit-only keypad
+  // for the Vault PIN row so users see a proper PIN+confirm form
+  // right where they tapped, no back-and-forth.
+  const [vaultSetupModal, setVaultSetupModal] = useState(false);
   const [pinType, setPinType] = useState('real');
   // Vault PIN — separate from real/decoy. When set, the user can
   // long-press the Chats title to enter the vault and reveal
@@ -694,51 +699,69 @@ export default function SettingsScreen({ navigation }) {
             <Row
               icon="🛡️"
               label="Vault PIN"
-              subText={vaultPinSet ? 'Set — long-press Chats title to unlock' : 'Not set'}
-              onPress={() => { setPinType('vault'); setPinInput(''); setPinModal(true); }}
+              subText={vaultPinSet ? 'Set — long-press Chats title to unlock' : 'Tap to set up — locks chats behind a PIN'}
+              onPress={() => {
+                if (vaultPinSet) {
+                  // Already set: open the legacy 6-digit keypad to
+                  // change/remove the existing PIN.
+                  setPinType('vault'); setPinInput(''); setPinModal(true);
+                } else {
+                  // Not set: open the inline VaultPinSetupModal —
+                  // PIN + confirm form, 4-8 digits, no navigation
+                  // away from Settings.
+                  setVaultSetupModal(true);
+                }
+              }}
             />
-            {/* Reset Vault PIN — discoverable recovery path for users
-                who forgot their PIN. Wipes the PIN AND the vaulted-id
-                list (no PIN, no vault), so chats inside the vault
-                come back out into the regular Chats list. The chat
-                history itself is preserved on both sides — only the
-                "this chat is hidden" flag is cleared. */}
-            {vaultPinSet && (
-              <Row
-                icon="🔁"
-                label="Reset Vault PIN"
-                subText="Forgot it? Removes the PIN. Vaulted chats return to your main list."
-                onPress={() => {
+            {/* Reset Vault PIN — always visible in plain sight so
+                users who forgot their PIN can find it without having
+                to tap into the Vault PIN row first. Disabled-looking
+                copy when no PIN exists yet. Wipes the PIN AND the
+                vaulted-id list (no PIN, no vault), returning vaulted
+                chats to the main list. Chat history is preserved on
+                both sides — only the "hidden" flag is cleared. */}
+            <Row
+              icon="🔁"
+              label="Reset Vault PIN"
+              subText={
+                vaultPinSet
+                  ? 'Forgot it? Removes the PIN. Vaulted chats return to your main list.'
+                  : 'No Vault PIN to reset right now.'
+              }
+              onPress={() => {
+                if (!vaultPinSet) {
                   Alert.alert(
-                    'Reset Vault PIN?',
-                    'This removes your Vault PIN. Any chats currently in the vault will return to your main Chats list. Conversation history is not deleted on either side.',
-                    [
-                      { text: 'Cancel', style: 'cancel' },
-                      {
-                        text: 'Reset PIN',
-                        style: 'destructive',
-                        onPress: async () => {
-                          try {
-                            await clearVaultPin();
-                            setVaultPinSet(false);
-                            // Reset the first-run setup flag so the
-                            // user can be re-prompted to create a new
-                            // PIN next time they open the Vault.
-                            try { await AsyncStorage.removeItem('vaultchat_vault_setup_seen'); } catch {}
-                            Alert.alert(
-                              'Vault PIN reset',
-                              'Your Vault PIN has been removed and any vaulted chats are back in your Chats list. You can set a new PIN anytime.'
-                            );
-                          } catch (e) {
-                            Alert.alert('Could not reset', e?.message || 'Try again in a moment.');
-                          }
-                        },
-                      },
-                    ]
+                    'No Vault PIN to reset',
+                    'You haven’t set a Vault PIN yet. Tap "Vault PIN" above to create one.'
                   );
-                }}
-              />
-            )}
+                  return;
+                }
+                Alert.alert(
+                  'Reset Vault PIN?',
+                  'This removes your Vault PIN. Any chats currently in the vault will return to your main Chats list. Conversation history is not deleted on either side.',
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                      text: 'Reset PIN',
+                      style: 'destructive',
+                      onPress: async () => {
+                        try {
+                          await clearVaultPin();
+                          setVaultPinSet(false);
+                          try { await AsyncStorage.removeItem('vaultchat_vault_setup_seen'); } catch {}
+                          Alert.alert(
+                            'Vault PIN reset',
+                            'Your Vault PIN has been removed and any vaulted chats are back in your Chats list. You can set a new PIN anytime.'
+                          );
+                        } catch (e) {
+                          Alert.alert('Could not reset', e?.message || 'Try again in a moment.');
+                        }
+                      },
+                    },
+                  ]
+                );
+              }}
+            />
             <Row
               icon="🔒"
               label="Vault"
@@ -1298,6 +1321,22 @@ export default function SettingsScreen({ navigation }) {
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+
+      {/* Inline Vault PIN setup — opens when the user taps the
+          Vault PIN row and no PIN exists yet. PIN + confirm form,
+          4-8 digits, no need to navigate away from Settings. */}
+      <VaultPinSetupModal
+        visible={vaultSetupModal}
+        onClose={() => setVaultSetupModal(false)}
+        onCreated={async () => {
+          setVaultSetupModal(false);
+          setVaultPinSet(true);
+          // Mark first-run flag seen so VaultScreen doesn't re-pop
+          // its own setup modal next visit.
+          try { await AsyncStorage.setItem('vaultchat_vault_setup_seen', '1'); } catch {}
+          Alert.alert('Vault PIN created', 'You can now move chats into the vault from the chat list (long-press a row → Move to Vault).');
+        }}
+      />
     </View>
   );
 }
