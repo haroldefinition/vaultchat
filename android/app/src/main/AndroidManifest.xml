@@ -5,24 +5,25 @@
   <uses-permission android:name="android.permission.INTERNET"/>
   <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
   <uses-permission android:name="android.permission.READ_CONTACTS"/>
-  <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+  <!-- Legacy storage perm — only used on Android 12 and below.
+       Android 13+ uses the granular READ_MEDIA_* perms below. -->
+  <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
   <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>
   <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
   <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
   <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED"/>
   <uses-permission android:name="android.permission.RECORD_AUDIO"/>
-  <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
   <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
-  <uses-permission android:name="android.permission.USE_FINGERPRINT"/>
   <uses-permission android:name="android.permission.VIBRATE"/>
   <uses-permission android:name="android.permission.WRITE_CONTACTS"/>
-  <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
+  <!-- Legacy storage perm — needed only on Android 9 and below
+       (scoped storage on Android 10+ removed the need for this). -->
+  <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>
   <!-- Phase AAA: Android calling stack -->
   <!-- ConnectionService backbone — lets us register a self-managed phone account via react-native-callkeep -->
   <uses-permission android:name="android.permission.MANAGE_OWN_CALLS"/>
   <uses-permission android:name="android.permission.READ_PHONE_STATE"/>
   <uses-permission android:name="android.permission.READ_PHONE_NUMBERS"/>
-  <uses-permission android:name="android.permission.CALL_PHONE"/>
   <uses-permission android:name="android.permission.BIND_TELECOM_CONNECTION_SERVICE"/>
   <!-- Background WebRTC + foreground service for in-call audio/video -->
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
@@ -45,7 +46,7 @@
       <data android:scheme="https"/>
     </intent>
   </queries>
-  <application android:name=".MainApplication" android:label="@string/app_name" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:allowBackup="true" android:theme="@style/AppTheme" android:supportsRtl="true" android:enableOnBackInvokedCallback="false" android:requestLegacyExternalStorage="true">
+  <application android:name=".MainApplication" android:label="@string/app_name" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:allowBackup="true" android:theme="@style/AppTheme" android:supportsRtl="true" android:enableOnBackInvokedCallback="false">
     <!-- Phase AAA: tools:replace forces our values to win the manifest merge.
          react-native-firebase_messaging declares default_notification_color
          with a different default (@color/white), and the merger refuses to

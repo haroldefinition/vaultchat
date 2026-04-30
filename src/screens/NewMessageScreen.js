@@ -138,7 +138,7 @@ export default function NewMessageScreen({ navigation, route }) {
       const p = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!p.granted) { Alert.alert('Permission needed'); return; }
       const r = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: 'images', quality: 1, allowsMultipleSelection: true, selectionLimit: 20,
+        mediaTypes: 'images', quality: 0.7, allowsMultipleSelection: true, selectionLimit: 20,
       });
       if (!r.canceled && r.assets?.length) {
         const newPhotos = await Promise.all(r.assets.map(async asset => {
@@ -151,13 +151,13 @@ export default function NewMessageScreen({ navigation, route }) {
     } else if (type === 'video') {
       const p = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!p.granted) { Alert.alert('Permission needed'); return; }
-      const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'videos', quality: 1, allowsMultipleSelection: true, selectionLimit: 10 });
+      const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'videos', quality: 0.7, allowsMultipleSelection: true, selectionLimit: 10 });
       if (!r.canceled && r.assets?.length)
         setStagedVideos(prev => [...prev, ...r.assets.map(a => ({ uri: a.uri }))].slice(0, 10));
     } else if (type === 'camera') {
       const p = await ImagePicker.requestCameraPermissionsAsync();
       if (!p.granted) { Alert.alert('Permission needed'); return; }
-      const r = await ImagePicker.launchCameraAsync({ quality: 1 });
+      const r = await ImagePicker.launchCameraAsync({ quality: 0.7 });
       if (!r.canceled && r.assets?.[0]) {
         const key = `img_${Date.now()}`;
         await AsyncStorage.setItem(key, r.assets[0].uri);
@@ -171,7 +171,7 @@ export default function NewMessageScreen({ navigation, route }) {
       try {
         const p = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (!p.granted) { Alert.alert('Permission needed'); return; }
-        const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'all', quality: 1, allowsMultipleSelection: false });
+        const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'all', quality: 0.7, allowsMultipleSelection: false });
         if (!r.canceled && r.assets?.[0]) {
           await Share.share(
             { url: r.assets[0].uri, message: 'Shared via VaultChat — encrypted messaging' },

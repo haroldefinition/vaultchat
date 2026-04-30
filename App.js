@@ -11,6 +11,42 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeProvider, useTheme } from './src/services/theme';
 import { UnreadProvider, useUnread } from './src/services/unreadBadge';
 import { setupPushNotifications, addNotificationResponseListener, clearBadge } from './src/services/pushNotifications';
+
+// Sentry crash reporting — wrapped in try/require so the app keeps
+// working even if @sentry/react-native isn't installed yet (lets us
+// commit the wiring without forcing a `yarn add` before next build).
+//
+// To enable in production:
+//   1. yarn add @sentry/react-native
+//   2. cd ios && pod install (or rebuild via EAS)
+//   3. Sign up at sentry.io → create a React Native project
+//   4. Replace 'YOUR_DSN_HERE' below with the DSN from Sentry's project settings
+//   5. Rebuild
+//
+// Until step 4, Sentry init silently no-ops and the rest of the app
+// is unaffected.
+let SentryRN = null;
+try { SentryRN = require('@sentry/react-native'); } catch (_) { SentryRN = null; }
+const SENTRY_DSN = 'YOUR_DSN_HERE'; // ← paste the real DSN here once you sign up
+if (SentryRN && SENTRY_DSN && !SENTRY_DSN.includes('YOUR_DSN_HERE')) {
+  try {
+    SentryRN.init({
+      dsn: SENTRY_DSN,
+      // Environment helps us split dev from prod crashes in Sentry.
+      environment: __DEV__ ? 'development' : 'production',
+      // Default tracesSampleRate is 0 — turn perf monitoring on
+      // gradually; spans can get expensive at high sample rates.
+      tracesSampleRate: 0.1,
+      // Sentry's own internal logger is noisy in dev — silence it.
+      enableNative: true,
+      enableNativeCrashHandling: true,
+      attachStacktrace: true,
+      // Don't capture user IPs — Supabase already has those, no
+      // value adding them to Sentry too.
+      sendDefaultPii: false,
+    });
+  } catch (e) { if (__DEV__) console.warn('[sentry] init failed:', e?.message || e); }
+}
 import { flushQueue } from './src/services/messageQueue';
 import { subscribeToInviteUrls } from './src/services/inviteLink';
 import { findByHandle } from './src/services/vaultHandle';
