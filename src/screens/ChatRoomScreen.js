@@ -925,9 +925,20 @@ export default function ChatRoomScreen({ route, navigation }) {
     const { data } = await supabase.auth.getUser();
     if (data?.user) {
       setMyId(data.user.id);
-      // Fetch handle for typing indicator
-      const { data: p } = await supabase.from('profiles').select('handle').eq('id', data.user.id).single().catch(() => ({ data: null }));
-      if (p?.handle) setMyHandle(p.handle);
+      // Fetch handle for typing indicator. Bug fix (Sentry-reported):
+      // Supabase v2's .single() returns a PostgrestBuilder which is
+      // thenable but doesn't expose .catch directly — chaining
+      // .single().catch(...) throws "catch is not a function". Wrap
+      // the whole await in try/catch instead. The original .catch
+      // form swallowed errors silently in v1 of supabase-js but
+      // hard-crashes in v2, taking the rest of loadUser() with it
+      // — which manifested as "New Message / Sync Contacts / Add
+      // Contact buttons do nothing" because their handlers run
+      // after this throws.
+      try {
+        const r = await supabase.from('profiles').select('handle').eq('id', data.user.id).single();
+        if (r?.data?.handle) setMyHandle(r.data.handle);
+      } catch {}
       // Mark existing messages as read
       markRoomAsRead(roomId, data.user.id);
       return;
