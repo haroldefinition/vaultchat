@@ -457,9 +457,19 @@ export default function ChatsScreen({ navigation }) {
         <Text style={[s.emptySub, { color: sub }]}>
           Start a private encrypted conversation with anyone in your contacts.
         </Text>
+        {/* Defensive handlers — navigation.navigate runs FIRST so a
+            haptics throw or any other side-effect can't block it.
+            try/catch around the whole thing so any further throw
+            still surfaces a user-visible alert instead of looking
+            "dead". hitSlop generous so even fat taps land. */}
         <TouchableOpacity
           style={[s.emptyBtn, { backgroundColor: accent }]}
-          onPress={() => { taptic(); navigation.navigate('NewMessage'); }}>
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          accessibilityLabel="New message"
+          onPress={() => {
+            try { navigation.navigate('NewMessage'); } catch (e) { Alert.alert('Could not open New Message', e?.message || 'Please try again.'); }
+            try { taptic(); } catch {}
+          }}>
           <Text style={s.emptyBtnTx}>✏️  New Message</Text>
         </TouchableOpacity>
         {/* Growth CTA — onboard users faster by matching their address
@@ -468,14 +478,16 @@ export default function ChatsScreen({ navigation }) {
             chat list so any discovered friends show up. */}
         <TouchableOpacity
           style={[s.emptyBtnOutline, { borderColor: accent }]}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          accessibilityLabel="Sync phone contacts"
           onPress={async () => {
-            taptic();
-            const granted = await requestContactsPermission();
-            if (!granted) {
-              Alert.alert('Permission needed', 'Enable Contacts access in Settings so VaultChat can find friends you already know.');
-              return;
-            }
+            try { taptic(); } catch {}
             try {
+              const granted = await requestContactsPermission();
+              if (!granted) {
+                Alert.alert('Permission needed', 'Enable Contacts access in Settings so VaultChat can find friends you already know.');
+                return;
+              }
               const contacts = await syncContacts();
               Alert.alert('Contacts synced', `${contacts?.length || 0} contacts imported. Anyone already on VaultChat is ready to message.`);
               loadChats();
@@ -487,7 +499,12 @@ export default function ChatsScreen({ navigation }) {
         </TouchableOpacity>
         <TouchableOpacity
           style={[s.emptyBtnOutline, { borderColor: accent, marginTop: 10 }]}
-          onPress={() => { taptic(); navigation.navigate('Contacts'); }}>
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          accessibilityLabel="Add a contact"
+          onPress={() => {
+            try { navigation.navigate('Contacts'); } catch (e) { Alert.alert('Could not open Contacts', e?.message || 'Please try again.'); }
+            try { taptic(); } catch {}
+          }}>
           <Text style={[s.emptyBtnOutlineTx, { color: accent }]}>👤  Add a Contact</Text>
         </TouchableOpacity>
       </View>

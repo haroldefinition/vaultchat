@@ -86,10 +86,11 @@ const s = StyleSheet.create({
   container:    { flex: 1, paddingHorizontal: 32 },
 
   hero:         { alignItems: 'center', flex: 1 },
-  // Brand logo — sized to feel hero-sized but not overpowering on
-  // smaller phones. resizeMode="contain" keeps the shield crisp at
-  // any density.
-  logoImg:      { width: 160, height: 160, marginBottom: 24 },
+  // Brand logo — doubled from 160 → 320 per Harold so it dominates
+  // the welcome page. resizeMode="contain" keeps the shield crisp
+  // at any density. On narrow devices the View paddingHorizontal:
+  // 32 still leaves it inside safe bounds.
+  logoImg:      { width: 320, height: 320, marginBottom: 8 },
 
   brandName:    { fontSize: 26, fontWeight: '900', letterSpacing: 4, marginBottom: 2 },
   brandSuffix:  { fontSize: 13, fontWeight: '800', letterSpacing: 6, marginBottom: 14 },
