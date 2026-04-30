@@ -267,11 +267,38 @@ export default function SettingsScreen({ navigation }) {
     setBlockedContacts(updated); await save('vaultchat_blocked', updated);
   }
 
+  // Targeted sign-out — preserves all chat history, vault data,
+  // folders, and per-chat prefs so signing back in (as the same
+  // user) feels seamless. Only auth-related keys get cleared.
+  // Bug fix per Harold (2026-04-30): the previous version called
+  // AsyncStorage.clear() which nuked vaultchat_chats,
+  // vaultchat_msgs_<roomId>, vaultchat_plain_<roomId>,
+  // vaultchat_vaulted_ids, vaultchat_folders, etc. — every chat
+  // and message disappeared on sign-out and stayed gone after
+  // sign-in. Users were furious; this restores the iMessage-style
+  // "log back in and your stuff is right there" expectation.
+  //
+  // Account deletion (deleteAccount, below) still does a full
+  // wipe — that's the correct behavior for "I'm permanently
+  // leaving."
+  async function signOutPreservingData() {
+    try { await supabase.auth.signOut(); } catch {}
+    // Clear only the auth pointer + supabase's own session token.
+    // Anything else stays. Note: supabase-js manages its own keys
+    // automatically when signOut runs, so we only need to remove
+    // OUR cached user record.
+    try { await AsyncStorage.removeItem('vaultchat_user'); } catch {}
+  }
+
   async function signOut() {
-    Alert.alert('Sign Out', 'Are you sure?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Sign Out', style: 'destructive', onPress: async () => { await supabase.auth.signOut(); await AsyncStorage.clear(); } },
-    ]);
+    Alert.alert(
+      'Sign Out',
+      'Sign out of VaultChat? Your chats, messages, and vault stay on this device — they\'ll be there when you sign back in.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Sign Out', style: 'destructive', onPress: signOutPreservingData },
+      ]
+    );
   }
 
   // Two-step account deletion required by App Store guideline 5.1.1(v):
@@ -865,8 +892,12 @@ export default function SettingsScreen({ navigation }) {
                           const { signOutAllDevices } = require('../services/sessionGuard');
                           const r = await signOutAllDevices();
                           if (r.ok) {
-                            await AsyncStorage.clear();
-                            Alert.alert('Signed out', 'You have been signed out of all devices.');
+                            // Same data-preservation policy as the
+                            // normal sign-out: drop the auth pointer
+                            // only, keep chats / messages / vault
+                            // intact so signing back in is seamless.
+                            try { await AsyncStorage.removeItem('vaultchat_user'); } catch {}
+                            Alert.alert('Signed out', 'You have been signed out of all devices. Your chats and messages stay on this device for when you sign back in.');
                           } else {
                             Alert.alert('Sign out failed', r.error || 'Please try again.');
                           }

@@ -69,6 +69,7 @@ import SplashScreen        from './src/screens/SplashScreen';
 import RegisterScreen      from './src/screens/RegisterScreen';
 import WelcomeScreen       from './src/screens/WelcomeScreen';
 import EncryptionInfoScreen from './src/screens/EncryptionInfoScreen';
+import PremiumUpgradeSplash from './src/components/PremiumUpgradeSplash';
 import BiometricLockScreen from './src/screens/BiometricLockScreen';
 import ChatsScreen         from './src/screens/ChatsScreen';
 import ChatRoomScreen      from './src/screens/ChatRoomScreen';
@@ -262,6 +263,10 @@ export default Sentry.wrap(function App() {
   const [ready,     setReady]     = useState(false);
   const [isLoggedIn,setIsLoggedIn]= useState(false);
   const [isLocked,  setIsLocked]  = useState(false);
+  // Premium upgrade splash — fires once when the user's premium
+  // flag flips false → true (purchase completes, Restore brings it
+  // back, server sync confirms it). Subscribed via adsService below.
+  const [showUpgradeSplash, setShowUpgradeSplash] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -434,6 +439,24 @@ export default Sentry.wrap(function App() {
         setIsLoggedIn(!!stored);
       }
 
+      // Premium upgrade splash subscription. We snapshot the
+      // current premium state once, then watch for the false→true
+      // transition. The splash only fires on actual upgrade events,
+      // not on every cold-launch where the user is already premium.
+      // adsService publishes flag changes via subscribeToPremium.
+      try {
+        const ads = require('./src/services/adsService');
+        let lastPrem = await ads.isPremiumUser();
+        const unsubPrem = ads.subscribeToPremium(async (next) => {
+          // false → true is the upgrade event we care about.
+          if (next && !lastPrem) setShowUpgradeSplash(true);
+          lastPrem = !!next;
+        });
+        // Cleanup is handled implicitly — the bootstrap effect runs
+        // once for the lifetime of the app, so the listener should
+        // live for the lifetime of the app too.
+      } catch {}
+
       // Front-door lock removed per Harold (2026-04-29). No
       // BiometricLockScreen on launch — user goes straight in.
       // Vault PIN still gates the vault contents inside the app.
@@ -545,6 +568,14 @@ export default Sentry.wrap(function App() {
           )}
         </Stack.Navigator>
       </NavigationContainer>
+
+      {/* Premium upgrade splash — sits above NavigationContainer
+          so it can take over the entire screen when premium flips
+          on. Auto-dismisses after 3s; user can also tap Done. */}
+      <PremiumUpgradeSplash
+        visible={showUpgradeSplash}
+        onDone={() => setShowUpgradeSplash(false)}
+      />
     </ThemeProvider>
     </UnreadProvider>
     </GestureHandlerRootView>

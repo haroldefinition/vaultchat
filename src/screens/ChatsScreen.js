@@ -35,6 +35,78 @@ import {
 
 const CHATS_KEY = 'vaultchat_chats';
 
+// EmptyState defined at MODULE level — not inside ChatsScreen — so its
+// component type is stable across parent re-renders. The previous
+// in-function definition created a new component reference on every
+// ChatsScreen render, which made React unmount + remount the empty
+// state on each render. That happened to break tap handlers entirely
+// in some scenarios (the underlying native button view was tearing
+// down before the touch could resolve). Stable type = stable taps.
+function ChatsEmptyState({
+  search, tx, sub, accent, navigation, loadChats,
+  requestContactsPermission, syncContacts,
+}) {
+  if (search) return (
+    <View style={s.empty}>
+      <Text style={s.emptyIcon}>🔍</Text>
+      <Text style={[s.emptyTitle, { color: tx }]}>No chats found</Text>
+      <Text style={[s.emptySub, { color: sub }]}>No chats matching "{search}"</Text>
+    </View>
+  );
+  return (
+    <View style={s.empty}>
+      <View style={[s.emptyIconWrap, { backgroundColor: accent + '18', borderColor: accent + '30' }]}>
+        <Text style={{ fontSize: 48 }}>💬</Text>
+      </View>
+      <Text style={[s.emptyTitle, { color: tx }]}>No messages yet</Text>
+      <Text style={[s.emptySub, { color: sub }]}>
+        Start a private encrypted conversation with anyone in your contacts.
+      </Text>
+      <TouchableOpacity
+        style={[s.emptyBtn, { backgroundColor: accent }]}
+        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        accessibilityLabel="New message"
+        onPress={() => {
+          try { navigation.navigate('NewMessage'); } catch (e) { Alert.alert('Could not open New Message', e?.message || 'Please try again.'); }
+          try { taptic(); } catch {}
+        }}>
+        <Text style={s.emptyBtnTx}>✏️  New Message</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[s.emptyBtnOutline, { borderColor: accent }]}
+        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        accessibilityLabel="Sync phone contacts"
+        onPress={async () => {
+          try { taptic(); } catch {}
+          try {
+            const granted = await requestContactsPermission();
+            if (!granted) {
+              Alert.alert('Permission needed', 'Enable Contacts access in Settings so VaultChat can find friends you already know.');
+              return;
+            }
+            const contacts = await syncContacts();
+            Alert.alert('Contacts synced', `${contacts?.length || 0} contacts imported. Anyone already on VaultChat is ready to message.`);
+            loadChats();
+          } catch (e) {
+            Alert.alert('Sync failed', e?.message || 'Please try again in a moment.');
+          }
+        }}>
+        <Text style={[s.emptyBtnOutlineTx, { color: accent }]}>👥  Sync Phone Contacts</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[s.emptyBtnOutline, { borderColor: accent, marginTop: 10 }]}
+        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        accessibilityLabel="Add a contact"
+        onPress={() => {
+          try { navigation.navigate('Contacts'); } catch (e) { Alert.alert('Could not open Contacts', e?.message || 'Please try again.'); }
+          try { taptic(); } catch {}
+        }}>
+        <Text style={[s.emptyBtnOutlineTx, { color: accent }]}>👤  Add a Contact</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 export default function ChatsScreen({ navigation }) {
   const { bg, card, tx, sub, border, inputBg, accent } = useTheme();
   const { clear: clearUnread } = useUnread();
@@ -439,77 +511,10 @@ export default function ChatsScreen({ navigation }) {
     navigation.navigate('Folders');
   }
 
-  // ── Better empty state ────────────────────────────────────────
-  const EmptyState = () => {
-    if (search) return (
-      <View style={s.empty}>
-        <Text style={s.emptyIcon}>🔍</Text>
-        <Text style={[s.emptyTitle, { color: tx }]}>No chats found</Text>
-        <Text style={[s.emptySub, { color: sub }]}>No chats matching "{search}"</Text>
-      </View>
-    );
-    return (
-      <View style={s.empty}>
-        <View style={[s.emptyIconWrap, { backgroundColor: accent + '18', borderColor: accent + '30' }]}>
-          <Text style={{ fontSize: 48 }}>💬</Text>
-        </View>
-        <Text style={[s.emptyTitle, { color: tx }]}>No messages yet</Text>
-        <Text style={[s.emptySub, { color: sub }]}>
-          Start a private encrypted conversation with anyone in your contacts.
-        </Text>
-        {/* Defensive handlers — navigation.navigate runs FIRST so a
-            haptics throw or any other side-effect can't block it.
-            try/catch around the whole thing so any further throw
-            still surfaces a user-visible alert instead of looking
-            "dead". hitSlop generous so even fat taps land. */}
-        <TouchableOpacity
-          style={[s.emptyBtn, { backgroundColor: accent }]}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          accessibilityLabel="New message"
-          onPress={() => {
-            try { navigation.navigate('NewMessage'); } catch (e) { Alert.alert('Could not open New Message', e?.message || 'Please try again.'); }
-            try { taptic(); } catch {}
-          }}>
-          <Text style={s.emptyBtnTx}>✏️  New Message</Text>
-        </TouchableOpacity>
-        {/* Growth CTA — onboard users faster by matching their address
-            book against known VaultChat profiles. Request contacts
-            permission, sync, show a friendly count, then reload the
-            chat list so any discovered friends show up. */}
-        <TouchableOpacity
-          style={[s.emptyBtnOutline, { borderColor: accent }]}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          accessibilityLabel="Sync phone contacts"
-          onPress={async () => {
-            try { taptic(); } catch {}
-            try {
-              const granted = await requestContactsPermission();
-              if (!granted) {
-                Alert.alert('Permission needed', 'Enable Contacts access in Settings so VaultChat can find friends you already know.');
-                return;
-              }
-              const contacts = await syncContacts();
-              Alert.alert('Contacts synced', `${contacts?.length || 0} contacts imported. Anyone already on VaultChat is ready to message.`);
-              loadChats();
-            } catch (e) {
-              Alert.alert('Sync failed', e?.message || 'Please try again in a moment.');
-            }
-          }}>
-          <Text style={[s.emptyBtnOutlineTx, { color: accent }]}>👥  Sync Phone Contacts</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[s.emptyBtnOutline, { borderColor: accent, marginTop: 10 }]}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          accessibilityLabel="Add a contact"
-          onPress={() => {
-            try { navigation.navigate('Contacts'); } catch (e) { Alert.alert('Could not open Contacts', e?.message || 'Please try again.'); }
-            try { taptic(); } catch {}
-          }}>
-          <Text style={[s.emptyBtnOutlineTx, { color: accent }]}>👤  Add a Contact</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  };
+  // EmptyState moved to module-level (ChatsEmptyState above the
+  // default export) so its component type is stable across renders
+  // — fixes the dead-button issue where TouchableOpacities were
+  // tearing down before the touch could resolve.
 
   // Premium polish — when the user is a subscriber, the header band
   // adopts the deep-purple gradient backdrop from Harold's mockup
@@ -890,7 +895,16 @@ export default function ChatsScreen({ navigation }) {
             </Swipeable>
           );
         }}
-        ListEmptyComponent={<EmptyState />}
+        ListEmptyComponent={
+          <ChatsEmptyState
+            search={search}
+            tx={tx} sub={sub} accent={accent}
+            navigation={navigation}
+            loadChats={loadChats}
+            requestContactsPermission={requestContactsPermission}
+            syncContacts={syncContacts}
+          />
+        }
         ListFooterComponent={
           archived.length > 0 ? (
             <TouchableOpacity
