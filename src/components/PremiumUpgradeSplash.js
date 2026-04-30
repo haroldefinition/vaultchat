@@ -114,7 +114,14 @@ const s = StyleSheet.create({
   markWrap:   {
     width: 220, height: 220,
     alignItems: 'center', justifyContent: 'center',
-    marginBottom: 36, position: 'relative',
+    marginBottom: 56, position: 'relative',
+    // Rounded corners + matching overflow:hidden so the V+crown
+    // image's baked-in dark square background reads as a tasteful
+    // app-icon-style mark instead of a square clashing with the
+    // round glow ring behind it. 28px radius gives the same "soft
+    // squircle" feel as iOS app icons.
+    borderRadius: 28,
+    overflow: 'hidden',
   },
   markImg:    { width: '100%', height: '100%' },
   title:      { color: '#fff', fontSize: 26, fontWeight: '900', textAlign: 'center', marginBottom: 8, letterSpacing: 0.3 },
