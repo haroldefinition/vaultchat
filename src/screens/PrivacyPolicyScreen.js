@@ -75,8 +75,18 @@ export default function PrivacyPolicyScreen({ navigation }) {
           Note: We do not use any advertising networks or analytics trackers.
         </Section>
 
-        <Section title="8. Your Rights & Opt-Out">
+        <Section title="8. Your Rights & Account Deletion">
           You have the right to access, delete, or export your data at any time.{'\n\n'}
+          {'  '}• In-app deletion: open Settings → scroll to the bottom → tap Delete Account. The deletion completes immediately and removes your profile, @handle, encryption keys (per-device + ratchet pre-keys), folders, chat preferences, block list, cached contacts, and your authentication record.{'\n'}
+          {'  '}• Web deletion (no install required): visit{' '}
+          <Text style={[s.link, { color: accent }]} onPress={() => Linking.openURL('https://vaultchat.co/delete-account')}>
+            vaultchat.co/delete-account
+          </Text>
+          {' '}and submit the form. We confirm and complete the deletion within 30 days.{'\n\n'}
+          What stays after deletion:{'\n'}
+          {'  '}• Messages you sent to other people remain on their devices — that's how end-to-end encryption works; we cannot reach into someone else's phone to delete a message we never had access to.{'\n'}
+          {'  '}• Anonymized aggregate metrics (e.g. "5,000 active users last week") that don't identify you personally.{'\n'}
+          {'  '}• Records we're legally required to keep — for example, safety reports filed under federal child-protection law (NCMEC reports). These are retained for the period required by law and no longer.{'\n\n'}
           SMS Opt-Out: You can cancel the SMS service at any time by texting "STOP" to our number.{'\n\n'}
           Assistance: Text "HELP" for more info or contact{' '}
           <Text style={[s.link, { color: accent }]} onPress={() => Linking.openURL('mailto:privacy@vaultchat.co')}>

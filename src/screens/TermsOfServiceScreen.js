@@ -154,13 +154,22 @@ export default function TermsOfServiceScreen({ navigation }) {
           the event giving rise to the claim.
         </Section>
 
-        <Section title="13. Termination">
-          You may delete your account at any time from Settings. We may
-          suspend or terminate your access for violations of these Terms,
-          for legal or security reasons, or if we discontinue the service.
-          Sections that by their nature should survive termination
-          (ownership, disclaimers, liability limits, dispute resolution)
-          will survive.
+        <Section title="13. Termination & Account Deletion">
+          You may delete your account at any time from Settings → Delete
+          Account, or from the web at vaultchat.co/delete-account if you
+          can't access the app. In-app deletion completes immediately;
+          web requests complete within 30 days of confirmation. Deletion
+          removes your profile, @handle, encryption keys, contacts,
+          folders, preferences, and authentication record. Messages you
+          previously sent to other people remain on their devices —
+          end-to-end encryption means we cannot reach into someone
+          else's phone to delete a message we never had access to.
+          {'\n\n'}
+          We may suspend or terminate your access for violations of these
+          Terms, for legal or security reasons, or if we discontinue the
+          service. Sections that by their nature should survive
+          termination (ownership, disclaimers, liability limits, dispute
+          resolution) will survive.
         </Section>
 
         <Section title="14. Governing Law and Disputes">

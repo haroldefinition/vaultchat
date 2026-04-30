@@ -221,7 +221,7 @@ function CallContactEditor({ item, onClose, onSave, accent, bg, card, tx, sub, b
 
 // ── Main CallScreen ───────────────────────────────────────────
 export default function CallScreen({ navigation }) {
-  const { bg, card, tx, sub, border, inputBg, accent } = useTheme();
+  const { bg, card, tx, sub, border, inputBg, accent, isPremium } = useTheme();
   const [calls,          setCalls]          = useState([]);
   const [tab,            setTab]            = useState('recent');
   const [dialInput,      setDialInput]      = useState('');
@@ -433,7 +433,14 @@ export default function CallScreen({ navigation }) {
                 delayLongPress={350}
                 onLongPress={() => confirmDeleteCall(item)}
                 onPress={() => { setInfoTarget(item); setInfoModal(true); }}>
-                <View style={[s.callItem, { borderBottomColor: border }]}>
+                {/* Premium row uses a rounded card treatment matching
+                    Contacts/Groups; free flow keeps the original
+                    bottom-bordered list. */}
+                <View style={
+                  isPremium
+                    ? [s.callItemCard, { backgroundColor: card, borderColor: border }]
+                    : [s.callItem, { borderBottomColor: border }]
+                }>
                   <TouchableOpacity
                     style={[s.avatar, { backgroundColor: item.type === 'missed' ? '#ff4444' : accent }]}
                     onPress={() => { setEditCallTarget(item); setEditCallModal(true); }}>
@@ -582,6 +589,8 @@ const s = StyleSheet.create({
   emptySub:         { fontSize: 14, textAlign: 'center', paddingHorizontal: 24 },
   emptyCta:         { marginTop: 20, paddingHorizontal: 22, paddingVertical: 12, borderRadius: 22 },
   callItem:         { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1 },
+  // Premium-only — rounded card row matching Contacts + Groups
+  callItemCard:     { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginBottom: 8, paddingVertical: 12, paddingHorizontal: 12, borderRadius: 14, borderWidth: 1 },
   avatar:           { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
   avatarText:       { color: '#fff', fontWeight: 'bold', fontSize: 18 },
   callInfo:         { flex: 1, marginLeft: 14 },
