@@ -352,7 +352,12 @@ export default function ActiveCallScreen({ route, navigation }) {
         else if (p.maxBitrate >= 200000)  setQuality('Low');
         else                              setQuality('Min');
       }, 7000);
-      return () => { clearTimeout(connect); clearInterval(qualTimer); anim.stop(); };
+      // Bug fix (Sentry EXC_BAD_ACCESS in Hermes): the ring loop
+      // was being started but never stopped — it kept driving
+      // Animated updates after the screen unmounted, eventually
+      // crashing the JS runtime when its bridge value got freed.
+      // Stop both loops on cleanup.
+      return () => { clearTimeout(connect); clearInterval(qualTimer); anim.stop(); ring.stop(); };
     }
 
     // Begin the Recents journal entry up-front so even a force-quit mid-call
@@ -537,6 +542,9 @@ export default function ActiveCallScreen({ route, navigation }) {
       unsubRoom();
       unsubQuality();
       anim.stop();
+      // Same fix as the mock branch above — stop the always-running
+      // ring loop too. Hermes EXC_BAD_ACCESS root cause.
+      try { ring.stop(); } catch {}
       clearInterval(timer.current);
       // If the screen unmounts while we're still in a call, tear it down.
       // Guard against spurious cleanup firings (e.g. React dev-mode effect

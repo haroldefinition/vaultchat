@@ -46,15 +46,23 @@ export default function PremiumUpgradeSplash({ visible, onDone }) {
       Animated.timing(fade,  { toValue: 1, duration: 380, useNativeDriver: true }),
       Animated.spring(scale, { toValue: 1, friction: 6, tension: 70, useNativeDriver: true }),
     ]).start();
-    Animated.loop(
+    // Bug fix (Sentry EXC_BAD_ACCESS in Hermes): capture the loop
+    // handle so we can .stop() it on unmount. Previously the loop
+    // ran forever after the splash dismissed and eventually
+    // crashed the JS runtime when its bridge value got freed.
+    const glowLoop = Animated.loop(
       Animated.sequence([
         Animated.timing(glow, { toValue: 1, duration: 1400, useNativeDriver: true }),
         Animated.timing(glow, { toValue: 0, duration: 1400, useNativeDriver: true }),
       ])
-    ).start();
+    );
+    glowLoop.start();
     // Auto-dismiss after 3s — the user can also tap Done early.
     const t = setTimeout(() => dismiss(), 3000);
-    return () => clearTimeout(t);
+    return () => {
+      clearTimeout(t);
+      try { glowLoop.stop(); } catch {}
+    };
   }, [visible]);
 
   function dismiss() {
