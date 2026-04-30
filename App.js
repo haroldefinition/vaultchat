@@ -12,37 +12,30 @@ import { ThemeProvider, useTheme } from './src/services/theme';
 import { UnreadProvider, useUnread } from './src/services/unreadBadge';
 import { setupPushNotifications, addNotificationResponseListener, clearBadge } from './src/services/pushNotifications';
 
-// Sentry crash reporting — wrapped in try/require so the app keeps
-// working even if @sentry/react-native isn't installed yet (lets us
-// commit the wiring without forcing a `yarn add` before next build).
+// Sentry crash reporting. Wired by the @sentry/wizard CLI; we own
+// the init config below. Sentry.wrap() at the bottom of this file
+// auto-binds the React error boundary so unhandled render errors
+// reach the dashboard.
 //
-// To enable in production:
-//   1. yarn add @sentry/react-native
-//   2. cd ios && pod install (or rebuild via EAS)
-//   3. Sign up at sentry.io → create a React Native project
-//   4. Replace 'YOUR_DSN_HERE' below with the DSN from Sentry's project settings
-//   5. Rebuild
-//
-// Until step 4, Sentry init silently no-ops and the rest of the app
-// is unaffected.
-let SentryRN = null;
-try { SentryRN = require('@sentry/react-native'); } catch (_) { SentryRN = null; }
-const SENTRY_DSN = 'YOUR_DSN_HERE'; // ← paste the real DSN here once you sign up
-if (SentryRN && SENTRY_DSN && !SENTRY_DSN.includes('YOUR_DSN_HERE')) {
+// To set the DSN:
+//   1. Go to https://sentry.io → your project → Settings → Client Keys (DSN)
+//   2. Copy the DSN string (looks like https://abc@o123.ingest.us.sentry.io/456)
+//   3. Replace 'YOUR_DSN_HERE' below with it
+//   4. Rebuild
+import * as Sentry from '@sentry/react-native';
+
+const SENTRY_DSN = 'YOUR_DSN_HERE'; // ← paste the real DSN here
+if (SENTRY_DSN && !SENTRY_DSN.includes('YOUR_DSN_HERE')) {
   try {
-    SentryRN.init({
+    Sentry.init({
       dsn: SENTRY_DSN,
-      // Environment helps us split dev from prod crashes in Sentry.
       environment: __DEV__ ? 'development' : 'production',
-      // Default tracesSampleRate is 0 — turn perf monitoring on
-      // gradually; spans can get expensive at high sample rates.
       tracesSampleRate: 0.1,
-      // Sentry's own internal logger is noisy in dev — silence it.
       enableNative: true,
       enableNativeCrashHandling: true,
       attachStacktrace: true,
-      // Don't capture user IPs — Supabase already has those, no
-      // value adding them to Sentry too.
+      // Don't capture user IPs — Supabase already has those, no value
+      // adding them to Sentry too.
       sendDefaultPii: false,
     });
   } catch (e) { if (__DEV__) console.warn('[sentry] init failed:', e?.message || e); }
@@ -198,7 +191,7 @@ function MainTabs() {
                 // replacing the loud iOS-system red. Counts above 0
                 // still render the number; the small dot reads cleaner
                 // than the red badge against the dark canvas.
-                <View style={{
+                (<View style={{
                   position: 'absolute', top: -4, right: -8,
                   backgroundColor: accent, borderRadius: 10,
                   minWidth: 18, height: 18,
@@ -208,7 +201,7 @@ function MainTabs() {
                   <Text style={{ color: '#fff', fontSize: 11, fontWeight: '800' }}>
                     {count > 99 ? '99+' : count}
                   </Text>
-                </View>
+                </View>)
               )}
             </View>
           ),
@@ -249,7 +242,9 @@ function MainTabs() {
 }
 
 // ── Root app ──────────────────────────────────────────────────
-export default function App() {
+// Sentry.wrap is a no-op when Sentry hasn't been init'd, so safe to
+// keep here even before the DSN is filled in.
+export default Sentry.wrap(function App() {
   const [ready,     setReady]     = useState(false);
   const [isLoggedIn,setIsLoggedIn]= useState(false);
   const [isLocked,  setIsLocked]  = useState(false);
@@ -529,4 +524,4 @@ export default function App() {
     </UnreadProvider>
     </GestureHandlerRootView>
   );
-}
+});
