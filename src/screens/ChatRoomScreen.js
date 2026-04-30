@@ -83,6 +83,26 @@ async function persistSenderPlaintext(roomId, msgId, plaintext) {
   } catch {}
 }
 
+// Pretty date label for the date-pill separator. iMessage convention:
+//   - Today / Yesterday / weekday for messages from this week
+//   - "MMM D" (Apr 30) for older messages this year
+//   - "MMM D, YYYY" for messages from a different year
+function formatDateLabel(d) {
+  if (!d) return '';
+  const now = new Date();
+  const isSameDay = (a, b) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth()    === b.getMonth() &&
+    a.getDate()     === b.getDate();
+  const yesterday = new Date(now); yesterday.setDate(yesterday.getDate() - 1);
+  if (isSameDay(d, now))       return 'Today';
+  if (isSameDay(d, yesterday)) return 'Yesterday';
+  const diffDays = Math.floor((now - d) / 86400000);
+  if (diffDays < 7) return d.toLocaleDateString('en-US', { weekday: 'long' });
+  if (d.getFullYear() === now.getFullYear()) return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
 async function hydrateSenderPlaintext(roomId, cacheRef) {
   try {
     const raw = await AsyncStorage.getItem(_plainKey(roomId));
@@ -1732,7 +1752,16 @@ export default function ChatRoomScreen({ route, navigation }) {
                 when connected, fuzzy 'last seen' when not). Falls back
                 to just the E2E label while we're still figuring out the
                 peer's presence. */}
-            <Text style={[s.hSub, { color: sub }]}>
+            {/* Lock label — the 🔒 + "End-to-end encrypted" subtitle
+                is tappable and routes to EncryptionInfoScreen so users
+                can read what E2E actually means. The presence label
+                (Online / last seen) stays non-tappable. RN fires the
+                Text's onPress when the user taps directly on the label,
+                and the parent TouchableOpacity (which navigates to
+                ContactView) fires when they tap elsewhere on the row. */}
+            <Text
+              style={[s.hSub, { color: sub }]}
+              onPress={() => navigation.navigate('EncryptionInfo')}>
               🔒  {presence.online ? (
                 <Text style={{ color: '#34C759', fontWeight: '600' }}>● Online</Text>
               ) : presence.label ? (
@@ -1816,7 +1845,34 @@ export default function ChatRoomScreen({ route, navigation }) {
           const list = searchQuery.trim()
             ? messages.filter(m => (m.content || '').toLowerCase().includes(searchQuery.toLowerCase()))
             : messages;
-          return [...list].reverse();
+          // Pre-enrich the message list with non-message rows that get
+          // dispatched in renderItem:
+          //   - 'date': "Today" / "Yesterday" / weekday separator pill
+          //     inserted whenever two consecutive messages cross a
+          //     calendar-day boundary
+          //   - 'e2e':  "Messages and calls are end-to-end encrypted"
+          //     banner pinned to the OLDEST end so it renders at the
+          //     top of the inverted list, just like iMessage's intro
+          // Sentinel rows have a `_type` discriminator and a synthetic
+          // id prefixed with __ so keyExtractor still gives unique keys.
+          const enriched = [];
+          let lastDateKey = null;
+          list.forEach((m, idx) => {
+            const ts = m.created_at ? new Date(m.created_at) : null;
+            const dateKey = ts ? `${ts.getFullYear()}-${ts.getMonth()}-${ts.getDate()}` : null;
+            if (dateKey && dateKey !== lastDateKey) {
+              enriched.push({ id: `__date_${dateKey}_${idx}`, _type: 'date', _date: ts });
+              lastDateKey = dateKey;
+            }
+            enriched.push(m);
+          });
+          // E2E banner — only show in chats that haven't accumulated a
+          // ton of messages yet. After ~50 messages the banner is just
+          // visual noise; users have already established trust.
+          if (list.length < 50) {
+            enriched.unshift({ id: '__e2e_banner', _type: 'e2e' });
+          }
+          return [...enriched].reverse();
         })()}
         keyExtractor={(item, i) => String(item.id || i)}
         inverted
@@ -1833,21 +1889,48 @@ export default function ChatRoomScreen({ route, navigation }) {
         ListFooterComponent={hasMore && loadingOlder ? (
           <Text style={{ color: sub, textAlign: 'center', paddingVertical: 12, fontSize: 12 }}>Loading older…</Text>
         ) : null}
-        renderItem={({ item }) => (
-          <Bubble
-            item={item} myId={myId} tx={tx} sub={sub} card={card} accent={accent}
-            bubbleOut={bubbleOut} bubbleIn={bubbleIn}
-            bubbleOutTx={bubbleOutTx} bubbleInTx={bubbleInTx}
-            onOpenImg={uri => setFullImgUri(uri)}
-            onPlayVid={uri => setVidUri(uri)}
-            onLongPress={item => { longPressFeedback(); setPickerMsg(item); }}
-            onReply={() => setReplyTo(item)}
-            tappedId={tappedId}
-            onTap={id => setTappedId(prev => prev === id ? null : id)}
-            reactions={reactions[item.id] || []}
-            onReact={emoji => toggleReaction(item.id, emoji)}
-          />
-        )}
+        renderItem={({ item }) => {
+          // Sentinel rows injected upstream — date pill + E2E intro
+          // banner. Real messages have no _type field and fall through
+          // to the existing Bubble renderer.
+          if (item._type === 'date') {
+            return (
+              <View style={s.datePillWrap}>
+                <View style={[s.datePill, { backgroundColor: card, borderColor: border }]}>
+                  <Text style={[s.datePillTx, { color: sub }]}>{formatDateLabel(item._date)}</Text>
+                </View>
+              </View>
+            );
+          }
+          if (item._type === 'e2e') {
+            return (
+              <TouchableOpacity
+                style={[s.e2eIntro, { backgroundColor: card, borderColor: border }]}
+                onPress={() => navigation.navigate('EncryptionInfo')}
+                activeOpacity={0.85}>
+                <Text style={[s.e2eIntroTx, { color: sub }]}>
+                  🔒  Messages and calls are end-to-end encrypted. Only you and {recipientName || 'this contact'} can read or listen to them.{' '}
+                  <Text style={{ color: accent, fontWeight: '700' }}>Learn more.</Text>
+                </Text>
+              </TouchableOpacity>
+            );
+          }
+          return (
+            <Bubble
+              item={item} myId={myId} tx={tx} sub={sub} card={card} accent={accent}
+              bubbleOut={bubbleOut} bubbleIn={bubbleIn}
+              bubbleOutTx={bubbleOutTx} bubbleInTx={bubbleInTx}
+              onOpenImg={uri => setFullImgUri(uri)}
+              onPlayVid={uri => setVidUri(uri)}
+              onLongPress={item => { longPressFeedback(); setPickerMsg(item); }}
+              onReply={() => setReplyTo(item)}
+              tappedId={tappedId}
+              onTap={id => setTappedId(prev => prev === id ? null : id)}
+              reactions={reactions[item.id] || []}
+              onReact={emoji => toggleReaction(item.id, emoji)}
+            />
+          );
+        }}
         ListEmptyComponent={
           <View style={s.emptyBox}>
             <Text style={{ fontSize: 40, marginBottom: 10 }}>🔒</Text>
@@ -2414,6 +2497,17 @@ const s = StyleSheet.create({
   searchIcon: { fontSize: 14, marginRight: 6, opacity: 0.6 },
   searchInput:{ flex: 1, paddingVertical: 8, paddingHorizontal: 4, fontSize: 14 },
   pinBanner:  { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8, borderBottomWidth: 1 },
+
+  // Date separator pill — centered between message clusters from
+  // different days. Subtle pill so it doesn't compete with bubbles.
+  datePillWrap: { alignItems: 'center', paddingVertical: 10 },
+  datePill:     { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 12, borderWidth: 1 },
+  datePillTx:   { fontSize: 11, fontWeight: '700', letterSpacing: 0.4 },
+
+  // E2E intro banner pinned to the oldest end of new chats. Suppresses
+  // itself once the chat has accumulated more than ~50 messages.
+  e2eIntro:     { marginHorizontal: 24, marginVertical: 14, padding: 14, borderRadius: 12, borderWidth: 1 },
+  e2eIntroTx:   { fontSize: 12, lineHeight: 18, textAlign: 'center' },
   fsWrap:      { flex: 1, backgroundColor: 'rgba(0,0,0,0.97)', alignItems: 'center', justifyContent: 'center' },
   menuOverlay:  { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
   msgMenu:      { borderTopLeftRadius: 20, borderTopRightRadius: 20 },

@@ -67,6 +67,8 @@ const navigationRef = createNavigationContainerRef();
 // ── Core screens ──────────────────────────────────────────────
 import SplashScreen        from './src/screens/SplashScreen';
 import RegisterScreen      from './src/screens/RegisterScreen';
+import WelcomeScreen       from './src/screens/WelcomeScreen';
+import EncryptionInfoScreen from './src/screens/EncryptionInfoScreen';
 import BiometricLockScreen from './src/screens/BiometricLockScreen';
 import ChatsScreen         from './src/screens/ChatsScreen';
 import ChatRoomScreen      from './src/screens/ChatRoomScreen';
@@ -477,9 +479,16 @@ export default Sentry.wrap(function App() {
         <ShareIntentBridge navigationRef={navigationRef} />
         <Stack.Navigator screenOptions={{ headerShown:false, animation:'slide_from_right' }}>
           {!isLoggedIn ? (
-            <Stack.Screen name="Register">
-              {props => <RegisterScreen {...props} onLoginCallback={() => setIsLoggedIn(true)} />}
-            </Stack.Screen>
+            <>
+              {/* WelcomeScreen is the first thing a new install sees:
+                  premium-branded landing card with Create Account /
+                  Sign In CTAs. Both buttons push Register on top so
+                  the user can back-swipe to the welcome card. */}
+              <Stack.Screen name="Welcome"  component={WelcomeScreen} />
+              <Stack.Screen name="Register">
+                {props => <RegisterScreen {...props} onLoginCallback={() => setIsLoggedIn(true)} />}
+              </Stack.Screen>
+            </>
           ) : (
             <>
               <Stack.Screen name="Main"          component={MainTabs} />
@@ -495,6 +504,10 @@ export default Sentry.wrap(function App() {
               <Stack.Screen name="Profile"       component={ProfileScreen} />
               <Stack.Screen name="Channels"      component={ChannelsScreen} />
               <Stack.Screen name="PrivacyPolicy"       component={PrivacyPolicyScreen} />
+              {/* Tap target from any chat room's 🔒 badge or from
+                  Settings → Privacy & Security → "About End-to-end
+                  Encryption". Pure info screen, no actions. */}
+              <Stack.Screen name="EncryptionInfo"      component={EncryptionInfoScreen} />
               <Stack.Screen name="TermsOfService"      component={TermsOfServiceScreen} />
               <Stack.Screen name="CommunityGuidelines" component={CommunityGuidelinesScreen} />
               <Stack.Screen name="Settings"      component={SettingsScreen} />

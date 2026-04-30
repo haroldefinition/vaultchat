@@ -799,6 +799,15 @@ export default function SettingsScreen({ navigation }) {
               subText="View your vaulted chats, files, and media · Premium 👑"
               onPress={() => navigation.navigate('Vault')}
             />
+            {/* About End-to-end Encryption — pure info screen with
+                the "Your privacy is our priority" treatment. Same
+                screen reachable from the 🔒 badge in any chat room. */}
+            <Row
+              icon="🛡️"
+              label="About End-to-end Encryption"
+              subText="How VaultChat protects your messages and calls"
+              onPress={() => navigation.navigate('EncryptionInfo')}
+            />
             {/* Encrypted vault backup (Phase VV+XX). PIN is the
                 encryption key — same one that protects the live
                 vault — so we prompt for it, derive an AES key

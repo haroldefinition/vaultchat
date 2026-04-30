@@ -267,7 +267,7 @@ export default function ActiveCallScreen({ route, navigation }) {
   const { bg, card, tx, sub, border, inputBg, accent, isPremium, gold } = useTheme();
   const {
     mode, callId, roomId, myUserId, peerUserId,
-    recipientName, recipientPhone, callType,
+    recipientName, recipientPhone, recipientPhoto, callType,
     isConference: isConfParam,
   } = route.params || {};
 
@@ -813,9 +813,18 @@ export default function ActiveCallScreen({ route, navigation }) {
                 { borderColor: accent, shadowColor: accent,
                   transform: [{ scale: status === 'Connecting...' ? pulse : 1 }] },
               ]}>
-              <View style={[s.avatar, { backgroundColor: accent }]}>
-                <Text style={s.avatarTx}>{(recipientName || '?')[0]?.toUpperCase()}</Text>
-              </View>
+              {/* Use the contact photo when we have one — falls back
+                  to the colored initial so we always show *something*
+                  even pre-resolution. Matches what ChatRoom and
+                  Contacts do, so the avatar is visually consistent
+                  across the app. */}
+              {recipientPhoto ? (
+                <Image source={{ uri: recipientPhoto }} style={s.avatar} />
+              ) : (
+                <View style={[s.avatar, { backgroundColor: accent }]}>
+                  <Text style={s.avatarTx}>{(recipientName || '?')[0]?.toUpperCase()}</Text>
+                </View>
+              )}
             </Animated.View>
             {/* Right disperse waveform dots */}
             <DisperseDots
@@ -943,24 +952,24 @@ export default function ActiveCallScreen({ route, navigation }) {
           />
         </View>
         <View style={s.controlRow}>
-          {/* Video button intentionally hidden until task #64 (video calling UI)
-              lands. Once RTCView + camera switching are wired, restore this
-              control — it should toggle camera on/off when already in video,
-              or escalate a voice call into video when tapped from audio. */}
-          {__DEV__ && (
-            <CallBtn
-              theme={{ tx, sub, inputBg }}
-              Icon={VideoIcon}
-              label="Video"
-              onPress={() => {
-                haptic();
-                Alert.alert(
-                  'Video calls — dev preview',
-                  'Full video rendering (RTCView + PIP self-view + camera flip) lands with task #64. Dev button kept here so the layout stays balanced during testing.',
-                );
-              }}
-            />
-          )}
+          {/* Video — always visible in the voice-call control grid so
+              the 3x2 layout matches the premium mockup. Tapping it
+              today opens an "escalate to video" prompt; the actual
+              voice→video escalation flow is task #64 and will replace
+              the prompt with a real renegotiation when ready. */}
+          <CallBtn
+            theme={{ tx, sub, inputBg }}
+            Icon={VideoIcon}
+            label="Video"
+            onPress={() => {
+              haptic();
+              Alert.alert(
+                'Switch to video?',
+                'Voice → video escalation lands in v1.1. For a video call right now, end this call and tap the video icon in the chat header instead.',
+                [{ text: 'OK' }]
+              );
+            }}
+          />
           <CallBtn
             theme={{ tx, sub, inputBg }}
             Icon={Plus}

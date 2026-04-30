@@ -432,31 +432,40 @@ export default function GroupScreen({ navigation }) {
     ]);
   };
 
-  const renderGroup = ({ item }) => (
-    <TouchableOpacity
-      style={[s.row, { backgroundColor: card, borderBottomColor: border }]}
-      activeOpacity={0.7}
-      onPress={() => navigation.navigate('GroupChat', { groupId: item.id, groupName: item.name })}
-      onLongPress={() => openActionMenu(item)}
-      delayLongPress={400}>
-      <TouchableOpacity style={[s.avatar, { backgroundColor: accent + '22' }]}
-        onPress={() => { setGroupEditTarget({ ...item, firstName: item.name, phone: '', email: '', id: item.id }); setGroupEditModal(true); }}>
-        <Text style={s.avatarEmoji}>👥</Text>
-        {item.pinned && <View style={[s.pinBadge, { backgroundColor: accent }]}><Text style={s.pinText}>📌</Text></View>}
+  // Premium row: rounded-card treatment matching ContactsScreen.
+  // Free row: legacy flat-bordered list. Both share the same avatar
+  // edit shortcut, long-press menu, and tap-to-open behavior.
+  const renderGroup = ({ item }) => {
+    const rowStyle = premium
+      ? [s.cardRow, { backgroundColor: card, borderColor: border }]
+      : [s.row,     { backgroundColor: card, borderBottomColor: border }];
+
+    return (
+      <TouchableOpacity
+        style={rowStyle}
+        activeOpacity={0.85}
+        onPress={() => navigation.navigate('GroupChat', { groupId: item.id, groupName: item.name })}
+        onLongPress={() => openActionMenu(item)}
+        delayLongPress={400}>
+        <TouchableOpacity style={[s.avatar, { backgroundColor: accent + '22' }]}
+          onPress={() => { setGroupEditTarget({ ...item, firstName: item.name, phone: '', email: '', id: item.id }); setGroupEditModal(true); }}>
+          <Text style={s.avatarEmoji}>👥</Text>
+          {item.pinned && <View style={[s.pinBadge, { backgroundColor: accent }]}><Text style={s.pinText}>📌</Text></View>}
+        </TouchableOpacity>
+        <View style={s.info}>
+          <View style={s.topRow}>
+            <Text style={[s.name, { color: tx }]} numberOfLines={1}>{item.name}</Text>
+            <Text style={[s.time, { color: sub }]}>{item.time || ''}</Text>
+          </View>
+          <View style={s.bottomRow}>
+            <Text style={[s.preview, { color: sub }]} numberOfLines={1}>{item.hideAlerts ? '🔕 ' : '🔒 '}{item.lastMessage || 'Tap to open'}</Text>
+            <Text style={[s.members, { color: sub }]}>{item.memberCount || 1} member{(item.memberCount || 1) !== 1 ? 's' : ''}</Text>
+          </View>
+        </View>
+        <Text style={[s.chevron, { color: sub }]}>›</Text>
       </TouchableOpacity>
-      <View style={s.info}>
-        <View style={s.topRow}>
-          <Text style={[s.name, { color: tx }]} numberOfLines={1}>{item.name}</Text>
-          <Text style={[s.time, { color: sub }]}>{item.time || ''}</Text>
-        </View>
-        <View style={s.bottomRow}>
-          <Text style={[s.preview, { color: sub }]} numberOfLines={1}>{item.hideAlerts ? '🔕 ' : '🔒 '}{item.lastMessage || 'Tap to open'}</Text>
-          <Text style={[s.members, { color: sub }]}>{item.memberCount || 1} member{(item.memberCount || 1) !== 1 ? 's' : ''}</Text>
-        </View>
-      </View>
-      <Text style={[s.chevron, { color: sub }]}>›</Text>
-    </TouchableOpacity>
-  );
+    );
+  };
 
   return (
     <SafeAreaView style={[s.safe, { backgroundColor: bg }]}>
@@ -476,7 +485,12 @@ export default function GroupScreen({ navigation }) {
             <Text style={{ color: accent, fontSize: 30, fontWeight: '300', lineHeight: 32 }}>‹</Text>
           </TouchableOpacity>
         ) : null}
-        <Text style={[s.headerTitle, { color: tx, flex: 1 }]}>Groups</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+          <Text style={[s.headerTitle, { color: tx }]}>Groups</Text>
+          {/* Crown next to title for premium users — matches the rest
+              of the premium chrome (Chats / Vault / Contacts). */}
+          {premium && <Text style={{ fontSize: 18, marginLeft: 2 }}>👑</Text>}
+        </View>
         <TouchableOpacity style={[s.newBtn, { backgroundColor: accent }]} onPress={() => setCreateModal(true)}>
           <Text style={s.newBtnText}>+ New Group</Text>
         </TouchableOpacity>
@@ -634,6 +648,8 @@ const s = StyleSheet.create({
   newBtn:        { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
   newBtnText:    { color: '#000', fontWeight: '700', fontSize: 14 },
   row:           { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth },
+  // Premium-only — rounded card row matching ContactsScreen
+  cardRow:       { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginBottom: 8, paddingVertical: 12, paddingHorizontal: 12, borderRadius: 14, borderWidth: 1 },
   avatar:        { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', marginRight: 12, position: 'relative' },
   avatarEmoji:   { fontSize: 22 },
   pinBadge:      { position: 'absolute', bottom: -2, right: -2, width: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
