@@ -4,13 +4,12 @@ import {
   StyleSheet, ActivityIndicator, Dimensions, KeyboardAvoidingView, Platform,
 } from 'react-native';
 
-// Giphy API. The default value below is Giphy's PUBLIC BETA KEY,
-// shared by every project that hasn't bothered to register their
-// own — it's heavily rate-limited and frequently returns 429 / 403.
-// To get reliable GIF search in your build, register a free app
-// at https://developers.giphy.com/dashboard/apps and replace
-// the constant below with your own key.
-const GIPHY_API_KEY = 'dc6zaTOxFJmzC';
+// Giphy API. This is VaultChat's own SDK key, registered to
+// AUXXILUS MEDIA LLC. Giphy SDK keys are designed to be embedded
+// in client apps — they're not secret, they're rate-limited per
+// app. If we ever need to rotate without a rebuild we can move
+// this into app.json extra + Constants.expoConfig.extra.
+const GIPHY_API_KEY = 'Kz1uQfMZ8KZeSKKwaKzXfrlc6spV7yKq';
 const GIPHY_BASE    = 'https://api.giphy.com/v1/gifs';
 const USING_PUBLIC_KEY = GIPHY_API_KEY === 'dc6zaTOxFJmzC';
 const COL_WIDTH     = (Dimensions.get('window').width - 48) / 2;
