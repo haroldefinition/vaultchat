@@ -686,16 +686,15 @@ export default function SettingsScreen({ navigation }) {
             <Row icon="🚫" label="Blocked Contacts" subText={`${blockedContacts.length} blocked`} onPress={() => setPage('blocked')} />
           </Section>
           <Section title="SECURITY">
-            <Row icon="🔐" label="Biometric Lock" subText="Face ID / Touch ID on app open" right={
-              <Switch value={biometricEnabled} onValueChange={async v => {
-                const supported = await checkBiometricSupport();
-                if (!supported && v) { Alert.alert('Not Available', 'Biometric authentication is not set up on this device.'); return; }
-                setBiometricEnabled(v);
-                await AsyncStorage.setItem('vaultchat_biometric', v ? 'true' : 'false');
-              }} trackColor={{ false: '#333', true: accent }} thumbColor="#fff" />
-            } />
-            <Row icon="🔢" label="Set Real PIN" subText={realPin ? '••••••' : 'Not set'} onPress={() => { setPinType('real'); setPinInput(''); setPinModal(true); }} />
-            <Row icon="🎭" label="Decoy PIN" subText={decoyPin ? 'Set — shows empty chats' : 'Not set'} onPress={() => { setPinType('decoy'); setPinInput(''); setPinModal(true); }} />
+            {/* Biometric Lock + Real PIN + Decoy PIN were removed
+                per Harold (2026-04-29). The product surface is now
+                "Vault PIN only" — users open the app without any
+                front-door unlock; only chats they explicitly move
+                into the vault are protected by a PIN. The underlying
+                code (BiometricLockScreen, securePinStore real/decoy
+                keys) is still there and intentionally kept for a
+                possible future re-introduction, just no longer
+                exposed in the UI. */}
             <Row
               icon="🛡️"
               label="Vault PIN"

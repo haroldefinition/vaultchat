@@ -224,25 +224,22 @@ export default function App() {
       clearBadge(); // clear badge when app opens
       flushQueue(); // retry any queued messages from offline period
 
-      // Flush queue + clear badge + enforce 5-min lock timeout on foreground
-      let backgroundedAt = null;
-      const LOCK_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
-
+      // Flush queue + clear badge on foreground.
+      //
+      // Real PIN / Biometric front-door lock was removed per Harold
+      // (2026-04-29) — users open the app without any unlock screen.
+      // Only the Vault PIN remains (it gates specific chats moved
+      // into the vault, not the whole app). The 5-min lock timeout
+      // logic is preserved below as a comment for easy re-enable
+      // if we ever bring back the front-door lock.
+      //
+      //   let backgroundedAt = null;
+      //   const LOCK_TIMEOUT_MS = 5 * 60 * 1000;
+      //   ... if (biometricOn) setIsLocked(true); ...
       const appStateSub = AppState.addEventListener('change', async state => {
-        if (state === 'background' || state === 'inactive') {
-          backgroundedAt = Date.now();
-        } else if (state === 'active') {
+        if (state === 'active') {
           flushQueue();
           clearBadge();
-          // Lock if biometric is enabled and app was backgrounded for >5 minutes
-          if (backgroundedAt !== null) {
-            const elapsed = Date.now() - backgroundedAt;
-            backgroundedAt = null;
-            if (elapsed >= LOCK_TIMEOUT_MS) {
-              const biometricOn = await isBiometricEnabled();
-              if (biometricOn) setIsLocked(true);
-            }
-          }
         }
       });
 
@@ -392,8 +389,9 @@ export default function App() {
         setIsLoggedIn(!!stored);
       }
 
-      const locked = await isBiometricEnabled();
-      if (locked) setIsLocked(true);
+      // Front-door lock removed per Harold (2026-04-29). No
+      // BiometricLockScreen on launch — user goes straight in.
+      // Vault PIN still gates the vault contents inside the app.
       setReady(true);
       return cleanup;
     })();
@@ -409,7 +407,11 @@ export default function App() {
     </GestureHandlerRootView>
   );
 
-  if (isLocked) return (
+  // Front-door lock disabled (2026-04-29) — branch kept defensively
+  // in case `setIsLocked(true)` is ever called from another path,
+  // but with the Settings toggle removed and the AppState handler
+  // skipping the lock check, this should never render in practice.
+  if (false && isLocked) return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <UnreadProvider>
       <ThemeProvider>
