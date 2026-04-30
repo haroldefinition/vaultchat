@@ -4,8 +4,15 @@ import {
   StyleSheet, ActivityIndicator, Dimensions, KeyboardAvoidingView, Platform,
 } from 'react-native';
 
+// Giphy API. The default value below is Giphy's PUBLIC BETA KEY,
+// shared by every project that hasn't bothered to register their
+// own — it's heavily rate-limited and frequently returns 429 / 403.
+// To get reliable GIF search in your build, register a free app
+// at https://developers.giphy.com/dashboard/apps and replace
+// the constant below with your own key.
 const GIPHY_API_KEY = 'dc6zaTOxFJmzC';
 const GIPHY_BASE    = 'https://api.giphy.com/v1/gifs';
+const USING_PUBLIC_KEY = GIPHY_API_KEY === 'dc6zaTOxFJmzC';
 const COL_WIDTH     = (Dimensions.get('window').width - 48) / 2;
 
 // Fallback emoji GIFs shown if API fails or returns nothing
@@ -122,39 +129,44 @@ export default function GifPickerModal({ visible, onClose, onSelectGif, colors }
 
           {/* Header */}
           <View style={s.headerRow}>
-            <Text style={[s.headerTitle, { color: tx }]}>
-              {useFallback ? 'Send an Emoji' : 'Send a GIF'}
-            </Text>
+            <Text style={[s.headerTitle, { color: tx }]}>GIFs & Memes</Text>
             <TouchableOpacity onPress={onClose} style={[s.closeBtn, { backgroundColor: accent }]}>
-              <Text style={{ color: '#000', fontWeight: '900', fontSize: 15 }}>✕</Text>
+              <Text style={{ color: '#fff', fontWeight: '900', fontSize: 15 }}>✕</Text>
             </TouchableOpacity>
           </View>
 
-          {/* Search — only show when API is working */}
-          {!useFallback && (
-            <View style={[s.searchRow, { backgroundColor: inputBg, borderColor: border }]}>
-              <Text style={{ color: sub, marginRight: 8 }}>🔍</Text>
-              <TextInput
-                style={[s.searchInput, { color: tx }]}
-                placeholder="Search GIFs…"
-                placeholderTextColor={sub}
-                value={query}
-                onChangeText={setQuery}
-                onSubmitEditing={() => fetchGifs(query)}
-                returnKeyType="search"
-              />
-              {query.length > 0 && (
-                <TouchableOpacity onPress={() => { setQuery(''); fetchGifs(''); }}>
-                  <Text style={{ color: sub, fontSize: 16, paddingHorizontal: 8 }}>✕</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          )}
+          {/* Search — ALWAYS visible. Even when the Giphy API is
+              rate-limited and we're showing the emoji fallback,
+              keeping the search bar gives the user a path to
+              retry / type a new query that may succeed. */}
+          <View style={[s.searchRow, { backgroundColor: inputBg, borderColor: border }]}>
+            <Text style={{ color: sub, marginRight: 8 }}>🔍</Text>
+            <TextInput
+              style={[s.searchInput, { color: tx }]}
+              placeholder="Search GIFs and memes…"
+              placeholderTextColor={sub}
+              value={query}
+              onChangeText={setQuery}
+              onSubmitEditing={() => fetchGifs(query)}
+              returnKeyType="search"
+            />
+            {query.length > 0 && (
+              <TouchableOpacity onPress={() => { setQuery(''); fetchGifs(''); }}>
+                <Text style={{ color: sub, fontSize: 16, paddingHorizontal: 8 }}>✕</Text>
+              </TouchableOpacity>
+            )}
+          </View>
 
-          {/* Error message */}
-          {error && (
+          {/* API key warning — surfaces the real cause of the
+              fallback so future-you knows to drop in a real key. */}
+          {(error || useFallback) && USING_PUBLIC_KEY && (
             <Text style={[s.errorText, { color: sub }]}>
-              Can't load GIFs right now — sending emoji instead
+              GIF service rate-limited — using the public Giphy key. Add a free key from developers.giphy.com to GifPickerModal.js for reliable search.
+            </Text>
+          )}
+          {error && !USING_PUBLIC_KEY && (
+            <Text style={[s.errorText, { color: sub }]}>
+              Can’t reach the GIF service right now. Try again in a moment.
             </Text>
           )}
 
@@ -162,17 +174,20 @@ export default function GifPickerModal({ visible, onClose, onSelectGif, colors }
           {loading ? (
             <View style={s.loader}>
               <ActivityIndicator size="large" color={accent} />
-              <Text style={{ color: sub, marginTop: 12 }}>Loading GIFs…</Text>
+              <Text style={{ color: sub, marginTop: 12 }}>Loading…</Text>
             </View>
           ) : useFallback ? (
-            <FlatList
-              data={FALLBACK_GIFS}
-              keyExtractor={item => item.id}
-              numColumns={4}
-              contentContainerStyle={s.fallbackGrid}
-              renderItem={renderFallback}
-              showsVerticalScrollIndicator={false}
-            />
+            <>
+              <Text style={[s.sectionLabel, { color: sub }]}>QUICK REACTIONS</Text>
+              <FlatList
+                data={FALLBACK_GIFS}
+                keyExtractor={item => item.id}
+                numColumns={4}
+                contentContainerStyle={s.fallbackGrid}
+                renderItem={renderFallback}
+                showsVerticalScrollIndicator={false}
+              />
+            </>
           ) : (
             <FlatList
               data={gifs}
@@ -184,7 +199,7 @@ export default function GifPickerModal({ visible, onClose, onSelectGif, colors }
               ListEmptyComponent={
                 <View style={s.emptyBox}>
                   <Text style={{ fontSize: 40, marginBottom: 10 }}>🎭</Text>
-                  <Text style={{ color: sub }}>No GIFs found</Text>
+                  <Text style={{ color: sub }}>No results — try another search.</Text>
                 </View>
               }
             />
@@ -209,6 +224,7 @@ const s = StyleSheet.create({
   gifGrid:      { paddingHorizontal: 12, gap: 6 },
   gifItem:      { width: COL_WIDTH, height: COL_WIDTH * 0.75, margin: 3, borderRadius: 12, overflow: 'hidden', backgroundColor: '#111' },
   gifImg:       { width: '100%', height: '100%' },
+  sectionLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 0.5, marginLeft: 20, marginBottom: 10, marginTop: 4 },
   fallbackGrid: { paddingHorizontal: 16, paddingBottom: 20 },
   fallbackItem: { flex: 1, margin: 6, borderRadius: 14, paddingVertical: 14, alignItems: 'center', justifyContent: 'center' },
   emptyBox:     { alignItems: 'center', paddingTop: 40 },

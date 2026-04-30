@@ -1677,7 +1677,7 @@ export default function ChatRoomScreen({ route, navigation }) {
     { icon: '📸', label: 'Camera',    type: 'camera'   },
     { icon: '👁️', label: 'View Once', type: 'vonce'    },
     { icon: '📁', label: 'File',      type: 'file'     },
-    { icon: '🎭', label: 'GIF',       type: 'gif'      },
+    { icon: '🎭', label: 'GIFs & Memes', type: 'gif'    },
     { icon: '😀', label: 'Emoji',     type: 'emoji'    },
     { icon: '🔵', label: 'AirDrop',   type: 'airdrop'  },
     { icon: '📍', label: 'Location',  type: 'location' },
