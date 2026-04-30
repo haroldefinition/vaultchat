@@ -462,7 +462,21 @@ export default function GroupScreen({ navigation }) {
     <SafeAreaView style={[s.safe, { backgroundColor: bg }]}>
       <StatusBar barStyle="light-content" />
       <View style={[s.header, { backgroundColor: bg, borderBottomColor: border }]}>
-        <Text style={[s.headerTitle, { color: tx }]}>Groups</Text>
+        {/* Back chevron — GroupScreen used to be a bottom tab (no back
+            button needed). Now that it's pushed onto the stack from
+            the "Groups" chip on Chats, we render the chevron whenever
+            there's a screen to pop back to. Falls back to a spacer
+            View so the title centering doesn't shift when GroupScreen
+            is reached from a tab path with no stack history. */}
+        {navigation.canGoBack && navigation.canGoBack() ? (
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            style={{ paddingRight: 12, paddingVertical: 4 }}>
+            <Text style={{ color: accent, fontSize: 30, fontWeight: '300', lineHeight: 32 }}>‹</Text>
+          </TouchableOpacity>
+        ) : null}
+        <Text style={[s.headerTitle, { color: tx, flex: 1 }]}>Groups</Text>
         <TouchableOpacity style={[s.newBtn, { backgroundColor: accent }]} onPress={() => setCreateModal(true)}>
           <Text style={s.newBtnText}>+ New Group</Text>
         </TouchableOpacity>
