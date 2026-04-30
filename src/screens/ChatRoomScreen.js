@@ -1853,9 +1853,19 @@ export default function ChatRoomScreen({ route, navigation }) {
       <FlatList
         ref={listRef}
         data={(() => {
+          // Per Harold (2026-04-30): hide undecryptable messages from
+          // the rendered list entirely. The placeholder string lives
+          // on inside the cache so safeDecrypt + decryptRow have a
+          // sentinel to write, but users never see it. Reasoning:
+          // those messages are unrecoverable (forward secrecy); the
+          // placeholder text just clutters the chat. New messages
+          // will decrypt fine — the filter only affects ones whose
+          // keys are no longer on this device.
+          const PLACEHOLDER = '[Can’t decrypt this message on this device]';
+          const visible = messages.filter(m => (m.content || '') !== PLACEHOLDER);
           const list = searchQuery.trim()
-            ? messages.filter(m => (m.content || '').toLowerCase().includes(searchQuery.toLowerCase()))
-            : messages;
+            ? visible.filter(m => (m.content || '').toLowerCase().includes(searchQuery.toLowerCase()))
+            : visible;
           // Pre-enrich the message list with non-message rows that get
           // dispatched in renderItem:
           //   - 'date': "Today" / "Yesterday" / weekday separator pill

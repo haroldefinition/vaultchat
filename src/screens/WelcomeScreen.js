@@ -39,14 +39,14 @@ export default function WelcomeScreen({ navigation }) {
 
       {/* Logo + wordmark block — vertically centered hero */}
       <View style={s.hero}>
-        <View style={[s.logoWrap, { backgroundColor: brand + '18', borderColor: brand + '44' }]}>
-          {/* Crown emoji above the V monogram is the simplest way to
-              echo the mockup's crowned-V mark without shipping a
-              new SVG/PNG. Replace with an Image source if a polished
-              brand asset becomes available. */}
-          <Text style={s.crown}>👑</Text>
-          <Text style={[s.monogram, { color: brand }]}>V</Text>
-        </View>
+        {/* Real brand logo (assets/vaultchat-logo.png) — blue shield
+            with lock + chat bubble. Replaces the placeholder
+            crown+V monogram. */}
+        <Image
+          source={require('../../assets/vaultchat-logo.png')}
+          style={s.logoImg}
+          resizeMode="contain"
+        />
 
         <Text style={[s.brandName, { color: tx }]}>VAULTCHAT</Text>
         <Text style={[s.brandSuffix, { color: brand }]}>PREMIUM</Text>
@@ -86,14 +86,10 @@ const s = StyleSheet.create({
   container:    { flex: 1, paddingHorizontal: 32 },
 
   hero:         { alignItems: 'center', flex: 1 },
-  logoWrap:     {
-    width: 132, height: 132, borderRadius: 30,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1.5, marginBottom: 28,
-    position: 'relative',
-  },
-  crown:        { position: 'absolute', top: -12, fontSize: 28 },
-  monogram:     { fontSize: 64, fontWeight: '900', letterSpacing: -2, lineHeight: 70 },
+  // Brand logo — sized to feel hero-sized but not overpowering on
+  // smaller phones. resizeMode="contain" keeps the shield crisp at
+  // any density.
+  logoImg:      { width: 160, height: 160, marginBottom: 24 },
 
   brandName:    { fontSize: 26, fontWeight: '900', letterSpacing: 4, marginBottom: 2 },
   brandSuffix:  { fontSize: 13, fontWeight: '800', letterSpacing: 6, marginBottom: 14 },
