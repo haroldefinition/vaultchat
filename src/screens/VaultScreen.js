@@ -46,9 +46,16 @@ import {
   isUnlocked as isVaultUnlocked,
   lock as lockVault,
   listVaultedIds,
+  hasVaultPin,
 } from '../services/vault';
 import PremiumModal from '../components/PremiumModal';
 import VaultPinPrompt from '../components/VaultPinPrompt';
+import VaultPinSetupModal from '../components/VaultPinSetupModal';
+
+// AsyncStorage flag — set when we've shown the first-run setup modal
+// (whether the user created a PIN or skipped). Prevents the modal
+// from popping every time they visit the Vault.
+const SETUP_SEEN_KEY = 'vaultchat_vault_setup_seen';
 
 export default function VaultScreen({ navigation }) {
   // gold + isPremium come from theme.js premium polish — used to
@@ -64,6 +71,10 @@ export default function VaultScreen({ navigation }) {
   // Inline PIN prompt — opens when the user taps the lock pill on
   // the bottom protection banner while the vault is still locked.
   const [pinPromptOpen,   setPinPromptOpen]   = useState(false);
+  // First-run PIN setup modal — pops on first Vault visit when the
+  // user is premium and has no PIN yet (so they don't have to hunt
+  // for the Settings row). Tracked locally with `setupModalOpen`.
+  const [setupModalOpen,  setSetupModalOpen]  = useState(false);
 
   // Refresh on every focus — vault state can change from elsewhere
   // (Settings PIN setup, chat list "Move to Vault" actions).
@@ -90,6 +101,25 @@ export default function VaultScreen({ navigation }) {
       } catch {}
       setStats(prev => ({ ...prev, chats: ids.length, biometrics: bio }));
       setUnlocked(isVaultUnlocked());
+
+      // First-run Vault setup — premium users who don't have a PIN
+      // yet AND haven't seen the setup modal before get a friendly
+      // in-screen guide so they don't have to know about Settings →
+      // Vault PIN. We don't show it to free users (they can vault
+      // chats but the PIN is optional for the basic flow), and we
+      // never show it twice (the seen flag persists across launches).
+      if (isPrem) {
+        try {
+          const [hasPin, seenRaw] = await Promise.all([
+            hasVaultPin(),
+            AsyncStorage.getItem(SETUP_SEEN_KEY),
+          ]);
+          if (cancelled) return;
+          if (!hasPin && !seenRaw) {
+            setSetupModalOpen(true);
+          }
+        } catch {}
+      }
     })();
     return () => { cancelled = true; };
   }, []));
@@ -278,6 +308,26 @@ export default function VaultScreen({ navigation }) {
             Alert.alert('Vault Unlocked', 'Your locked chats are visible again.');
           }}
           onSetup={() => navigation.navigate('Settings')}
+        />
+
+        {/* First-run setup — premium-only, fires once when the user
+            opens the Vault and no PIN exists. The "seen" flag is set
+            on either successful create OR explicit skip, so the
+            modal never re-pops. */}
+        <VaultPinSetupModal
+          visible={setupModalOpen}
+          onClose={async () => {
+            setSetupModalOpen(false);
+            try { await AsyncStorage.setItem(SETUP_SEEN_KEY, '1'); } catch {}
+          }}
+          onCreated={async () => {
+            setSetupModalOpen(false);
+            try { await AsyncStorage.setItem(SETUP_SEEN_KEY, '1'); } catch {}
+            Alert.alert(
+              'Vault PIN created',
+              'You can now move chats into the vault from the chat list (long-press a row → Move to Vault).'
+            );
+          }}
         />
       </View>
     );
