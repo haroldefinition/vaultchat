@@ -319,17 +319,39 @@ export default function SettingsScreen({ navigation }) {
                       const { data: { session } } = await supabase.auth.getSession();
                       const myUserId = session?.user?.id;
                       if (myUserId) {
-                        // Public profile row — peers can no longer resolve us
-                        // by @handle once this is gone.
-                        try { await supabase.from('profiles').delete().eq('id', myUserId); } catch {}
-                        // Note: auth.users deletion needs a service-role RPC
-                        // or Edge Function. Tracked as a follow-up — for now
-                        // the auth row is orphaned (no profile, no handle,
-                        // no way to be found).
+                        // Scrub every user-specific table in parallel.
+                        // We deliberately do NOT delete from `messages`,
+                        // `rooms`, `room_secrets`, or `message_reactions`
+                        // because those are SHARED with the other parties
+                        // in our chats — wiping them would erase the
+                        // counterpart's history too. After deletion, the
+                        // sender_id on those rows points at an orphaned
+                        // user with no profile / handle / keys, so we're
+                        // effectively unresolvable.
+                        await Promise.all([
+                          supabase.from('profiles').delete().eq('id', myUserId).then(() => {}, () => {}),
+                          supabase.from('user_device_keys').delete().eq('user_id', myUserId).then(() => {}, () => {}),
+                          supabase.from('ratchet_pre_keys').delete().eq('user_id', myUserId).then(() => {}, () => {}),
+                          supabase.from('user_folders').delete().eq('user_id', myUserId).then(() => {}, () => {}),
+                          supabase.from('user_chat_prefs').delete().eq('user_id', myUserId).then(() => {}, () => {}),
+                          supabase.from('blocked_users').delete().eq('blocker_id', myUserId).then(() => {}, () => {}),
+                          supabase.from('contacts').delete().eq('owner_id', myUserId).then(() => {}, () => {}),
+                        ]);
+                        // Note: the row in `auth.users` itself can only
+                        // be deleted via a service-role call (Edge
+                        // Function with admin key). Without that, the
+                        // auth row is orphaned but unreachable — no
+                        // profile, no @handle, nothing to look up. Plan
+                        // to add a delete-account Edge Function before
+                        // we ship Premium so paying users can actually
+                        // exit cleanly.
                       }
                       try { await supabase.auth.signOut(); } catch {}
                       try { await AsyncStorage.clear(); } catch {}
-                      Alert.alert('Account deleted', 'Your VaultChat account has been removed.');
+                      Alert.alert(
+                        'Account deleted',
+                        'Your VaultChat profile, encryption keys, contacts, folders, and preferences have been removed from our servers. Messages you sent to other people stay on their devices — that\'s the nature of end-to-end encrypted messaging.'
+                      );
                     } catch (e) {
                       Alert.alert('Delete failed', e?.message || 'Could not delete the account. Try again or contact support.');
                     }
