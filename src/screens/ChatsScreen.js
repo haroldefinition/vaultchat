@@ -265,15 +265,25 @@ export default function ChatsScreen({ navigation }) {
     // the free 3-pin cap. Premium users have unlimited pins.
     const willPin = !selected?.pinned;
     if (willPin && !premium) {
-      const currentlyPinned = chats.filter(c => c.pinned && c.id !== selected.id).length;
+      // Bug fix (2026-04-29): was filtering with `c.id !== selected.id`,
+      // which collides when multiple chats have no id field (only
+      // roomId) — `undefined !== undefined` is false so the count
+      // omitted unrelated chats. Use sameChat so the comparison
+      // falls back through roomId.
+      const currentlyPinned = chats.filter(c => c.pinned && !sameChat(c, selected)).length;
       if (currentlyPinned >= FREE_PIN_CAP) {
         setActionModal(false);
         setTimeout(() => setPremiumModalVis(true), 200);
         return;
       }
     }
+    // Bug fix (2026-04-29): was `c.id === selected.id`, which
+    // matched ALL chats whose id was undefined when selected.id was
+    // also undefined — pinning one chat secretly pinned every
+    // id-less chat. Use sameChat so the match falls back through
+    // roomId, never matching across distinct rooms.
     const updated = chats
-      .map(c => c.id === selected.id ? { ...c, pinned: !c.pinned } : c)
+      .map(c => sameChat(c, selected) ? { ...c, pinned: !c.pinned } : c)
       .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
     await saveChats(updated);
     syncPrefForRoom(selected?.roomId || selected?.id, { pinned: !selected?.pinned }).catch(() => {});
@@ -281,8 +291,10 @@ export default function ChatsScreen({ navigation }) {
   }
 
   async function archiveChat() {
+    // Same bug class as pinChat — use sameChat instead of `c.id ===`
+    // so id-less chats don't all flip together.
     const updated = chats.map(c =>
-      c.id === selected.id ? { ...c, archived: !c.archived } : c
+      sameChat(c, selected) ? { ...c, archived: !c.archived } : c
     );
     await saveChats(updated);
     syncPrefForRoom(selected?.roomId || selected?.id, { archived: !selected?.archived }).catch(() => {});
@@ -355,7 +367,9 @@ export default function ChatsScreen({ navigation }) {
     Alert.alert('Delete Chat', `Delete chat with ${selected.name || 'this contact'}?`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: async () => {
-        await saveChats(chats.filter(c => c.id !== selected.id));
+        // Same bug class as pinChat — use sameChat so id-less chats
+        // don't all delete together when one is selected.
+        await saveChats(chats.filter(c => !sameChat(c, selected)));
         setActionModal(false);
       }},
     ]);
