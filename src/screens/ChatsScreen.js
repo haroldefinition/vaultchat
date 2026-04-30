@@ -579,15 +579,17 @@ export default function ChatsScreen({ navigation }) {
         </TouchableOpacity>
       </View>
 
-      {/* Premium-only: floating search bar that sits on the purple
-          header background, BETWEEN the title row and the pulled-tab
-          white area below. Translucent white-on-purple look matches
-          the mockup. */}
+      {/* Premium-only: floating translucent search bar inside the
+          purple header band. Updated 2026-04-30 to match the new
+          mockup — paddingBottom dropped from 40 → 14 since we no
+          longer need a "shoulder" for the white pulled-tab to
+          overlap into. The chip row + chat list now flow directly
+          on bg below the header, no curve. */}
       {premium && (
         <View style={{
           backgroundColor: headerBg,           // purple, extends header band down
           paddingHorizontal: 16,
-          paddingBottom: 40,                   // generous purple "shoulder" below the search bar — the white tab overlaps INTO this 40px so the curve has purple to render against
+          paddingBottom: 14,
           paddingTop: 4,
         }}>
           <View style={{
@@ -621,22 +623,19 @@ export default function ChatsScreen({ navigation }) {
           onFolderPillPress); the pills are visible either way so
           non-premium users discover the upsell naturally.
 
-          Premium: this row IS the pulled white tab. The negative
-          marginTop is what makes the curve visible — without overlap
-          into the purple band above, rounded corners would just sit
-          on white-on-white and look flat. -24 carves a 24px-deep
-          arc into the purple "shoulder" above (which is 40px tall),
-          leaving 16px of clear purple between the search bar and
-          the start of the curve. */}
+          Premium chrome (replaced 2026-04-30 per Harold's mockup
+          review): the previous "pulled white tab" treatment with
+          marginTop:-24 + borderTopRadius:44 has been removed in
+          favor of the cleaner uniform-canvas look in the new
+          mockup. The chip row now flows directly from the purple
+          header into the rest of the screen on the bg color, no
+          curve, matching the mockup exactly. */}
       <View style={[
         s.folderRow,
         { borderBottomColor: border },
         premium && {
           backgroundColor: bg,
-          borderTopLeftRadius: 44,
-          borderTopRightRadius: 44,
-          marginTop: -24,
-          paddingTop: 28,
+          paddingTop: 12,
           paddingBottom: 10,
           borderBottomWidth: 0,
         },
