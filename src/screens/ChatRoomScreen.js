@@ -15,6 +15,7 @@ import { uploadMedia } from '../services/mediaUpload';
 import ContactEditModal from '../components/ContactEditModal';
 import ReplyPreview       from '../components/ReplyPreview';
 import StagedPhotosPicker from '../components/StagedPhotosPicker';
+import GifPickerModal     from '../components/GifPickerModal';
 import { successFeedback, longPressFeedback, taptic, impactMedium } from '../services/haptics';
 import SwipeableRow    from '../components/SwipeableRow';
 import ZoomableImage   from '../components/ZoomableImage';
@@ -2082,29 +2083,30 @@ export default function ChatRoomScreen({ route, navigation }) {
         </TouchableOpacity>
       </Modal>
 
-      {/* GIF modal */}
-      <Modal visible={gifModal} transparent animationType="slide">
-        <View style={s.overlay}>
-          <View style={[s.sheet, { backgroundColor: card, maxHeight: '60%' }]}>
-            <View style={[s.handle, { backgroundColor: border }]} />
-            <View style={s.sheetHeaderRow}>
-              <Text style={[s.sheetTitle, { color: tx }]}>GIFs</Text>
-              <TouchableOpacity style={[s.sheetXBtn, { backgroundColor: accent }]} onPress={() => setGifModal(false)}>
-                <Text style={s.sheetXTx}>✕</Text>
-              </TouchableOpacity>
-            </View>
-            <View style={s.gifGrid}>
-              {GIFS.map((g, i) => (
-                <TouchableOpacity key={i} style={[s.gifItem, { backgroundColor: inputBg }]}
-                  onPress={() => { setGifModal(false); sendText(g.msg); }}>
-                  <Text style={{ fontSize: 32 }}>{g.emoji}</Text>
-                  <Text style={{ fontSize: 10, color: sub, marginTop: 4 }}>{g.name}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        </View>
-      </Modal>
+      {/* GIFs & Memes — real Giphy-powered search picker. Replaces
+          the previous inline modal that only showed the static
+          emoji-shortcut grid. URL-based GIFs are sent with the
+          IMG: prefix so SinglePhoto renders them via React Native's
+          <Image> (which handles animated GIFs natively); the
+          fallback emoji shortcuts in GifPickerModal still send as
+          plain text via sendText. */}
+      <GifPickerModal
+        visible={gifModal}
+        onClose={() => setGifModal(false)}
+        onSelectGif={(gif) => {
+          setGifModal(false);
+          if (!gif) return;
+          if (gif.isEmoji) {
+            // Fallback emoji — send as plain text
+            sendText(gif.url);
+          } else if (gif.url) {
+            // Real Giphy GIF — send as IMG:<url> so SinglePhoto
+            // picks it up and renders the animated frame
+            sendText(`IMG:${gif.url}`);
+          }
+        }}
+        colors={{ bg, card, tx, sub, border, inputBg, accent }}
+      />
 
       {/* Emoji modal */}
       <Modal visible={emojiModal} transparent animationType="slide">
