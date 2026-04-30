@@ -290,7 +290,12 @@ function Bubble({ item, currentUserId, colors, onFullScreen, onPlay, onLongPress
 export default function GroupChatScreen({ route, navigation }) {
   const { groupId, groupName: initialGroupName } = route.params || {};
   const colors = useTheme();
-  const { bg, card, tx, sub, border, inputBg, accent } = colors;
+  const { bg, card, tx, sub, border, inputBg, accent, isPremium } = colors;
+  // Per Harold (2026-04-29): premium users get real gold call/video
+  // icons in the chat header for a "premium feel". Free users keep
+  // the accent color so their UI doesn't change. Same rule as
+  // ChatRoomScreen — kept here so 1:1 and group chats look consistent.
+  const callIconColor = isPremium ? '#F5C518' : accent;
   // Safe-area insets — used for the long-press menu so its bottom
   // row clears the home indicator on every device geometry.
   const insets = useSafeAreaInsets();
@@ -1209,13 +1214,13 @@ export default function GroupChatScreen({ route, navigation }) {
           onPress={() => startGroupCall('voice')}
           accessibilityLabel="Start group voice call"
           style={{ paddingHorizontal: 6 }}>
-          <Phone size={20} color={accent} strokeWidth={2} />
+          <Phone size={20} color={callIconColor} strokeWidth={2} />
         </TouchableOpacity>
         <TouchableOpacity
           onPress={() => startGroupCall('video')}
           accessibilityLabel="Start group video call"
           style={{ paddingHorizontal: 6 }}>
-          <VideoIcon size={20} color={accent} strokeWidth={2} />
+          <VideoIcon size={20} color={callIconColor} strokeWidth={2} />
         </TouchableOpacity>
         <TouchableOpacity onPress={leaveGroup} style={{ paddingHorizontal: 8 }}>
           <Text style={{ fontSize: 18, color: sub }}>⋯</Text>

@@ -406,7 +406,12 @@ function Bubble({ item, myId, tx, sub, card, accent, bubbleOut, bubbleIn, bubble
 // ── Main Screen ───────────────────────────────────────────────
 export default function ChatRoomScreen({ route, navigation }) {
   const { bg, card, tx, sub, border, inputBg, accent,
-          bubbleOut, bubbleIn, bubbleOutTx, bubbleInTx } = useTheme();
+          bubbleOut, bubbleIn, bubbleOutTx, bubbleInTx, isPremium } = useTheme();
+  // Per Harold (2026-04-29): the call/video icons in the chat header
+  // should pop in real gold for premium users to drive the "premium
+  // feel" — purple makes them blend into the rest of the accent. Free
+  // users keep the accent color so their UI doesn't change.
+  const callIconColor = isPremium ? '#F5C518' : accent;
   // Safe-area insets — used to pad the long-press action sheet so
   // its bottom row clears the iPhone home-indicator + any custom
   // gestures area, instead of being hardcoded to 34px (which
@@ -1737,10 +1742,10 @@ export default function ChatRoomScreen({ route, navigation }) {
           <Search size={20} color={tx} strokeWidth={2} />
         </TouchableOpacity>
         <TouchableOpacity onPress={() => placeCall({ navigation, peerUserId: recipientId, chatRoomId: roomId, recipientName, recipientPhone, type: 'voice' })} style={s.callBtn}>
-          <Phone size={22} color={accent} strokeWidth={2} />
+          <Phone size={22} color={callIconColor} strokeWidth={2} />
         </TouchableOpacity>
         <TouchableOpacity onPress={() => placeCall({ navigation, peerUserId: recipientId, chatRoomId: roomId, recipientName, recipientPhone, type: 'video' })} style={s.callBtn}>
-          <VideoIcon size={22} color={accent} strokeWidth={2} />
+          <VideoIcon size={22} color={callIconColor} strokeWidth={2} />
         </TouchableOpacity>
       </View>
 
