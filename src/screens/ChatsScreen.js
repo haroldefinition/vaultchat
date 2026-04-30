@@ -526,7 +526,19 @@ export default function ChatsScreen({ navigation }) {
         )}
         <TouchableOpacity
           style={[s.iconBtn, { backgroundColor: headerBtnBg, borderColor: headerBtnBd }]}
-          onPress={() => { taptic(); navigation.navigate('NewMessage'); }}>
+          accessibilityLabel="New message"
+          // Generous hitSlop — the icon is small (36×36) and sits at
+          // the screen edge in premium mode where the floating search
+          // bar / pulled tab encroach. Pad the tap area so missing it
+          // by a few pixels still registers.
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          onPress={() => {
+            // Fire the navigation FIRST so the button feels responsive
+            // even if haptics or some other side-effect throws. taptic
+            // is best-effort.
+            navigation.navigate('NewMessage');
+            try { taptic(); } catch {}
+          }}>
           <Text style={{ fontSize: 18 }}>✏️</Text>
         </TouchableOpacity>
       </View>

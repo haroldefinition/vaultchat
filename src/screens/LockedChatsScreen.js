@@ -42,7 +42,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../services/theme';
 import {
-  listVaultedIds, addToVault, removeFromVault, isUnlocked,
+  listVaultedIds, addToVault, removeFromVault, isUnlocked, lock as lockVault,
 } from '../services/vault';
 import VaultPinPrompt from '../components/VaultPinPrompt';
 
@@ -103,8 +103,9 @@ export default function LockedChatsScreen({ navigation }) {
       Alert.alert('Nothing selected', 'Tap rows to mark them, then try again.');
       return;
     }
+    const count = selected.size;
     Alert.alert(
-      `Remove ${selected.size} chat${selected.size === 1 ? '' : 's'}?`,
+      `Remove ${count} chat${count === 1 ? '' : 's'}?`,
       'They will go back to your main chats list. The conversation history is not deleted.',
       [
         { text: 'Cancel', style: 'cancel' },
@@ -118,6 +119,26 @@ export default function LockedChatsScreen({ navigation }) {
             setSelected(new Set());
             setSelectMode(false);
             await reload();
+            // ChatsScreen filters in two modes:
+            //   - vault LOCKED → hide vaulted chats
+            //   - vault UNLOCKED → show ONLY vaulted chats
+            // So if we leave the vault unlocked here, the just-removed
+            // chats disappear from BOTH views (they're no longer in the
+            // vaulted-id set, and the unlocked Chats view is filtered
+            // to that set). Auto-lock so the user lands back in the
+            // normal Chats list with the restored chats visible.
+            try { lockVault(); } catch {}
+            // Drop a confirmation so the user knows where to look —
+            // the LockedChats screen stays open, but going back gets
+            // them to the normal Chats list with the restored items.
+            Alert.alert(
+              'Removed from vault',
+              `${count} chat${count === 1 ? '' : 's'} ${count === 1 ? 'is' : 'are'} now back in your main Chats list.`,
+              [
+                { text: 'OK', style: 'default' },
+                { text: 'Go to Chats', onPress: () => navigation.navigate('Main', { screen: 'Chats' }) },
+              ]
+            );
           },
         },
       ],

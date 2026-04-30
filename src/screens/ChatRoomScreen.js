@@ -1205,6 +1205,42 @@ export default function ChatRoomScreen({ route, navigation }) {
     } catch {}
   }
 
+  // Constant used by both the banner and the hide action below so they
+  // stay in sync. If the placeholder string in encryption.js changes,
+  // update it here too.
+  const DECRYPT_PLACEHOLDER = '[Can’t decrypt this message on this device]';
+
+  // "Hide undecryptable messages" — strips local copies of messages
+  // whose ciphertext can't be opened on this device (typically because
+  // the local identity keys were lost via reinstall, or a peer rotated
+  // keys while we were offline). We do NOT delete from Supabase here —
+  // the other side may still have working keys, so server-side wipe
+  // would be destructive bilateral. Local-only is the safe default.
+  async function hideUndecryptable() {
+    const placeholderIds = new Set(
+      messages.filter(m => (m.content || '') === DECRYPT_PLACEHOLDER).map(m => m.id)
+    );
+    if (placeholderIds.size === 0) return;
+    Alert.alert(
+      'Hide undecryptable messages?',
+      `Remove ${placeholderIds.size} message${placeholderIds.size === 1 ? '' : 's'} from this device only. The other side still has them if their keys are intact.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Hide', style: 'destructive', onPress: async () => {
+          setMessages(prev => prev.filter(m => !placeholderIds.has(m.id)));
+          try {
+            const raw = await AsyncStorage.getItem(`vaultchat_msgs_${roomId}`);
+            if (raw) {
+              const stored = JSON.parse(raw);
+              const cleaned = stored.filter(m => !placeholderIds.has(m.id));
+              await AsyncStorage.setItem(`vaultchat_msgs_${roomId}`, JSON.stringify(cleaned));
+            }
+          } catch {}
+        }},
+      ]
+    );
+  }
+
   async function doDeleteMessage() {
     if (!menuMsg) return;
     setMenuVis(false);
@@ -1791,6 +1827,34 @@ export default function ChatRoomScreen({ route, navigation }) {
               <Text style={{ color: sub, fontSize: 14, marginLeft: 8 }}>✕</Text>
             </TouchableOpacity>
           </TouchableOpacity>
+        );
+      })()}
+
+      {/* Decrypt-failure banner — shows when 3+ messages couldn't be
+          opened on this device. Most common cause: this install lost
+          the keys those messages were encrypted to (reinstall, key
+          reset, etc.). Offers a "Hide" action that scrubs them from
+          local storage only — server copy untouched in case keys come
+          back online. */}
+      {(() => {
+        const failCount = messages.reduce((acc, m) => acc + ((m.content || '') === DECRYPT_PLACEHOLDER ? 1 : 0), 0);
+        if (failCount < 3) return null;
+        return (
+          <View style={[s.decryptBanner, { backgroundColor: '#7C3AED14', borderBottomColor: '#7C3AED55' }]}>
+            <View style={{ flex: 1, marginRight: 10 }}>
+              <Text style={[s.decryptBannerTitle, { color: tx }]}>
+                🔒  {failCount} message{failCount === 1 ? '' : 's'} couldn’t be opened on this device
+              </Text>
+              <Text style={[s.decryptBannerBody, { color: sub }]} numberOfLines={3}>
+                The keys to decrypt them aren’t on this device — usually because the app was reinstalled, or your peer rotated keys while you were offline. Hide them to clean up the chat.
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={[s.decryptBannerBtn, { backgroundColor: '#7C3AED' }]}
+              onPress={hideUndecryptable}>
+              <Text style={s.decryptBannerBtnTx}>Hide</Text>
+            </TouchableOpacity>
+          </View>
         );
       })()}
 
@@ -2391,6 +2455,11 @@ const s = StyleSheet.create({
   searchIcon: { fontSize: 14, marginRight: 6, opacity: 0.6 },
   searchInput:{ flex: 1, paddingVertical: 8, paddingHorizontal: 4, fontSize: 14 },
   pinBanner:  { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8, borderBottomWidth: 1 },
+  decryptBanner:    { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: 1 },
+  decryptBannerTitle:{ fontSize: 13, fontWeight: '700', marginBottom: 4 },
+  decryptBannerBody: { fontSize: 12, lineHeight: 16 },
+  decryptBannerBtn:  { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10 },
+  decryptBannerBtnTx:{ color: '#fff', fontWeight: '700', fontSize: 13 },
   fsWrap:      { flex: 1, backgroundColor: 'rgba(0,0,0,0.97)', alignItems: 'center', justifyContent: 'center' },
   menuOverlay:  { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
   msgMenu:      { borderTopLeftRadius: 20, borderTopRightRadius: 20 },
