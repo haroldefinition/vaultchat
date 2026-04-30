@@ -67,7 +67,12 @@ const navigationRef = createNavigationContainerRef();
 // ── Core screens ──────────────────────────────────────────────
 import SplashScreen        from './src/screens/SplashScreen';
 import RegisterScreen      from './src/screens/RegisterScreen';
-import WelcomeScreen       from './src/screens/WelcomeScreen';
+// WelcomeScreen import removed (2026-04-30) per Harold — the dark
+// premium-branded landing was confusing because tapping its CTAs
+// transitioned into the bright white RegisterScreen. Logged-out
+// users now land directly on RegisterScreen which is the original
+// "Welcome to VaultChat" white form. The WelcomeScreen.js file is
+// kept on disk for future reference.
 import EncryptionInfoScreen from './src/screens/EncryptionInfoScreen';
 import PremiumUpgradeSplash from './src/components/PremiumUpgradeSplash';
 import BiometricLockScreen from './src/screens/BiometricLockScreen';
@@ -502,16 +507,9 @@ export default Sentry.wrap(function App() {
         <ShareIntentBridge navigationRef={navigationRef} />
         <Stack.Navigator screenOptions={{ headerShown:false, animation:'slide_from_right' }}>
           {!isLoggedIn ? (
-            <>
-              {/* WelcomeScreen is the first thing a new install sees:
-                  premium-branded landing card with Create Account /
-                  Sign In CTAs. Both buttons push Register on top so
-                  the user can back-swipe to the welcome card. */}
-              <Stack.Screen name="Welcome"  component={WelcomeScreen} />
-              <Stack.Screen name="Register">
-                {props => <RegisterScreen {...props} onLoginCallback={() => setIsLoggedIn(true)} />}
-              </Stack.Screen>
-            </>
+            <Stack.Screen name="Register">
+              {props => <RegisterScreen {...props} onLoginCallback={() => setIsLoggedIn(true)} />}
+            </Stack.Screen>
           ) : (
             <>
               <Stack.Screen name="Main"          component={MainTabs} />

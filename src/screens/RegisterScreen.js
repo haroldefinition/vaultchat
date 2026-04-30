@@ -14,26 +14,22 @@ const SW      = Dimensions.get('window').width;
 const BACKEND = 'https://vaultchat-production-3a96.up.railway.app';
 
 // Fixed colours — Register is always light (matching the website)
-// Palette flipped to dark per Harold (2026-04-30) so the
-// Register / OTP screen matches the dark WelcomeScreen aesthetic.
-// Previously this rendered as a bright white screen which felt
-// jarring after the dark Welcome → Create Account / Sign In tap.
-// Brand accent shifted from Fiji blue (#1A7AE8) → premium purple
-// (#7C3AED) to match the WelcomeScreen + premium chrome.
-//
-// Variable names kept (blue / blueSoft / blueBorder) to minimize
-// churn elsewhere in this file — only the values change.
+// Palette restored to original light/Fiji-blue treatment per
+// Harold (2026-04-30). The dark variant we briefly tried to match
+// the dark WelcomeScreen was scrapped because the WelcomeScreen
+// itself was removed from the logged-out flow — users land
+// directly here, on the white "Welcome to VaultChat" form.
 const C = {
-  bg:          '#0a0a0f',
-  blue:        '#7C3AED',
-  blueSoft:    'rgba(124, 58, 237, 0.10)',
-  blueBorder:  'rgba(124, 58, 237, 0.32)',
-  tx:          '#FFFFFF',
-  sub:         '#9296a0',
-  border:      'rgba(255, 255, 255, 0.12)',
-  inputBg:     '#17171f',
-  placeholder: 'rgba(255, 255, 255, 0.40)',
-  toggleBg:    'rgba(255, 255, 255, 0.08)',
+  bg:          '#FFFFFF',
+  blue:        '#1A7AE8',
+  blueSoft:    '#EBF3FD',
+  blueBorder:  '#BFDBFE',
+  tx:          '#0F172A',
+  sub:         '#64748B',
+  border:      '#E2E8F0',
+  inputBg:     '#F8FAFC',
+  placeholder: '#94A3B8',
+  toggleBg:    '#F1F5F9',
 };
 
 export default function RegisterScreen({ route, onLoginCallback }) {
@@ -499,10 +495,7 @@ const s = StyleSheet.create({
   // Phone/Email toggle
   toggleRow:      { flexDirection: 'row', backgroundColor: C.toggleBg, borderRadius: 14, padding: 4, width: '100%', marginBottom: 14 },
   toggleBtn:      { flex: 1, paddingVertical: 11, alignItems: 'center', borderRadius: 10 },
-  // Dark-mode active toggle — purple-tinted card vs the
-  // surrounding rgba(255,255,255,0.08) toggle bg. Drops the
-  // shadow since shadows on dark backgrounds don't read.
-  toggleBtnActive:{ backgroundColor: 'rgba(124, 58, 237, 0.32)' },
+  toggleBtnActive:{ backgroundColor: '#FFFFFF', shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 2 },
   toggleTx:       { fontSize: 14, fontWeight: '700', color: C.sub },
   toggleTxActive: { color: C.blue },
 
