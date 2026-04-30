@@ -697,6 +697,48 @@ export default function SettingsScreen({ navigation }) {
               subText={vaultPinSet ? 'Set — long-press Chats title to unlock' : 'Not set'}
               onPress={() => { setPinType('vault'); setPinInput(''); setPinModal(true); }}
             />
+            {/* Reset Vault PIN — discoverable recovery path for users
+                who forgot their PIN. Wipes the PIN AND the vaulted-id
+                list (no PIN, no vault), so chats inside the vault
+                come back out into the regular Chats list. The chat
+                history itself is preserved on both sides — only the
+                "this chat is hidden" flag is cleared. */}
+            {vaultPinSet && (
+              <Row
+                icon="🔁"
+                label="Reset Vault PIN"
+                subText="Forgot it? Removes the PIN. Vaulted chats return to your main list."
+                onPress={() => {
+                  Alert.alert(
+                    'Reset Vault PIN?',
+                    'This removes your Vault PIN. Any chats currently in the vault will return to your main Chats list. Conversation history is not deleted on either side.',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: 'Reset PIN',
+                        style: 'destructive',
+                        onPress: async () => {
+                          try {
+                            await clearVaultPin();
+                            setVaultPinSet(false);
+                            // Reset the first-run setup flag so the
+                            // user can be re-prompted to create a new
+                            // PIN next time they open the Vault.
+                            try { await AsyncStorage.removeItem('vaultchat_vault_setup_seen'); } catch {}
+                            Alert.alert(
+                              'Vault PIN reset',
+                              'Your Vault PIN has been removed and any vaulted chats are back in your Chats list. You can set a new PIN anytime.'
+                            );
+                          } catch (e) {
+                            Alert.alert('Could not reset', e?.message || 'Try again in a moment.');
+                          }
+                        },
+                      },
+                    ]
+                  );
+                }}
+              />
+            )}
             <Row
               icon="🔒"
               label="Vault"

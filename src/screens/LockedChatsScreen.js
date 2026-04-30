@@ -347,7 +347,6 @@ export default function LockedChatsScreen({ navigation }) {
             navigation.navigate('ChatRoom', target);
           }
         }}
-        onSetup={() => navigation.navigate('Settings')}
       />
     </View>
   );

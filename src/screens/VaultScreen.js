@@ -307,7 +307,6 @@ export default function VaultScreen({ navigation }) {
             setUnlocked(true);
             Alert.alert('Vault Unlocked', 'Your locked chats are visible again.');
           }}
-          onSetup={() => navigation.navigate('Settings')}
         />
 
         {/* First-run setup — premium-only, fires once when the user
