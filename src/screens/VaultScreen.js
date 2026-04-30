@@ -69,10 +69,11 @@ export default function VaultScreen({ navigation }) {
       const isPrem = await isPremiumUser();
       if (cancelled) return;
       setPremium(isPrem);
-      if (!isPrem) {
-        // Non-premium: pop the upgrade modal immediately.
-        setPremiumModalVis(true);
-      }
+      // (Per Harold 2026-04-29: Vault is now FREE for the basic
+      //  Locked Chats flow. The premium gate moved row-by-row — the
+      //  Encrypted Files / Notes / Passwords / Biometrics rows pop
+      //  the upgrade modal individually when a free user taps them.
+      //  No more auto-popping the modal on Vault mount.)
       const ids = await listVaultedIds();
       if (cancelled) return;
       // Best-effort biometric check — if the user enabled biometric
@@ -89,10 +90,15 @@ export default function VaultScreen({ navigation }) {
     return () => { cancelled = true; };
   }, []));
 
-  // ── PREMIUM LAYOUT (mockup match) ────────────────────────────
-  // Categorized list with searchable filter, Add (+) button in the
-  // header, and the protection banner pinned to the bottom.
-  if (premium) {
+  // ── UNIFIED VAULT LAYOUT (mockup match for both free + premium) ──
+  // Per Harold 2026-04-29: Vault is now free for the basic Locked
+  // Chats use. Encrypted Files / Secure Notes / Passwords / Biometrics
+  // rows are paywalled — tapping them as a free user pops the upgrade
+  // modal. The categorized layout matches the dark-mode mockup. Free
+  // users still get the full layout, just with 🔒 markers on premium
+  // rows and the modal as the gate.
+  {
+    const openUpsell = () => setPremiumModalVis(true);
     const items = [
       {
         key:   'messages',
@@ -100,6 +106,7 @@ export default function VaultScreen({ navigation }) {
         label: 'Encrypted Messages',
         count: stats.chats,
         right: String(stats.chats),
+        premium: false,
         onPress: () => navigation.navigate('LockedChats'),
       },
       {
@@ -107,32 +114,44 @@ export default function VaultScreen({ navigation }) {
         Icon:  FileText,
         label: 'Encrypted Files',
         count: stats.files,
-        right: String(stats.files),
-        onPress: () => Alert.alert('Coming Soon', 'Vault file browser ships in v1.1.'),
+        right: premium ? String(stats.files) : '👑',
+        premium: true,
+        onPress: () => premium
+          ? Alert.alert('Coming Soon', 'Vault file browser ships in v1.1.')
+          : openUpsell(),
       },
       {
         key:   'notes',
         Icon:  FileText,
         label: 'Secure Notes',
         count: stats.notes,
-        right: String(stats.notes),
-        onPress: () => Alert.alert('Coming Soon', 'Secure Notes will be available in v1.1.'),
+        right: premium ? String(stats.notes) : '👑',
+        premium: true,
+        onPress: () => premium
+          ? Alert.alert('Coming Soon', 'Secure Notes will be available in v1.1.')
+          : openUpsell(),
       },
       {
         key:   'passwords',
         Icon:  Key,
         label: 'Passwords',
         count: stats.passwords,
-        right: String(stats.passwords),
-        onPress: () => Alert.alert('Coming Soon', 'Password vault ships in v1.1.'),
+        right: premium ? String(stats.passwords) : '👑',
+        premium: true,
+        onPress: () => premium
+          ? Alert.alert('Coming Soon', 'Password vault ships in v1.1.')
+          : openUpsell(),
       },
       {
         key:   'biometrics',
         Icon:  Fingerprint,
         label: 'Biometrics',
         count: 0,
-        right: stats.biometrics ? 'Enabled' : 'Set up',
-        onPress: () => navigation.navigate('Settings'),
+        right: premium ? (stats.biometrics ? 'Enabled' : 'Set up') : '👑',
+        premium: true,
+        onPress: () => premium
+          ? navigation.navigate('Settings')
+          : openUpsell(),
       },
     ];
 
@@ -148,21 +167,27 @@ export default function VaultScreen({ navigation }) {
           </TouchableOpacity>
           <View style={s.headerTitleRow}>
             <Text style={[s.headerTitle, { color: tx }]}>Vault</Text>
-            <Text style={s.headerCrown}>👑</Text>
+            {premium && <Text style={s.headerCrown}>👑</Text>}
           </View>
           <TouchableOpacity
             style={s.headerBtn}
             accessibilityLabel="Add to Vault"
-            onPress={() => Alert.alert(
-              'Add to Vault',
-              'Choose what to add.',
-              [
-                { text: 'Lock a Chat',   onPress: () => navigation.navigate('LockedChats') },
-                { text: 'Secure Note',   onPress: () => Alert.alert('Coming Soon', 'Secure Notes ship in v1.1.') },
-                { text: 'Password',      onPress: () => Alert.alert('Coming Soon', 'Password vault ships in v1.1.') },
+            onPress={() => {
+              // Free users only get the "Lock a Chat" option (free
+              // tier) plus an upsell for the rest. Premium users see
+              // the full menu.
+              const choices = [
+                { text: 'Lock a Chat', onPress: () => navigation.navigate('LockedChats') },
+                premium
+                  ? { text: 'Secure Note', onPress: () => Alert.alert('Coming Soon', 'Secure Notes ship in v1.1.') }
+                  : { text: 'Secure Note 👑', onPress: openUpsell },
+                premium
+                  ? { text: 'Password',    onPress: () => Alert.alert('Coming Soon', 'Password vault ships in v1.1.') }
+                  : { text: 'Password 👑', onPress: openUpsell },
                 { text: 'Cancel', style: 'cancel' },
-              ]
-            )}>
+              ];
+              Alert.alert('Add to Vault', 'Choose what to add.', choices);
+            }}>
             <Plus size={24} color={accent} strokeWidth={2.5} />
           </TouchableOpacity>
         </View>
@@ -231,125 +256,6 @@ export default function VaultScreen({ navigation }) {
       </View>
     );
   }
-
-  // ── FREE LAYOUT (legacy) ─────────────────────────────────────
-  return (
-    <View style={[s.container, { backgroundColor: bg }]}>
-      {/* Header */}
-      <View style={[s.header, { borderBottomColor: border }]}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={s.headerBtn}>
-          <ChevronLeft size={26} color={accent} />
-        </TouchableOpacity>
-        <View style={s.headerTitleRow}>
-          <Shield size={18} color={accent} strokeWidth={2.5} />
-          <Text style={[s.headerTitle, { color: tx }]}>Vault</Text>
-        </View>
-        <TouchableOpacity
-          style={s.headerBtn}
-          onPress={() => navigation.navigate('Settings')}>
-          <SettingsIcon size={22} color={sub} />
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
-        {/* Hero card — matches mockup's protected-state visual.
-            Premium users get the gold-tinted variant; others keep
-            the standard accent treatment. */}
-        <View style={[s.heroCard, { backgroundColor: heroAccent + '12', borderColor: heroAccent + '40' }]}>
-          <View style={[s.heroIconWrap, { backgroundColor: heroAccent + '22' }]}>
-            <Shield size={32} color={heroAccent} strokeWidth={2.5} />
-          </View>
-          <Text style={[s.heroTitle, { color: tx }]}>Your Vault is Protected</Text>
-          <Text style={[s.heroBody, { color: sub }]}>
-            Everything in your vault is secured with end-to-end encryption.
-          </Text>
-          <TouchableOpacity
-            style={[s.heroBtn, { backgroundColor: unlocked ? heroAccent : 'transparent', borderColor: heroAccent, borderWidth: unlocked ? 0 : 1.5 }]}
-            onPress={() => {
-              setPremiumModalVis(true);
-            }}>
-            <Lock size={16} color={unlocked ? '#fff' : heroAccent} strokeWidth={2.5} />
-            <Text style={[s.heroBtnTx, { color: unlocked ? '#fff' : heroAccent }]}>
-              {unlocked ? 'Lock Vault' : 'Vault is Locked'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* 3-stat row */}
-        <View style={s.statsRow}>
-          <StatTile label="Chats"  value={stats.chats}  icon="💬" card={card} border={border} tx={tx} sub={sub} />
-          <StatTile label="Files"  value={stats.files}  icon="📁" card={card} border={border} tx={tx} sub={sub} />
-          <StatTile label="Media"  value={stats.media}  icon="🖼"  card={card} border={border} tx={tx} sub={sub} />
-        </View>
-
-        {/* Vault items list */}
-        <Text style={[s.sectionLabel, { color: sub }]}>VAULT ITEMS</Text>
-        <View style={s.itemsList}>
-          <VaultItem
-            Icon={Lock}
-            label="Locked Chats"
-            count={stats.chats}
-            countLabel={stats.chats === 1 ? 'conversation' : 'conversations'}
-            onPress={() => setPremiumModalVis(true)}
-            accent={accent} card={card} border={border} tx={tx} sub={sub}
-          />
-          <VaultItem
-            Icon={FileText}
-            label="Secure Notes"
-            count={stats.notes}
-            countLabel={stats.notes === 1 ? 'note' : 'notes'}
-            onPress={() => setPremiumModalVis(true)}
-            accent={accent} card={card} border={border} tx={tx} sub={sub}
-          />
-          <VaultItem
-            Icon={FileText}
-            label="Files"
-            count={stats.files}
-            countLabel={stats.files === 1 ? 'file' : 'files'}
-            onPress={() => setPremiumModalVis(true)}
-            accent={accent} card={card} border={border} tx={tx} sub={sub}
-          />
-          <VaultItem
-            Icon={ImageIcon}
-            label="Photos & Videos"
-            count={stats.media}
-            countLabel="items"
-            onPress={() => setPremiumModalVis(true)}
-            accent={accent} card={card} border={border} tx={tx} sub={sub}
-          />
-          <VaultItem
-            Icon={Mic}
-            label="Audio"
-            count={stats.audio}
-            countLabel={stats.audio === 1 ? 'recording' : 'recordings'}
-            onPress={() => setPremiumModalVis(true)}
-            accent={accent} card={card} border={border} tx={tx} sub={sub}
-          />
-        </View>
-
-        {/* Bottom upsell for non-premium users — soft second-chance after they
-            dismiss the modal but stay on the page browsing what's available. */}
-        <View style={[s.upsellCard, { backgroundColor: accent + '0d', borderColor: accent + '40' }]}>
-          <Text style={[s.upsellTitle, { color: accent }]}>👑  Vault is a Premium feature</Text>
-          <Text style={[s.upsellBody, { color: sub }]}>
-            Hide sensitive chats, secure notes, files, and media behind a separate PIN. Upgrade to VaultChat Premium to unlock the vault.
-          </Text>
-          <TouchableOpacity
-            style={[s.upsellBtn, { backgroundColor: accent }]}
-            onPress={() => setPremiumModalVis(true)}>
-            <Text style={s.upsellBtnTx}>See Premium</Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
-
-      <PremiumModal
-        visible={premiumModalVis}
-        onClose={() => setPremiumModalVis(false)}
-        onUpgraded={() => { setPremiumModalVis(false); isPremiumUser().then(setPremium); }}
-        colors={{ card, text: tx, muted: sub, border }}
-      />
-    </View>
-  );
 }
 
 // ── Sub-components ───────────────────────────────────────────

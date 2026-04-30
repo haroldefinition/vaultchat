@@ -474,6 +474,11 @@ export default function App() {
               <Stack.Screen name="ThemePicker"   component={ThemePickerScreen} />
               <Stack.Screen name="Vault"         component={VaultScreen} />
               <Stack.Screen name="LockedChats"   component={LockedChatsScreen} />
+              {/* Groups list — pushed when the "Groups" chip on the
+                  Chats screen is tapped. We removed the Groups bottom
+                  tab in favor of Vault, but the chip still routes
+                  here so the destination has to live in the stack. */}
+              <Stack.Screen name="Groups"        component={GroupScreen} />
               <Stack.Screen name="Premium"       component={({navigation}) => {
                 const [vis,setVis] = useState(true);
                 return <PremiumModal visible={vis} onClose={() => navigation.goBack()} onUpgraded={() => navigation.goBack()} />;
