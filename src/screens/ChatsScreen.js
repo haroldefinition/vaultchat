@@ -742,10 +742,25 @@ export default function ChatsScreen({ navigation }) {
         </View>
       )}
 
-      {/* Chat list */}
+      {/* Chat list — performance tuning:
+            - removeClippedSubviews drops off-screen rows from the
+              native view tree, lower memory + smoother scroll on
+              long lists
+            - initialNumToRender sized for typical viewport (8 rows)
+              so first paint isn't blocked drawing 50+ rows
+            - maxToRenderPerBatch + windowSize keep scroll catch-up
+              from janking the JS thread
+            - keyboardShouldPersistTaps='handled' lets pin/archive
+              swipe actions still register when the keyboard is up */}
       <FlatList
         data={listData}
         keyExtractor={(item, i) => item.id || item.roomId || i.toString()}
+        removeClippedSubviews
+        initialNumToRender={8}
+        maxToRenderPerBatch={6}
+        windowSize={9}
+        updateCellsBatchingPeriod={40}
+        keyboardShouldPersistTaps="handled"
         refreshControl={
           <RefreshControl
             refreshing={refreshing}

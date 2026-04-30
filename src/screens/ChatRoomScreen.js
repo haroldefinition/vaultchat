@@ -1795,7 +1795,17 @@ export default function ChatRoomScreen({ route, navigation }) {
         );
       })()}
 
-      {/* Messages */}
+      {/* Messages — performance tuning for the heaviest scroll
+          surface in the app:
+            - removeClippedSubviews trims off-screen bubbles from
+              the native view tree (big win for media-heavy threads)
+            - initialNumToRender / windowSize sized for typical
+              viewport so first paint isn't blocked rendering 100+
+              bubbles when entering an old chat
+            - keyboardShouldPersistTaps lets long-press menu
+              register when the keyboard is up
+            - keyboardDismissMode='interactive' matches iMessage:
+              swipe down on the message list to dismiss the keyboard */}
       <FlatList
         ref={listRef}
         data={(() => {
@@ -1807,6 +1817,13 @@ export default function ChatRoomScreen({ route, navigation }) {
         keyExtractor={(item, i) => String(item.id || i)}
         inverted
         contentContainerStyle={{ padding: 12, paddingTop: 8 }}
+        removeClippedSubviews
+        initialNumToRender={12}
+        maxToRenderPerBatch={8}
+        windowSize={11}
+        updateCellsBatchingPeriod={40}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
         onEndReached={loadMoreOlder}
         onEndReachedThreshold={0.4}
         ListFooterComponent={hasMore && loadingOlder ? (
