@@ -169,6 +169,15 @@ export default function GifPickerModal({ visible, onClose, onSelectGif, colors }
             </Text>
           )}
 
+          {/* Required attribution — Giphy's production key review
+              requires "Powered by GIPHY" or the Giphy logo to be
+              visible in the picker. We render the text variant
+              under the search bar so it's always visible regardless
+              of whether the API succeeds, fails, or returns the
+              fallback. Don't remove this without re-reading the
+              Giphy SDK terms or you'll get bounced on review. */}
+          <Text style={[s.attribution, { color: sub }]}>Powered by GIPHY</Text>
+
           {/* Content */}
           {loading ? (
             <View style={s.loader}>
@@ -223,6 +232,7 @@ const s = StyleSheet.create({
   gifGrid:      { paddingHorizontal: 12, gap: 6 },
   gifItem:      { width: COL_WIDTH, height: COL_WIDTH * 0.75, margin: 3, borderRadius: 12, overflow: 'hidden', backgroundColor: '#111' },
   gifImg:       { width: '100%', height: '100%' },
+  attribution:  { fontSize: 10, fontWeight: '600', letterSpacing: 1, textAlign: 'center', marginBottom: 8, opacity: 0.55 },
   sectionLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 0.5, marginLeft: 20, marginBottom: 10, marginTop: 4 },
   fallbackGrid: { paddingHorizontal: 16, paddingBottom: 20 },
   fallbackItem: { flex: 1, margin: 6, borderRadius: 14, paddingVertical: 14, alignItems: 'center', justifyContent: 'center' },
