@@ -37,6 +37,15 @@ if (SENTRY_DSN && !SENTRY_DSN.includes('YOUR_DSN_HERE')) {
       // Don't capture user IPs — Supabase already has those, no value
       // adding them to Sentry too.
       sendDefaultPii: false,
+      // Session Replay explicitly disabled — VaultChat is privacy-
+      // first and recording user sessions (even masked) is too
+      // aggressive a tradeoff for an E2E messaging app. Re-enable
+      // later if we ever need it for a specific debugging window,
+      // but ship with it OFF.
+      replaysSessionSampleRate: 0,
+      replaysOnErrorSampleRate: 0,
+      integrations: (defaults) =>
+        defaults.filter((i) => !i?.name?.toLowerCase?.().includes('replay')),
     });
   } catch (e) { if (__DEV__) console.warn('[sentry] init failed:', e?.message || e); }
 }
