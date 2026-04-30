@@ -1306,15 +1306,11 @@ export default function GroupChatScreen({ route, navigation }) {
       {/* Messages */}
       <FlatList
         ref={flatRef}
-        // Hide undecryptable messages from the rendered list — same
-        // policy as ChatRoomScreen. The placeholder string stays in
-        // the cache so we can detect them; users just don't see a
-        // wall of "[Can't decrypt...]" bubbles cluttering the view.
-        data={(() => {
-          const PLACEHOLDER = '[Can’t decrypt this message on this device]';
-          const visible = messages.filter(m => (m.content || '') !== PLACEHOLDER);
-          return [...visible].reverse();
-        })()}
+        // Pass through all messages; the per-row renderer below
+        // soft-handles undecryptable ones with a neutral indicator
+        // instead of dropping them. Same policy as ChatRoomScreen
+        // (was hiding entirely; that swallowed real deliveries).
+        data={[...messages].reverse()}
         keyExtractor={(item, i) => String(item.id || i)}
         inverted
         contentContainerStyle={{ padding: 12, paddingTop: 8 }}

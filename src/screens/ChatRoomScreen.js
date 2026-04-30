@@ -1853,19 +1853,26 @@ export default function ChatRoomScreen({ route, navigation }) {
       <FlatList
         ref={listRef}
         data={(() => {
-          // Per Harold (2026-04-30): hide undecryptable messages from
-          // the rendered list entirely. The placeholder string lives
-          // on inside the cache so safeDecrypt + decryptRow have a
-          // sentinel to write, but users never see it. Reasoning:
-          // those messages are unrecoverable (forward secrecy); the
-          // placeholder text just clutters the chat. New messages
-          // will decrypt fine — the filter only affects ones whose
-          // keys are no longer on this device.
+          // Decrypt-failure handling — UNDONE the blanket-hide
+          // (2026-04-30 evening) because it was making real
+          // delivered messages invisible. Sam→Jon test showed Sam's
+          // messages were arriving but failing to decrypt and the
+          // filter was silently dropping them. Now we KEEP them in
+          // the list but transform the content into a sentinel
+          // _type='undecryptable' so renderItem dispatches a small
+          // neutral "🔒 Can't read this message" indicator instead
+          // of the alarming "[Can't decrypt this message on this
+          // device]" raw text. User sees something arrived; long-
+          // press to retry / report.
           const PLACEHOLDER = '[Can’t decrypt this message on this device]';
-          const visible = messages.filter(m => (m.content || '') !== PLACEHOLDER);
+          const transformed = messages.map(m =>
+            (m.content || '') === PLACEHOLDER
+              ? { ...m, _type: 'undecryptable' }
+              : m
+          );
           const list = searchQuery.trim()
-            ? visible.filter(m => (m.content || '').toLowerCase().includes(searchQuery.toLowerCase()))
-            : visible;
+            ? transformed.filter(m => m._type !== 'undecryptable' && (m.content || '').toLowerCase().includes(searchQuery.toLowerCase()))
+            : transformed;
           // Pre-enrich the message list with non-message rows that get
           // dispatched in renderItem:
           //   - 'date': "Today" / "Yesterday" / weekday separator pill
@@ -1934,6 +1941,21 @@ export default function ChatRoomScreen({ route, navigation }) {
                   <Text style={{ color: accent, fontWeight: '700' }}>Learn more.</Text>
                 </Text>
               </TouchableOpacity>
+            );
+          }
+          if (item._type === 'undecryptable') {
+            // Soft neutral indicator — proves SOMETHING arrived from
+            // the peer, doesn't expose the raw "[Can't decrypt...]"
+            // string, leaves a stable mental anchor for the user.
+            // Aligned by sender so the placeholder still reads as a
+            // proper bubble in the conversation flow.
+            const me = item.sender_id === myId;
+            return (
+              <View style={{ flexDirection: 'row', justifyContent: me ? 'flex-end' : 'flex-start', paddingHorizontal: 6, paddingVertical: 4 }}>
+                <View style={{ backgroundColor: sub + '22', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8, maxWidth: '70%' }}>
+                  <Text style={{ color: sub, fontSize: 13, fontStyle: 'italic' }}>🔒 Can't read this message</Text>
+                </View>
+              </View>
             );
           }
           return (
