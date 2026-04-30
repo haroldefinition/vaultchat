@@ -24,7 +24,10 @@ import { setupPushNotifications, addNotificationResponseListener, clearBadge } f
 //   4. Rebuild
 import * as Sentry from '@sentry/react-native';
 
-const SENTRY_DSN = 'YOUR_DSN_HERE'; // ← paste the real DSN here
+// VaultChat Sentry DSN — registered to AUXXILUS MEDIA LLC's
+// react-native project. Sentry DSNs are designed to be embedded in
+// the client bundle (rate-limited per project, not secret).
+const SENTRY_DSN = 'https://8c2fb572aec1eb09868874f3f4d3f629@o4511306881368064.ingest.us.sentry.io/4511306886086656';
 if (SENTRY_DSN && !SENTRY_DSN.includes('YOUR_DSN_HERE')) {
   try {
     Sentry.init({
