@@ -48,6 +48,7 @@ import {
   listVaultedIds,
 } from '../services/vault';
 import PremiumModal from '../components/PremiumModal';
+import VaultPinPrompt from '../components/VaultPinPrompt';
 
 export default function VaultScreen({ navigation }) {
   // gold + isPremium come from theme.js premium polish — used to
@@ -60,6 +61,9 @@ export default function VaultScreen({ navigation }) {
   const [stats,           setStats]           = useState({ chats: 0, files: 0, media: 0, notes: 0, audio: 0, passwords: 0, biometrics: false });
   const [unlocked,        setUnlocked]        = useState(false);
   const [search,          setSearch]          = useState('');
+  // Inline PIN prompt — opens when the user taps the lock pill on
+  // the bottom protection banner while the vault is still locked.
+  const [pinPromptOpen,   setPinPromptOpen]   = useState(false);
 
   // Refresh on every focus — vault state can change from elsewhere
   // (Settings PIN setup, chat list "Move to Vault" actions).
@@ -239,8 +243,16 @@ export default function VaultScreen({ navigation }) {
             <TouchableOpacity
               style={[s.protectBtn, { backgroundColor: unlocked ? heroAccent : 'transparent', borderColor: heroAccent }]}
               onPress={() => {
-                if (unlocked) { lockVault(); setUnlocked(false); Alert.alert('Vault Locked', 'Vaulted chats are hidden again.'); }
-                else { Alert.alert('Vault Locked', 'Long-press the "Chats" title and enter your Vault PIN to unlock.'); }
+                if (unlocked) {
+                  lockVault();
+                  setUnlocked(false);
+                  Alert.alert('Vault Locked', 'Vaulted chats are hidden again.');
+                } else {
+                  // Open the PIN prompt inline — much friendlier than
+                  // bouncing the user back to long-press the Chats
+                  // title.
+                  setPinPromptOpen(true);
+                }
               }}>
               <Lock size={14} color={unlocked ? '#fff' : heroAccent} strokeWidth={2.5} />
             </TouchableOpacity>
@@ -252,6 +264,20 @@ export default function VaultScreen({ navigation }) {
           onClose={() => setPremiumModalVis(false)}
           onUpgraded={() => { setPremiumModalVis(false); isPremiumUser().then(setPremium); }}
           colors={{ card, text: tx, muted: sub, border }}
+        />
+
+        {/* Inline Vault PIN prompt — opens from the protection-banner
+            lock pill so users don't have to learn the long-press-on-
+            Chats-title gesture. */}
+        <VaultPinPrompt
+          visible={pinPromptOpen}
+          onClose={() => setPinPromptOpen(false)}
+          onUnlocked={() => {
+            setPinPromptOpen(false);
+            setUnlocked(true);
+            Alert.alert('Vault Unlocked', 'Your locked chats are visible again.');
+          }}
+          onSetup={() => navigation.navigate('Settings')}
         />
       </View>
     );

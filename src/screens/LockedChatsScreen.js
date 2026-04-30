@@ -44,6 +44,7 @@ import { useTheme } from '../services/theme';
 import {
   listVaultedIds, addToVault, removeFromVault, isUnlocked,
 } from '../services/vault';
+import VaultPinPrompt from '../components/VaultPinPrompt';
 
 const CHATS_KEY = 'vaultchat_chats';
 
@@ -58,6 +59,12 @@ export default function LockedChatsScreen({ navigation }) {
   const [selectMode, setSelectMode] = useState(false);
   const [selected,   setSelected]   = useState(new Set());
   const [pickerVisible, setPickerVisible] = useState(false);
+  // PIN prompt — opened when a free user (or a premium user who
+  // has locked the vault again) taps a locked row before unlocking.
+  const [pinPromptOpen,  setPinPromptOpen]  = useState(false);
+  // The chat the user wanted to open before getting bounced to the
+  // PIN prompt — auto-navigated once unlock succeeds.
+  const [pendingOpen,    setPendingOpen]    = useState(null);
 
   const reload = useCallback(async () => {
     const raw = await AsyncStorage.getItem(CHATS_KEY).catch(() => null);
@@ -138,17 +145,22 @@ export default function LockedChatsScreen({ navigation }) {
         style={[s.row, { borderBottomColor: border }]}
         onPress={() => {
           if (selectMode) { toggleSelected(id); return; }
-          // Tap a locked chat → open it, but only if vault is unlocked
-          if (!isUnlocked()) {
-            Alert.alert('Vault locked', 'Open the Vault to enter your PIN, then come back.');
-            return;
-          }
-          navigation.navigate('ChatRoom', {
+          // Tap a locked chat → open it, but only if vault is unlocked.
+          // Otherwise stash the target and prompt for the PIN inline —
+          // on success we navigate straight into the chat instead of
+          // making the user tap again.
+          const target = {
             roomId: item.roomId,
             recipientPhone: item.phone,
             recipientName: name,
             recipientPhoto: item.photo,
-          });
+          };
+          if (!isUnlocked()) {
+            setPendingOpen(target);
+            setPinPromptOpen(true);
+            return;
+          }
+          navigation.navigate('ChatRoom', target);
         }}
         onLongPress={() => {
           if (!selectMode) { setSelectMode(true); toggleSelected(id); }
@@ -299,6 +311,23 @@ export default function LockedChatsScreen({ navigation }) {
           </View>
         </View>
       </Modal>
+
+      {/* Inline Vault PIN prompt — opens when the user taps a row
+          while the vault is still locked. On success, navigate
+          straight into the chat they were trying to open. */}
+      <VaultPinPrompt
+        visible={pinPromptOpen}
+        onClose={() => { setPinPromptOpen(false); setPendingOpen(null); }}
+        onUnlocked={() => {
+          setPinPromptOpen(false);
+          if (pendingOpen) {
+            const target = pendingOpen;
+            setPendingOpen(null);
+            navigation.navigate('ChatRoom', target);
+          }
+        }}
+        onSetup={() => navigation.navigate('Settings')}
+      />
     </View>
   );
 }
