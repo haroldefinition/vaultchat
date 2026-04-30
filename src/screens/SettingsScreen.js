@@ -337,14 +337,24 @@ export default function SettingsScreen({ navigation }) {
                           supabase.from('blocked_users').delete().eq('blocker_id', myUserId).then(() => {}, () => {}),
                           supabase.from('contacts').delete().eq('owner_id', myUserId).then(() => {}, () => {}),
                         ]);
-                        // Note: the row in `auth.users` itself can only
-                        // be deleted via a service-role call (Edge
-                        // Function with admin key). Without that, the
-                        // auth row is orphaned but unreachable — no
-                        // profile, no @handle, nothing to look up. Plan
-                        // to add a delete-account Edge Function before
-                        // we ship Premium so paying users can actually
-                        // exit cleanly.
+
+                        // Hard-delete the auth.users row via the
+                        // delete-account Edge Function. The function
+                        // re-runs the table scrubs above with the
+                        // service-role key as belt-and-suspenders,
+                        // then calls auth.admin.deleteUser(userId).
+                        // We pass no body — the function reads the
+                        // JWT from Authorization to identify whose
+                        // account to delete. Best-effort: if the
+                        // function fails (network down, etc.) we
+                        // still sign out + wipe local data, leaving
+                        // the auth row orphaned but unreachable.
+                        try {
+                          const { error: fnErr } = await supabase.functions.invoke('delete-account');
+                          if (fnErr && __DEV__) console.warn('delete-account function failed:', fnErr.message || fnErr);
+                        } catch (e) {
+                          if (__DEV__) console.warn('delete-account invoke threw:', e?.message || e);
+                        }
                       }
                       try { await supabase.auth.signOut(); } catch {}
                       try { await AsyncStorage.clear(); } catch {}
