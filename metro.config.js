@@ -1,12 +1,11 @@
-// Metro bundler config — optimized for faster reloads and a more stable dev bridge.
-// Built on top of Expo's default config so SDK-level behavior is preserved.
-
-const { getDefaultConfig } = require('expo/metro-config');
 const { FileStore } = require('metro-cache');
 const path = require('path');
 const os = require('os');
+const {
+  getSentryExpoConfig
+} = require("@sentry/react-native/metro");
 
-const config = getDefaultConfig(__dirname);
+const config = getSentryExpoConfig(__dirname);
 
 // ---------------------------------------------------------------------------
 // 1. Inline requires: modules only load the first time they're used, not on

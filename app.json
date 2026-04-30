@@ -16,7 +16,10 @@
       "bundleIdentifier": "com.chatvault.vaultchat",
       "buildNumber": "1",
       "infoPlist": {
-        "UIBackgroundModes": ["audio", "voip"],
+        "UIBackgroundModes": [
+          "audio",
+          "voip"
+        ],
         "NSPhotoLibraryUsageDescription": "VaultChat needs access to your photos and videos to share them in chats.",
         "NSPhotoLibraryAddUsageDescription": "VaultChat needs access to save photos.",
         "NSCameraUsageDescription": "VaultChat needs camera access to take photos and videos.",
@@ -69,7 +72,15 @@
       ],
       "expo-video",
       "expo-audio",
-      "./plugins/with-pushkit.js"
+      "./plugins/with-pushkit.js",
+      [
+        "@sentry/react-native/expo",
+        {
+          "url": "https://sentry.io/",
+          "project": "react-native",
+          "organization": "auxxilus-media-llc"
+        }
+      ]
     ],
     "extra": {
       "serverUrl": "https://vaultchat-server-production.up.railway.app",

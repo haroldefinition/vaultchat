@@ -5,3 +5,11 @@ node_modules
 # they're restricted by SHA-1 + package name in the Firebase console.
 # The actually-sensitive credential (the service-account JSON) lives
 # on Railway as FCM_SERVICE_ACCOUNT_JSON env var, never committed.
+
+.env.local
+
+# Sentry source-map auth tokens — keep on local disk + EAS secrets
+# only. Anyone with this token could upload bogus source maps to
+# our Sentry project, so never commit it to a public repo.
+ios/sentry.properties
+android/sentry.properties
