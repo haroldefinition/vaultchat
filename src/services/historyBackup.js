@@ -92,31 +92,69 @@ function _hmacSha512(key, data) {
   return nacl.hash(outer); // 64 bytes
 }
 
-function _pbkdf2(pinBytes, salt, iters, dkLen) {
+// Yieldy async PBKDF2. We can't move the work off the JS thread
+// (no native crypto, no worker threads in RN), but we can chunk
+// the iteration loop and await between chunks so the UI keeps
+// breathing — the cancel button stays tappable, progress
+// callbacks can fire and re-render, and the user doesn't see a
+// frozen "Working…". Total wallclock time is roughly the same;
+// it just doesn't block.
+//
+// Chunk size 2000 = ~30 yield points across 100k iters. Each
+// yield is a setTimeout(0) so the event loop runs a real tick
+// (resolve()/microtasks alone don't drain the touch queue).
+const _PBKDF2_CHUNK = 2000;
+
+function _yield() {
+  return new Promise(resolve => setTimeout(resolve, 0));
+}
+
+async function _pbkdf2(pinBytes, salt, iters, dkLen, opts = {}) {
+  const onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : null;
+  const isCancelled = typeof opts.isCancelled === 'function' ? opts.isCancelled : () => false;
   const out = new Uint8Array(dkLen);
   let blockIdx = 1;
   let outOffset = 0;
+  let totalDone = 0;
+  const totalWork = iters * Math.ceil(dkLen / 64);  // ~iters per 64B block
+
   while (outOffset < dkLen) {
     const blockBE = new Uint8Array([(blockIdx>>24)&0xff,(blockIdx>>16)&0xff,(blockIdx>>8)&0xff,blockIdx&0xff]);
     const saltConcat = new Uint8Array(salt.length + 4);
     saltConcat.set(salt, 0); saltConcat.set(blockBE, salt.length);
     let u = _hmacSha512(pinBytes, saltConcat);
     let t = u.slice();
-    for (let i = 1; i < iters; i++) {
-      u = _hmacSha512(pinBytes, u);
-      for (let j = 0; j < t.length; j++) t[j] ^= u[j];
+
+    let i = 1;
+    while (i < iters) {
+      const prevI = i;
+      const stop = Math.min(i + _PBKDF2_CHUNK, iters);
+      while (i < stop) {
+        u = _hmacSha512(pinBytes, u);
+        for (let j = 0; j < t.length; j++) t[j] ^= u[j];
+        i++;
+      }
+      totalDone += (i - prevI);
+      if (isCancelled()) throw new Error('CANCELLED');
+      if (onProgress) {
+        const pct = Math.min(99, Math.round((totalDone / totalWork) * 100));
+        try { onProgress(pct); } catch {}
+      }
+      await _yield();
     }
+
     const copyLen = Math.min(t.length, dkLen - outOffset);
     out.set(t.subarray(0, copyLen), outOffset);
     outOffset += copyLen;
     blockIdx += 1;
   }
+  if (onProgress) { try { onProgress(100); } catch {} }
   return out;
 }
 
-function _deriveKey(pin, salt, iters) {
+async function _deriveKey(pin, salt, iters, opts) {
   const pinBytes = naclUtil.decodeUTF8(String(pin));
-  return _pbkdf2(pinBytes, salt, iters, nacl.secretbox.keyLength); // 32 bytes
+  return _pbkdf2(pinBytes, salt, iters, nacl.secretbox.keyLength, opts); // 32 bytes
 }
 
 // ── Snapshot collection / application ─────────────────────────
@@ -221,12 +259,12 @@ async function _applySnapshot(snap) {
 
 // ── Encrypt / decrypt the snapshot blob ───────────────────────
 
-function _encryptSnapshot(snap, pin, iters = PBKDF2_ITERS_DEFAULT) {
+async function _encryptSnapshot(snap, pin, iters = PBKDF2_ITERS_DEFAULT, kdfOpts) {
   const json   = JSON.stringify(snap);
   const data   = naclUtil.decodeUTF8(json);
   const salt   = nacl.randomBytes(16);
   const nonce  = nacl.randomBytes(nacl.secretbox.nonceLength);
-  const key    = _deriveKey(pin, salt, iters);
+  const key    = await _deriveKey(pin, salt, iters, kdfOpts);
   const cipher = nacl.secretbox(data, nonce, key);
   if (!cipher) throw new Error('Encryption failed');
   return {
@@ -238,14 +276,14 @@ function _encryptSnapshot(snap, pin, iters = PBKDF2_ITERS_DEFAULT) {
   };
 }
 
-function _decryptSnapshot(blob, pin) {
+async function _decryptSnapshot(blob, pin, kdfOpts) {
   const salt   = naclUtil.decodeBase64(blob.salt);
   const nonce  = naclUtil.decodeBase64(blob.nonce);
   const cipher = naclUtil.decodeBase64(blob.payload);
   const iters  = typeof blob.pbkdf2_iters === 'number' && blob.pbkdf2_iters > 0
     ? blob.pbkdf2_iters
     : PBKDF2_ITERS_DEFAULT;
-  const key   = _deriveKey(pin, salt, iters);
+  const key   = await _deriveKey(pin, salt, iters, kdfOpts);
   const plain = nacl.secretbox.open(cipher, nonce, key);
   if (!plain) throw new Error('WRONG_PIN');
   const json = naclUtil.encodeUTF8(plain);
@@ -260,7 +298,8 @@ function _decryptSnapshot(blob, pin) {
  * `force` is true. No UI side effects — caller decides whether
  * to surface success/failure to the user.
  */
-export async function runHistoryBackup(pin, { force = false } = {}) {
+export async function runHistoryBackup(pin, opts = {}) {
+  const { force = false, onProgress, isCancelled } = opts;
   // 4-digit PIN floor matches the rest of VaultChat's PIN UX. The
   // backup-attack trade-off is documented in the file header.
   if (!pin || String(pin).length < 4) {
@@ -285,7 +324,10 @@ export async function runHistoryBackup(pin, { force = false } = {}) {
       return { ok: true, skipped: true, reason: 'empty' };
     }
 
-    const enc = _encryptSnapshot(snap, pin);
+    const enc = await _encryptSnapshot(snap, pin, PBKDF2_ITERS_DEFAULT, { onProgress, isCancelled });
+    if (typeof isCancelled === 'function' && isCancelled()) {
+      return { ok: false, code: 'CANCELLED', message: 'Cancelled.' };
+    }
     const { error } = await supabase
       .from('message_history_blob')
       .upsert({
@@ -309,6 +351,9 @@ export async function runHistoryBackup(pin, { force = false } = {}) {
       groups: Object.keys(snap.groups).length,
     };
   } catch (e) {
+    if (e?.message === 'CANCELLED') {
+      return { ok: false, code: 'CANCELLED', message: 'Cancelled.' };
+    }
     if (__DEV__) console.warn('[historyBackup] failed:', e?.message);
     return { ok: false, message: e?.message || 'Backup failed.' };
   }
@@ -354,7 +399,8 @@ export async function fetchHistoryBackupMeta() {
  *   - 'WRONG_PIN'
  *   - any other error message
  */
-export async function runHistoryRestore(pin) {
+export async function runHistoryRestore(pin, opts = {}) {
+  const { onProgress, isCancelled } = opts;
   if (!pin) return { ok: false, message: 'PIN required.' };
   try {
     const { data: { user } = {} } = await supabase.auth.getUser();
@@ -369,12 +415,18 @@ export async function runHistoryRestore(pin) {
 
     let snap;
     try {
-      snap = _decryptSnapshot(data, pin);
+      snap = await _decryptSnapshot(data, pin, { onProgress, isCancelled });
     } catch (e) {
       if (e?.message === 'WRONG_PIN') {
         return { ok: false, code: 'WRONG_PIN', message: 'Wrong PIN — couldn’t decrypt the backup.' };
       }
+      if (e?.message === 'CANCELLED') {
+        return { ok: false, code: 'CANCELLED', message: 'Cancelled.' };
+      }
       throw e;
+    }
+    if (typeof isCancelled === 'function' && isCancelled()) {
+      return { ok: false, code: 'CANCELLED', message: 'Cancelled.' };
     }
     const result = await _applySnapshot(snap);
     return { ...result };

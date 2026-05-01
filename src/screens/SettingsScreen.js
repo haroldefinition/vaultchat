@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, Alert, Image, TextInput, Modal, Linking, ActivityIndicator } from 'react-native';
 import { supabase } from '../services/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -78,6 +78,16 @@ export default function SettingsScreen({ navigation }) {
   const [backupModal, setBackupModal] = useState(false);
   const [backupMode,  setBackupMode]  = useState('export');
   const [backupPin,   setBackupPin]   = useState('');
+  // 0..100 progress percentage during cloud-backup PBKDF2 work.
+  // null when not running so we can render the static button label
+  // instead of the progress UI.
+  const [backupProgress, setBackupProgress] = useState(null);
+  // Cancellation token shared with runHistoryBackup/Restore. When
+  // the user taps Cancel we flip the .cancelled flag; the yieldy
+  // PBKDF2 checks it between chunks and throws CANCELLED. Using a
+  // ref instead of state so the callback the worker captures
+  // sees the latest value without needing re-render.
+  const backupCancelRef = useRef({ cancelled: false });
   const [backupBusy,  setBackupBusy]  = useState(false);
   const [devCallState, setDevCallState] = useState('idle');
   const [devSocketConnected, setDevSocketConnected] = useState(false);
@@ -1356,15 +1366,23 @@ export default function SettingsScreen({ navigation }) {
                     setBackupModal(false);
                     Alert.alert(r.ok ? 'Restored' : 'Restore failed', r.message);
                   } else if (backupMode === 'cloud-export') {
-                    // 90-day history → Supabase. Per Harold (product
-                    // call 2026-04-30): keep the 4-digit PIN floor —
-                    // matches the rest of VaultChat's PIN UX. The
-                    // PBKDF2 1M iter cost helps but a leaked blob is
-                    // still brute-forceable from a short PIN; that
-                    // trade-off is documented in historyBackup.js.
-                    const r = await runHistoryBackup(backupPin, { force: true });
+                    // 90-day history → Supabase. Yieldy PBKDF2
+                    // reports progress + checks cancel between
+                    // chunks so the UI stays interactive.
+                    backupCancelRef.current = { cancelled: false };
+                    setBackupProgress(0);
+                    const r = await runHistoryBackup(backupPin, {
+                      force: true,
+                      onProgress: pct => setBackupProgress(pct),
+                      isCancelled: () => backupCancelRef.current.cancelled,
+                    });
+                    setBackupProgress(null);
                     setBackupBusy(false);
                     setBackupModal(false);
+                    if (r.code === 'CANCELLED') {
+                      // User aborted — no toast, just close.
+                      return;
+                    }
                     if (r.ok && r.skipped) {
                       Alert.alert('Nothing to back up', 'No cached messages were found on this device yet.');
                     } else if (r.ok) {
@@ -1376,10 +1394,17 @@ export default function SettingsScreen({ navigation }) {
                       Alert.alert('Backup failed', r.message || 'Try again in a moment.');
                     }
                   } else {
-                    // cloud-restore
-                    const r = await runHistoryRestore(backupPin);
+                    // cloud-restore — same progress + cancel wiring.
+                    backupCancelRef.current = { cancelled: false };
+                    setBackupProgress(0);
+                    const r = await runHistoryRestore(backupPin, {
+                      onProgress: pct => setBackupProgress(pct),
+                      isCancelled: () => backupCancelRef.current.cancelled,
+                    });
+                    setBackupProgress(null);
                     setBackupBusy(false);
                     setBackupModal(false);
+                    if (r.code === 'CANCELLED') return;
                     if (r.ok) {
                       Alert.alert('Restored', `${r.restored || 0} message${r.restored === 1 ? '' : 's'} merged into this device. Open a chat to see them.`);
                     } else if (r.code === 'NO_BACKUP') {
@@ -1398,8 +1423,8 @@ export default function SettingsScreen({ navigation }) {
               {backupBusy && <ActivityIndicator color="#fff" />}
               <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>
                 {backupBusy
-                  ? (backupMode === 'cloud-export'  ? 'Encrypting…'
-                  :  backupMode === 'cloud-restore' ? 'Decrypting…'
+                  ? (backupMode === 'cloud-export'  ? `Encrypting… ${backupProgress != null ? backupProgress + '%' : ''}`.trim()
+                  :  backupMode === 'cloud-restore' ? `Decrypting… ${backupProgress != null ? backupProgress + '%' : ''}`.trim()
                   :                                   'Working…')
                   : (backupMode === 'export'        ? 'Encrypt & Export'
                   :  backupMode === 'restore'       ? 'Decrypt & Restore'
@@ -1407,8 +1432,39 @@ export default function SettingsScreen({ navigation }) {
                   :                                   'Download & Decrypt')}
               </Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => !backupBusy && setBackupModal(false)} style={{ alignItems: 'center', paddingVertical: 12, marginTop: 4 }}>
-              <Text style={{ color: sub, fontSize: 14 }}>Cancel</Text>
+
+            {/* Determinate progress bar — only visible while a
+                cloud op is running. The yieldy PBKDF2 fires
+                onProgress between chunks, which keeps backupProgress
+                ticking up to ~99% during key derivation. The final
+                upload step jumps straight to 100% on success. */}
+            {backupBusy && backupProgress != null && (
+              <View style={{
+                marginTop: 12, height: 6, backgroundColor: 'rgba(255,255,255,0.08)',
+                borderRadius: 3, overflow: 'hidden',
+              }}>
+                <View style={{
+                  width: `${backupProgress}%`, height: '100%', backgroundColor: accent,
+                }} />
+              </View>
+            )}
+
+            {/* Cancel — always reachable. While busy, taps flip the
+                cancellation flag so the next PBKDF2 chunk throws
+                CANCELLED and the modal closes cleanly. */}
+            <TouchableOpacity
+              onPress={() => {
+                if (backupBusy) {
+                  backupCancelRef.current.cancelled = true;
+                } else {
+                  setBackupModal(false);
+                }
+              }}
+              style={{ alignItems: 'center', paddingVertical: 14, marginTop: 6 }}
+            >
+              <Text style={{ color: sub, fontSize: 14, fontWeight: '600' }}>
+                {backupBusy ? 'Stop' : 'Cancel'}
+              </Text>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
