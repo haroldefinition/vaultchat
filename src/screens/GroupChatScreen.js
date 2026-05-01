@@ -1306,19 +1306,12 @@ export default function GroupChatScreen({ route, navigation }) {
       {/* Messages */}
       <FlatList
         ref={flatRef}
-        // Same time-window policy as ChatRoomScreen: hide
-        // undecryptables older than 24h (forward-secrecy victims,
-        // dead forever) but keep recent ones visible so live
-        // delivery failures stay diagnosable.
+        // Blanket-hide undecryptables (Harold's product call) —
+        // matches WhatsApp / Signal / iMessage behavior. Diagnostic
+        // value moves to Sentry, not the UI.
         data={(() => {
           const PLACEHOLDER = '[Can’t decrypt this message on this device]';
-          const RECENT_MS = 24 * 60 * 60 * 1000;
-          const now = Date.now();
-          const visible = messages.filter(m => {
-            if ((m.content || '') !== PLACEHOLDER) return true;
-            const ts = m.created_at ? new Date(m.created_at).getTime() : 0;
-            return ts && (now - ts) < RECENT_MS;
-          });
+          const visible = messages.filter(m => (m.content || '') !== PLACEHOLDER);
           return [...visible].reverse();
         })()}
         keyExtractor={(item, i) => String(item.id || i)}

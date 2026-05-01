@@ -1853,33 +1853,21 @@ export default function ChatRoomScreen({ route, navigation }) {
       <FlatList
         ref={listRef}
         data={(() => {
-          // Decrypt-failure handling, third iteration:
-          //   - Messages older than 24h that fail to decrypt are
-          //     forward-secrecy victims (the keys to open them are
-          //     gone forever). Hide them entirely — there's nothing
-          //     the user can do about them and a wall of "🔒 Can't
-          //     read this message" rows just frustrates everyone.
-          //   - Messages newer than 24h that fail to decrypt MIGHT
-          //     be live deliveries that haven't decrypted yet
-          //     because keys are still being negotiated. Keep them
-          //     visible as the neutral indicator so we don't
-          //     silently swallow real arrivals (which is what the
-          //     blanket-hide did to Sam's live messages earlier).
+          // Final policy on decrypt-failure handling (per Harold,
+          // product call): blanket-hide. WhatsApp / Signal /
+          // iMessage don't surface decrypt-failure placeholders to
+          // users — they solve this with backup/restore
+          // architecture and treat un-decryptable messages as
+          // simply absent. We do the same. The trade-off is that
+          // a very rare live delivery to a peer with stale keys
+          // becomes invisible until our key republish kicks in
+          // and the next message decrypts cleanly. The diagnostic
+          // value of seeing failures lives in Sentry, not the UI.
           const PLACEHOLDER = '[Can’t decrypt this message on this device]';
-          const RECENT_MS = 24 * 60 * 60 * 1000;
-          const now = Date.now();
-          const transformed = messages
-            .map(m => {
-              if ((m.content || '') !== PLACEHOLDER) return m;
-              const ts = m.created_at ? new Date(m.created_at).getTime() : 0;
-              const isRecent = ts && (now - ts) < RECENT_MS;
-              if (!isRecent) return null;            // hide old dead msgs
-              return { ...m, _type: 'undecryptable' };
-            })
-            .filter(Boolean);
+          const visible = messages.filter(m => (m.content || '') !== PLACEHOLDER);
           const list = searchQuery.trim()
-            ? transformed.filter(m => m._type !== 'undecryptable' && (m.content || '').toLowerCase().includes(searchQuery.toLowerCase()))
-            : transformed;
+            ? visible.filter(m => (m.content || '').toLowerCase().includes(searchQuery.toLowerCase()))
+            : visible;
           // Pre-enrich the message list with non-message rows that get
           // dispatched in renderItem:
           //   - 'date': "Today" / "Yesterday" / weekday separator pill
@@ -1950,21 +1938,8 @@ export default function ChatRoomScreen({ route, navigation }) {
               </TouchableOpacity>
             );
           }
-          if (item._type === 'undecryptable') {
-            // Soft neutral indicator — proves SOMETHING arrived from
-            // the peer, doesn't expose the raw "[Can't decrypt...]"
-            // string, leaves a stable mental anchor for the user.
-            // Aligned by sender so the placeholder still reads as a
-            // proper bubble in the conversation flow.
-            const me = item.sender_id === myId;
-            return (
-              <View style={{ flexDirection: 'row', justifyContent: me ? 'flex-end' : 'flex-start', paddingHorizontal: 6, paddingVertical: 4 }}>
-                <View style={{ backgroundColor: sub + '22', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8, maxWidth: '70%' }}>
-                  <Text style={{ color: sub, fontSize: 13, fontStyle: 'italic' }}>🔒 Can't read this message</Text>
-                </View>
-              </View>
-            );
-          }
+          // (Undecryptable sentinel branch removed — see data:
+          //  blanket-hide policy filters them upstream now.)
           return (
             <Bubble
               item={item} myId={myId} tx={tx} sub={sub} card={card} accent={accent}
