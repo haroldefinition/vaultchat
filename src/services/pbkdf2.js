@@ -137,11 +137,26 @@ export async function pbkdf2HmacSha512(pinBytes, salt, iters, dkLen, opts = {}) 
     const hasBuffer = typeof Buffer !== 'undefined' && typeof Buffer.from === 'function';
     const pwArg   = hasBuffer ? Buffer.from(pinBytes) : pinBytes;
     const saltArg = hasBuffer ? Buffer.from(salt)     : salt;
-    const out = _nativePbkdf2(pwArg, saltArg, iters, dkLen, 'sha512');
-    if (onProgress) {
-      try { onProgress(100); } catch {}
+    try {
+      const out = _nativePbkdf2(pwArg, saltArg, iters, dkLen, 'sha512');
+      if (onProgress) {
+        try { onProgress(100); } catch {}
+      }
+      return out;
+    } catch (e) {
+      // CANCELLED is from us, propagate. Anything else means the
+      // native binding failed at call time (HybridObject not
+      // registered, Nitro Modules misconfig, etc.) — disable the
+      // fast path for the rest of the session and fall through to
+      // the pure-JS path below so the user can still finish their
+      // backup. Surfaces the failure once in the dev console.
+      if (e?.message === 'CANCELLED') throw e;
+      if (typeof __DEV__ !== 'undefined' && __DEV__) {
+        console.warn('[pbkdf2] native call failed, disabling fast path:', e?.message);
+      }
+      _nativePbkdf2 = null;
+      // Fall through to JS implementation below.
     }
-    return out;
   }
 
   // ── PURE-JS YIELDY FALLBACK ────────────────────────────────
