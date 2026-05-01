@@ -19,7 +19,7 @@
 //  screen graph.
 // ============================================================
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { Modal, View, Text, TextInput, TouchableOpacity, ActivityIndicator, Alert, StyleSheet } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../services/supabase';
@@ -35,6 +35,14 @@ export default function HistoryRestorePrompt() {
   const [meta, setMeta]       = useState(null);
   const [pin, setPin]         = useState('');
   const [busy, setBusy]       = useState(false);
+  // 0..100 progress during PBKDF2 derivation. null when idle.
+  const [progress, setProgress] = useState(null);
+  // Cancellation token shared with runHistoryRestore. Mutating
+  // .cancelled flips the flag the yieldy PBKDF2 checks between
+  // chunks (no effect on the native fast path which is too quick
+  // to need cancelling). Ref so the captured callback sees fresh
+  // values without re-renders.
+  const cancelRef = useRef({ cancelled: false });
 
   // Run the backup probe whenever the user's auth state changes
   // to "signed in". On a cold app start during registration the
@@ -87,10 +95,20 @@ export default function HistoryRestorePrompt() {
 
   const onRestore = useCallback(async () => {
     if (!pin) return;
+    cancelRef.current = { cancelled: false };
+    setProgress(0);
     setBusy(true);
     try {
-      const r = await runHistoryRestore(pin);
+      const r = await runHistoryRestore(pin, {
+        onProgress: pct => setProgress(pct),
+        isCancelled: () => cancelRef.current.cancelled,
+      });
+      setProgress(null);
       setBusy(false);
+      if (r.code === 'CANCELLED') {
+        // User aborted — stay in the modal so they can try again.
+        return;
+      }
       if (r.ok) {
         await AsyncStorage.setItem(OFFERED_KEY, '1').catch(() => {});
         Alert.alert(
@@ -109,6 +127,7 @@ export default function HistoryRestorePrompt() {
         Alert.alert('Restore failed', r.message || 'Try again from Settings → Restore Chats from Cloud.');
       }
     } catch (e) {
+      setProgress(null);
       setBusy(false);
       Alert.alert('Error', e?.message || 'Something went wrong.');
     }
@@ -158,12 +177,43 @@ export default function HistoryRestorePrompt() {
             activeOpacity={0.85}
           >
             {busy
-              ? <ActivityIndicator color="#fff" />
+              ? (
+                  <View style={s.primaryBusy}>
+                    <ActivityIndicator color="#fff" />
+                    <Text style={s.primaryTx}>
+                      {`Decrypting…${progress != null ? ' ' + progress + '%' : ''}`}
+                    </Text>
+                  </View>
+                )
               : <Text style={s.primaryTx}>Restore my chats</Text>}
           </TouchableOpacity>
 
-          <TouchableOpacity onPress={() => dismiss(true)} disabled={busy} style={s.secondary}>
-            <Text style={s.secondaryTx}>Not now</Text>
+          {/* Progress bar — only while busy. Determinate fill from
+              the PBKDF2 onProgress callback. The native fast path
+              completes too quickly to render visible progress; the
+              JS fallback (Simulator quirk, missing native module)
+              ticks 0 → 99 over ~10s so the user sees movement. */}
+          {busy && progress != null && (
+            <View style={s.progressTrack}>
+              <View style={[s.progressFill, { width: `${progress}%` }]} />
+            </View>
+          )}
+
+          {/* Secondary action: "Not now" when idle, "Stop" while
+              busy. Stop flips the cancellation flag — next yieldy
+              chunk throws CANCELLED and the modal stays open so
+              the user can retry without losing the typed PIN. */}
+          <TouchableOpacity
+            onPress={() => {
+              if (busy) {
+                cancelRef.current.cancelled = true;
+              } else {
+                dismiss(true);
+              }
+            }}
+            style={s.secondary}
+          >
+            <Text style={s.secondaryTx}>{busy ? 'Stop' : 'Not now'}</Text>
           </TouchableOpacity>
 
           <Text style={s.fineprint}>
@@ -203,7 +253,14 @@ const s = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 }, shadowRadius: 14,
     elevation: 4,
   },
+  primaryBusy: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   primaryTx: { color: '#fff', fontWeight: '800', fontSize: 15, letterSpacing: 0.3 },
+  progressTrack: {
+    marginTop: 10, height: 6,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 3, overflow: 'hidden',
+  },
+  progressFill: { height: '100%', backgroundColor: PURPLE },
   secondary: { alignItems: 'center', paddingVertical: 12, marginTop: 2 },
   secondaryTx: { color: 'rgba(255,255,255,0.55)', fontSize: 14 },
   fineprint: {
