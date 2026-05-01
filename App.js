@@ -295,6 +295,39 @@ export default Sentry.wrap(function App() {
         if (state === 'active') {
           flushQueue();
           clearBadge();
+          // Silent weekly auto-backup (Apr 30). Runs on every
+          // app foreground but only triggers if 7+ days have
+          // elapsed since the last successful run AND the user
+          // has a Vault PIN set (required to encrypt the backup).
+          // No notifications, no UI — backups land in the app's
+          // private documents directory and are restorable from
+          // Settings → Restore Vault if ever needed.
+          try {
+            const last = parseInt(await AsyncStorage.getItem('vaultchat_last_auto_backup') || '0', 10);
+            const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+            if (Date.now() - last >= WEEK_MS) {
+              const { hasVaultPin, getPin } = require('./src/services/vault');
+              const has = await hasVaultPin();
+              if (has) {
+                // We need the actual PIN value to derive the backup
+                // encryption key. vault.js doesn't expose getPin
+                // directly — pull from securePinStore via the same
+                // PIN_KEY_VAULT constant.
+                const { getPin: spGet, PIN_KEY_VAULT } = require('./src/services/securePinStore');
+                const pin = await spGet(PIN_KEY_VAULT).catch(() => null);
+                if (pin) {
+                  const { silentAutoBackup } = require('./src/services/vaultBackup');
+                  const r = await silentAutoBackup(pin);
+                  if (r?.ok) {
+                    await AsyncStorage.setItem('vaultchat_last_auto_backup', String(Date.now()));
+                    if (__DEV__) console.log('[auto-backup] weekly backup written:', r.path);
+                  }
+                }
+              }
+            }
+          } catch (e) {
+            if (__DEV__) console.warn('[auto-backup] check failed:', e?.message || e);
+          }
         }
       });
 

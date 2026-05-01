@@ -169,6 +169,72 @@ export async function exportVaultBackup(pin) {
   }
 }
 
+// ── Silent weekly auto-backup (Apr 30 launch addition) ─────────
+//
+// Same encryption + write as exportVaultBackup, but:
+//   - never pops the Share sheet (silent — no UI, no nudges)
+//   - writes to a stable rotating filename inside the app's
+//     sandboxed documents directory (auto-backup-N.vchat)
+//   - keeps the last 4 weekly backups, deletes older
+//   - skips if no PIN supplied (can't encrypt without one)
+//
+// Triggered from App.js on app foreground when 7+ days have
+// passed since the last successful backup. Tracked via
+// AsyncStorage `vaultchat_last_auto_backup` timestamp.
+//
+// Files live in iOS/Android private app sandbox so they're
+// protected by the OS and aren't visible in Files / iCloud
+// Drive unless the user manually exports via the Settings →
+// Backup Vault flow (which still uses the Share-sheet path).
+
+const AUTO_BACKUP_KEEP = 4;          // keep last 4 weeks
+const AUTO_BACKUP_PREFIX = 'auto-backup-';
+
+export async function silentAutoBackup(pin) {
+  if (!pin || String(pin).length < 4) {
+    return { ok: false, message: 'Skipped — no Vault PIN set.' };
+  }
+  try {
+    const snap   = await _collectSnapshot();
+    const json   = JSON.stringify(snap);
+    const data   = naclUtil.decodeUTF8(json);
+    const salt   = nacl.randomBytes(16);
+    const nonce  = nacl.randomBytes(nacl.secretbox.nonceLength);
+    const key    = _deriveKey(pin, salt);
+    const cipher = nacl.secretbox(data, nonce, key);
+    if (!cipher) throw new Error('Encryption failed');
+
+    const blob = HEADER +
+      naclUtil.encodeBase64(salt)   + ':' +
+      naclUtil.encodeBase64(nonce)  + ':' +
+      naclUtil.encodeBase64(cipher);
+
+    const ts       = Date.now();
+    const filename = `${AUTO_BACKUP_PREFIX}${ts}.vchat`;
+    const dir      = FileSystem.documentDirectory || FileSystem.cacheDirectory;
+    const uri      = `${dir}${filename}`;
+    await FileSystem.writeAsStringAsync(uri, blob, { encoding: FileSystem.EncodingType.UTF8 });
+
+    // Rotation — keep the last AUTO_BACKUP_KEEP, delete older.
+    try {
+      const list = await FileSystem.readDirectoryAsync(dir);
+      const autos = list
+        .filter(n => n.startsWith(AUTO_BACKUP_PREFIX) && n.endsWith('.vchat'))
+        .sort()      // ts in filename → lexicographic sort works
+        .reverse();  // newest first
+      const toDelete = autos.slice(AUTO_BACKUP_KEEP);
+      for (const name of toDelete) {
+        try { await FileSystem.deleteAsync(`${dir}${name}`, { idempotent: true }); } catch {}
+      }
+    } catch {}
+
+    return { ok: true, path: uri, message: 'Silent backup written.' };
+  } catch (e) {
+    if (__DEV__) console.warn('silentAutoBackup error:', e?.message);
+    return { ok: false, message: 'Silent backup failed.' };
+  }
+}
+
 // ── Restore ───────────────────────────────────────────────────
 
 /**
