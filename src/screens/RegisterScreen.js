@@ -8,6 +8,7 @@ import { supabase } from '../services/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { saveHandle } from '../services/vaultHandle';
 import { publishMyPublicKey } from '../services/keyExchange';
+import { hasVaultPin, setVaultPin } from '../services/vault';
 
 const LOGO    = require('../../assets/vaultchat-logo.png');
 const SW      = Dimensions.get('window').width;
@@ -40,9 +41,21 @@ export default function RegisterScreen({ route, onLoginCallback }) {
   const [email,   setEmail]   = useState('');
   const [otp,     setOtp]     = useState('');
   const [handle,  setHandle]  = useState('');
-  const [step,    setStep]    = useState('identifier'); // identifier → otp → handle
+  // identifier → otp → pin → handle
+  // (pin step is skipped if hasVaultPin() returns true, which
+  // is the case for users who already set up a PIN on this
+  // install — including any existing user signing back in
+  // after we've already migrated them through the PIN step.)
+  const [step,    setStep]    = useState('identifier');
   const [loading, setLoading] = useState(false);
   const [userId,  setUserId]  = useState('');
+  const [pin,         setPin]         = useState('');
+  const [pinConfirm,  setPinConfirm]  = useState('');
+  const [pinErr,      setPinErr]      = useState('');
+  // Carry the existing-handle flag forward from the OTP step so
+  // saveVaultPinAndContinue knows whether to advance to handle
+  // creation or jump straight into the app.
+  const [hasExistingHandle, setHasExistingHandle] = useState(false);
 
   // Which identifier is locked in for this attempt (stored so OTP/handle steps know)
   const [sentTo, setSentTo] = useState({ method: 'phone', value: '' });
@@ -142,32 +155,88 @@ export default function RegisterScreen({ route, onLoginCallback }) {
       const { data, error } = await supabase.auth.verifyOtp(verifyArgs);
       if (!error && data?.user) {
         setUserId(data.user.id);
+        // Persist the auth pointer first — same shape as before.
+        // Whether we advance to PIN, handle, or straight into the
+        // app, this row needs to exist for subsequent screens to
+        // know who's signed in.
+        await AsyncStorage.setItem(
+          'vaultchat_user',
+          JSON.stringify(
+            sentTo.method === 'phone'
+              ? { phone: sentTo.value, id: data.user.id }
+              : { email: sentTo.value, id: data.user.id }
+          )
+        );
         const { data: profile } = await supabase
           .from('profiles')
           .select('handle')
           .eq('id', data.user.id)
           .single();
-        if (profile?.handle) {
-          await AsyncStorage.setItem(
-            'vaultchat_user',
-            JSON.stringify(
-              sentTo.method === 'phone'
-                ? { phone: sentTo.value, id: data.user.id }
-                : { email: sentTo.value, id: data.user.id }
-            )
-          );
+        const handleAlreadySet = !!profile?.handle;
+        setHasExistingHandle(handleAlreadySet);
+
+        // If a Vault PIN is already set on this install, skip the
+        // PIN step. (This covers returning users who already went
+        // through PIN setup on a prior login.)
+        const pinAlreadySet = await hasVaultPin().catch(() => false);
+        if (pinAlreadySet) {
+          if (handleAlreadySet) {
+            setLoading(false);
+            onLogin?.();
+            return;
+          }
           setLoading(false);
-          onLogin?.();
+          setHandle(prev => prev || suggestHandle());
+          setStep('handle');
           return;
         }
+
+        // No PIN yet — every user must set one before continuing.
+        // The PIN doubles as the encryption key for the cloud
+        // chat history backup (services/historyBackup.js), so
+        // making it a required step right after verification means
+        // backup runs automatically from day one.
         setLoading(false);
-        setHandle(prev => prev || suggestHandle());
-        setStep('handle');
+        setPin(''); setPinConfirm(''); setPinErr('');
+        setStep('pin');
         return;
       }
     } catch {}
     setLoading(false);
     Alert.alert('Invalid Code', 'The code didn\'t match. Double-check the SMS we sent and try again.');
+  }
+
+  // ── Save Vault PIN & advance ──────────────────────────────────
+  // Called from the PIN step. Validates exactly-4 digits + match,
+  // persists via setVaultPin (which wires both the secure-store
+  // entry AND the hasVaultPin() flag), then routes to either the
+  // handle step (new user) or straight into the app (existing
+  // account that just needed PIN migration).
+  async function saveVaultPinAndContinue() {
+    setPinErr('');
+    if (!/^\d{4}$/.test(pin)) {
+      setPinErr('Enter a 4-digit PIN.');
+      return;
+    }
+    if (pin !== pinConfirm) {
+      setPinErr('PINs don\'t match.');
+      return;
+    }
+    setLoading(true);
+    try {
+      await setVaultPin(pin);
+    } catch (e) {
+      setLoading(false);
+      setPinErr(e?.message || 'Couldn\'t save PIN. Try again.');
+      return;
+    }
+    setLoading(false);
+    if (hasExistingHandle) {
+      onLogin?.();
+      return;
+    }
+    setHandle(prev => prev || suggestHandle());
+    setStep('handle');
   }
 
   // ── Save handle & enter app ───────────────────────────────────
@@ -400,6 +469,73 @@ export default function RegisterScreen({ route, onLoginCallback }) {
 
             <Text style={s.badge}>
               🔒 End-to-end encrypted · Metadata private · No ads
+            </Text>
+          </View>
+        )}
+
+        {/* ── PIN STEP ───────────────────────────────────────
+            Required 4-digit Vault PIN. Inserted between OTP
+            verification and @handle creation per Harold's product
+            call (2026-04-30): "users will forget about backups so
+            that has to be done automatically." Setting the PIN at
+            registration means the cloud history backup
+            (services/historyBackup.js) has an encryption key from
+            day one and runs silently in the background. */}
+        {step === 'pin' && (
+          <View style={s.content}>
+            {LogoBlock}
+
+            <Text style={s.heading}>Set Up Your Vault PIN</Text>
+            <Text style={s.subheading}>
+              Encrypts your chats so only you can read them — and lets you back them up to the cloud safely.
+            </Text>
+
+            <View style={s.inputBox}>
+              <TextInput
+                style={[s.textInput, { textAlign: 'center', letterSpacing: 8, fontSize: 22, paddingLeft: 0 }]}
+                placeholder="4-digit PIN"
+                placeholderTextColor={C.placeholder}
+                value={pin}
+                onChangeText={t => setPin((t || '').replace(/\D/g, '').slice(0, 4))}
+                maxLength={4}
+                keyboardType="number-pad"
+                secureTextEntry
+                autoFocus
+              />
+            </View>
+
+            <View style={[s.inputBox, { marginTop: 12 }]}>
+              <TextInput
+                style={[s.textInput, { textAlign: 'center', letterSpacing: 8, fontSize: 22, paddingLeft: 0 }]}
+                placeholder="Confirm PIN"
+                placeholderTextColor={C.placeholder}
+                value={pinConfirm}
+                onChangeText={t => setPinConfirm((t || '').replace(/\D/g, '').slice(0, 4))}
+                maxLength={4}
+                keyboardType="number-pad"
+                secureTextEntry
+              />
+            </View>
+
+            {!!pinErr && (
+              <Text style={[s.hint, { color: '#DC2626', marginTop: 10 }]}>{pinErr}</Text>
+            )}
+
+            <Text style={s.hint}>
+              Pick something you'll remember — you'll need it to restore your chat history on a new device. We never see your PIN.
+            </Text>
+
+            <TouchableOpacity
+              style={[s.btn, (pin.length < 4 || pinConfirm.length < 4) && s.btnOff]}
+              onPress={saveVaultPinAndContinue}
+              disabled={loading || pin.length < 4 || pinConfirm.length < 4}>
+              {loading
+                ? <ActivityIndicator color="#fff" />
+                : <Text style={s.btnTx}>Continue →</Text>}
+            </TouchableOpacity>
+
+            <Text style={s.badge}>
+              🔒 PIN-derived key encrypts your backup · Server can't read it
             </Text>
           </View>
         )}

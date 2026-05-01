@@ -22,6 +22,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Modal, View, Text, TextInput, TouchableOpacity, ActivityIndicator, Alert, StyleSheet } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase } from '../services/supabase';
 import { fetchHistoryBackupMeta, runHistoryRestore } from '../services/historyBackup';
 
 const OFFERED_KEY = 'vaultchat_history_restore_offered_v1';
@@ -35,11 +36,16 @@ export default function HistoryRestorePrompt() {
   const [pin, setPin]         = useState('');
   const [busy, setBusy]       = useState(false);
 
-  // One-shot probe: on mount, see if a backup exists and we
-  // haven't already offered to restore it.
+  // Run the backup probe whenever the user's auth state changes
+  // to "signed in". On a cold app start during registration the
+  // user isn't signed in yet — we'd run the check too early and
+  // fetchHistoryBackupMeta would return NOT_SIGNED_IN. Listening
+  // to onAuthStateChange means we re-run after OTP verification
+  // even if the prompt mounted before sign-in completed.
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+
+    async function probe() {
       try {
         const offered = await AsyncStorage.getItem(OFFERED_KEY);
         if (offered === '1') return;
@@ -50,8 +56,26 @@ export default function HistoryRestorePrompt() {
           setVisible(true);
         }
       } catch {}
-    })();
-    return () => { cancelled = true; };
+    }
+
+    // Initial probe (covers the case where the user is already
+    // signed in when the app cold-starts).
+    probe();
+
+    // Re-probe whenever auth flips. SIGNED_IN is the event we
+    // want; ignore SIGNED_OUT / TOKEN_REFRESHED.
+    let sub;
+    try {
+      const r = supabase.auth.onAuthStateChange((event) => {
+        if (event === 'SIGNED_IN') probe();
+      });
+      sub = r?.data?.subscription || r?.subscription || null;
+    } catch {}
+
+    return () => {
+      cancelled = true;
+      try { sub?.unsubscribe?.(); } catch {}
+    };
   }, []);
 
   const dismiss = useCallback((markOffered) => {
