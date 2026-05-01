@@ -1,24 +1,72 @@
 // ============================================================
-//  pbkdf2.js — shared yieldy async PBKDF2-HMAC-SHA512
+//  pbkdf2.js — shared PBKDF2-HMAC-SHA512 with native fast path
 //
-//  Pure-JS PBKDF2 built on tweetnacl primitives. We can't move
-//  the work off the JS thread (no native crypto bridge, no JS
-//  worker threads in RN), but we can chunk the iteration loop
-//  and await between chunks so the UI stays interactive — the
-//  cancel button stays tappable, progress callbacks can fire
-//  and re-render, and the user doesn't see a frozen "Working…".
+//  Two implementations selected at runtime:
+//
+//   1. NATIVE (preferred). When react-native-quick-crypto is
+//      installed and exposes pbkdf2Sync, we call into the
+//      native C++ implementation. ~10-100x faster than JS.
+//      100k iters: ~500ms; 200k iters: ~1s. Synchronous —
+//      blocks the JS thread but for a short enough window that
+//      the UI doesn't visibly freeze. Progress goes 0 → 100 in
+//      a single jump.
+//
+//   2. PURE-JS YIELDY FALLBACK. tweetnacl-based, used when the
+//      native module isn't available (web, tests, or if the
+//      native build failed). Chunks the iteration loop and
+//      awaits between chunks so the UI stays interactive — the
+//      cancel button stays tappable, progress callbacks fire,
+//      and the user doesn't see a frozen "Working…". Wallclock
+//      is much slower (~10s for 100k iters) but doesn't block.
 //
 //  Used by:
 //    - services/historyBackup.js   (cloud chat-history backup)
 //    - services/vaultBackup.js     (file-based vault backup)
-//
-//  Future: drop in react-native-quick-crypto's hardware-backed
-//  PBKDF2 here for a 10-100× speedup. Should be a single-file
-//  swap because everything routes through deriveKey() below.
 // ============================================================
 
 import nacl from 'tweetnacl';
 import naclUtil from 'tweetnacl-util';
+
+// ── Native PBKDF2 detection ───────────────────────────────────
+// Try to bind react-native-quick-crypto's pbkdf2Sync at module
+// load. The library has shipped a few API shapes across versions
+// — check the most common ones, fall back to JS if none match.
+// Wrapped in try/catch so a missing module is silent.
+let _nativePbkdf2 = null;
+try {
+  // eslint-disable-next-line global-require
+  const QC = require('react-native-quick-crypto');
+  // v1.x exposes pbkdf2Sync directly on the namespace; some
+  // builds put it on a `default` or `Crypto` namespace.
+  const candidate =
+    (QC && typeof QC.pbkdf2Sync === 'function' && QC.pbkdf2Sync) ||
+    (QC && QC.default && typeof QC.default.pbkdf2Sync === 'function' && QC.default.pbkdf2Sync) ||
+    (QC && QC.Crypto && typeof QC.Crypto.pbkdf2Sync === 'function' && QC.Crypto.pbkdf2Sync) ||
+    null;
+  if (candidate) {
+    _nativePbkdf2 = (password, salt, iters, dkLen, digest) => {
+      const result = candidate(password, salt, iters, dkLen, digest);
+      // Return as Uint8Array regardless of whether the binding
+      // returns a Buffer (extends Uint8Array) or a plain typed array.
+      if (result instanceof Uint8Array) return result;
+      if (result && typeof result.byteLength === 'number') {
+        return new Uint8Array(result.buffer, result.byteOffset || 0, result.byteLength);
+      }
+      // Last resort — coerce.
+      return new Uint8Array(result);
+    };
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+      console.log('[pbkdf2] native fast path enabled (react-native-quick-crypto)');
+    }
+  }
+} catch (e) {
+  // Module not installed (tests, web, or RN build without the
+  // native module compiled in). Yieldy JS fallback below handles
+  // it transparently.
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    console.log('[pbkdf2] native module unavailable, using JS fallback:', e?.message);
+  }
+}
 
 const CHUNK = 2000;  // ~30-50 yield points across 100k iters
 
@@ -68,6 +116,35 @@ function _yield() {
 export async function pbkdf2HmacSha512(pinBytes, salt, iters, dkLen, opts = {}) {
   const onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : null;
   const isCancelled = typeof opts.isCancelled === 'function' ? opts.isCancelled : () => false;
+
+  // ── NATIVE FAST PATH ───────────────────────────────────────
+  // ~10-100x faster than the JS fallback. Synchronous call into
+  // react-native-quick-crypto's C++ implementation. Can't be
+  // chunked or cancelled mid-flight — but it returns fast enough
+  // (~500ms for 100k iters on a phone) that the UI freeze window
+  // is imperceptible compared to the 10s JS path. We yield once
+  // before invoking so any pending UI work flushes (e.g. the
+  // "Encrypting…" label paints), then jump progress 0 → 100.
+  if (_nativePbkdf2) {
+    if (onProgress) {
+      try { onProgress(0); } catch {}
+    }
+    // Yield so the modal label/spinner renders before we block.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    if (isCancelled()) throw new Error('CANCELLED');
+    // Buffer.from(uint8array) wraps without copying. Some native
+    // bindings prefer Buffer over plain Uint8Array — defensive.
+    const hasBuffer = typeof Buffer !== 'undefined' && typeof Buffer.from === 'function';
+    const pwArg   = hasBuffer ? Buffer.from(pinBytes) : pinBytes;
+    const saltArg = hasBuffer ? Buffer.from(salt)     : salt;
+    const out = _nativePbkdf2(pwArg, saltArg, iters, dkLen, 'sha512');
+    if (onProgress) {
+      try { onProgress(100); } catch {}
+    }
+    return out;
+  }
+
+  // ── PURE-JS YIELDY FALLBACK ────────────────────────────────
   const out = new Uint8Array(dkLen);
   let blockIdx = 1;
   let outOffset = 0;
