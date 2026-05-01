@@ -30,7 +30,7 @@ const DEV_TEST_PEERS = {
 
 export default function SettingsScreen({ navigation }) {
   const theme = useTheme();
-  const { bg, card, tx, sub, border, inputBg, accent, sectionBg, lightMode, toggleLight } = theme;
+  const { bg, card, tx, sub, border, inputBg, accent, sectionBg, lightMode, toggleLight, isPremium } = theme;
 
   const [user, setUser] = useState(null);
   const [page, setPage] = useState('main');
@@ -1306,7 +1306,14 @@ export default function SettingsScreen({ navigation }) {
           <TouchableOpacity onPress={() => navigation.goBack()} style={{ marginRight: 12 }}>
             <Text style={{ color: accent, fontSize: 28, fontWeight: 'bold' }}>‹</Text>
           </TouchableOpacity>
-          <Text style={[st.header, { color: accent, paddingHorizontal: 0, paddingTop: 0 }]}>Settings</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text style={[st.header, { color: accent, paddingHorizontal: 0, paddingTop: 0 }]}>Settings</Text>
+            {/* Crown sits next to the title for premium accounts —
+                same chrome treatment used on the Chats title. Mirror
+                of the mockup: premium spaces get the V+crown mark
+                surfaced in section headers. */}
+            {isPremium && <Text style={{ fontSize: 22 }}>👑</Text>}
+          </View>
         </View>
 
         {/* TEMPORARY dev toggle — remove before public launch.
@@ -1424,13 +1431,29 @@ export default function SettingsScreen({ navigation }) {
               : <View style={[st.profilePhotoPlaceholder, { backgroundColor: accent }]}>
                   <Text style={st.profileInitial}>{displayName ? displayName[0].toUpperCase() : '?'}</Text>
                 </View>}
+            {/* Gold crown badge overlay on bottom-right of the
+                avatar for premium members — matches the mockup
+                where the crown sits like an iOS notification dot. */}
+            {isPremium && (
+              <View style={{
+                position: 'absolute', right: -3, bottom: -3,
+                width: 24, height: 24, borderRadius: 12,
+                borderWidth: 2, borderColor: card, backgroundColor: '#1a1a2e',
+                alignItems: 'center', justifyContent: 'center',
+              }}>
+                <Text style={{ fontSize: 12, lineHeight: 14 }}>👑</Text>
+              </View>
+            )}
           </View>
           <View style={{ flex: 1, marginLeft: 14 }}>
             <Text style={[st.profileName, { color: tx }]} numberOfLines={1}>{displayName || 'Tap to set your name'}</Text>
-            <Text style={[st.profileSub, { color: sub }]}>Protect what matters.</Text>
+            <Text style={[st.profileSub, { color: isPremium ? accent : sub, fontWeight: isPremium ? '700' : '400' }]}>
+              {isPremium ? 'Premium Member' : 'Protect what matters.'}
+            </Text>
             {vaultHandle ? <Text style={[st.profileId, { color: accent, marginTop: 2 }]}>{vaultHandle}</Text> : null}
           </View>
-          {/* Shield badge on the right — visual trust signal, matches mockup */}
+          {/* Right-side badge: shield for free, gold-tinted shield
+              for premium. Visual trust signal, matches mockup. */}
           <View style={{
             width: 38, height: 38, borderRadius: 12,
             backgroundColor: accent + '22',

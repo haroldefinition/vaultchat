@@ -84,7 +84,12 @@ export default function ProfileScreen({ navigation }) {
       <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 40 }}>
         {/* Hero card — avatar + name + Premium Member tag */}
         <View style={[s.hero, { alignItems: 'center', marginVertical: 18 }]}>
-          <View style={[s.avatarRing, { borderColor: brand + '88' }]}>
+          {/* Avatar ring with optional gold crown badge overlay
+              for premium members — matches the mockup where the
+              crown sits on the bottom-right of the avatar like
+              an iOS notification badge. Layered absolutely so it
+              floats over the ring without taking layout space. */}
+          <View style={[s.avatarRing, { borderColor: brand + '88', position: 'relative' }]}>
             {photo ? (
               <Image source={{ uri: photo }} style={s.avatar} />
             ) : (
@@ -94,15 +99,15 @@ export default function ProfileScreen({ navigation }) {
                 </Text>
               </View>
             )}
+            {premium && (
+              <View style={[s.crownBadge, { backgroundColor: '#1a1a2e', borderColor: brand }]}>
+                <Text style={s.crownBadgeTx}>👑</Text>
+              </View>
+            )}
           </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 14 }}>
-            <Text style={[s.name, { color: tx }]}>{displayName || 'Your Name'}</Text>
-            {premium && <Text style={{ fontSize: 18 }}>👑</Text>}
-          </View>
+          <Text style={[s.name, { color: tx, marginTop: 14 }]}>{displayName || 'Your Name'}</Text>
           {premium && (
-            <View style={[s.premiumTag, { backgroundColor: brand + '22', borderColor: brand + '55' }]}>
-              <Text style={[s.premiumTagTx, { color: brand }]}>Premium Member</Text>
-            </View>
+            <Text style={[s.premiumLabel, { color: brand }]}>Premium Member</Text>
           )}
         </View>
 
@@ -152,6 +157,21 @@ const s = StyleSheet.create({
   avatarRing:   { width: 132, height: 132, borderRadius: 66, padding: 4, borderWidth: 2 },
   avatar:       { width: '100%', height: '100%', borderRadius: 62 },
   name:         { fontSize: 22, fontWeight: '800' },
+  // Premium label sits centered below the name in plain text
+  // (no pill background) per Harold's mockup. Color comes from
+  // the premium accent so it pops against the dark background.
+  premiumLabel: { fontSize: 13, fontWeight: '700', letterSpacing: 0.3, marginTop: 4 },
+  // Gold crown badge — sits on the bottom-right of the avatar
+  // ring like an iOS notification dot. Border/background match
+  // the screen so the badge "cuts into" the ring cleanly.
+  crownBadge:   {
+    position: 'absolute', right: -4, bottom: -4,
+    width: 36, height: 36, borderRadius: 18,
+    borderWidth: 3, alignItems: 'center', justifyContent: 'center',
+  },
+  crownBadgeTx: { fontSize: 18, lineHeight: 22 },
+  // Legacy styles kept for the v1.0 builds — safe to remove
+  // in v1.2 once we confirm no other screens import them.
   premiumTag:   { marginTop: 8, paddingHorizontal: 14, paddingVertical: 5, borderRadius: 12, borderWidth: 1 },
   premiumTagTx: { fontSize: 12, fontWeight: '800', letterSpacing: 0.4 },
 
