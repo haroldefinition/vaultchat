@@ -5,7 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { exportVaultBackup, restoreVaultBackup } from '../services/vaultBackup';
-import { runHistoryBackup, runHistoryRestore, fetchHistoryBackupMeta } from '../services/historyBackup';
+import { runHistoryBackup, runHistoryRestore, fetchHistoryBackupMeta, deleteHistoryBackup } from '../services/historyBackup';
 import { useTheme } from '../services/theme';
 import { requestContactsPermission, syncContacts, findFriendsOnVaultChat } from '../services/contacts';
 import { checkBiometricSupport } from '../services/biometric';
@@ -1009,9 +1009,19 @@ export default function SettingsScreen({ navigation }) {
                           await clearVaultPin();
                           setVaultPinSet(false);
                           try { await AsyncStorage.removeItem('vaultchat_vault_setup_seen'); } catch {}
+                          // Wipe the cloud chat-history backup too —
+                          // without a PIN we can't encrypt new uploads,
+                          // and the existing blob is now orphaned
+                          // (encrypted with a key the user no longer
+                          // has). Leaving it would surface the "We
+                          // found your chat backup" prompt on a
+                          // future reinstall and trap the user in
+                          // WRONG_PIN with no recovery. Fire-and-forget
+                          // so the alert pops immediately.
+                          deleteHistoryBackup().catch(() => {});
                           Alert.alert(
                             'Vault PIN reset',
-                            'Your Vault PIN has been removed and any vaulted chats are back in your Chats list. You can set a new PIN anytime.'
+                            'Your Vault PIN has been removed and any vaulted chats are back in your Chats list. The cloud chat backup was also cleared since the PIN is its encryption key — set a new PIN anytime to start backing up again.'
                           );
                         } catch (e) {
                           Alert.alert('Could not reset', e?.message || 'Try again in a moment.');
@@ -1548,6 +1558,24 @@ export default function SettingsScreen({ navigation }) {
                             if (pinType === 'vault') {
                               await setVaultPin(pinInput);
                               setVaultPinSet(true);
+                              // Refresh the cloud chat-history backup so
+                              // it's encrypted with the new PIN. Without
+                              // this, the message_history_blob row stays
+                              // encrypted with the OLD PIN until the next
+                              // 6h auto-backup window — so a reinstall +
+                              // restore would fail with WRONG_PIN even
+                              // though the user typed their CURRENT PIN.
+                              // Delete first (covers the empty-snapshot
+                              // case where runHistoryBackup would skip
+                              // and leave the stale row in place), then
+                              // upload fresh. Fire-and-forget so the
+                              // user isn't blocked on the network call.
+                              (async () => {
+                                try {
+                                  await deleteHistoryBackup();
+                                  await runHistoryBackup(pinInput, { force: true });
+                                } catch {}
+                              })();
                             } else {
                               // Security audit fix #121 — real & decoy PINs
                               // now persist to Keychain via securePinStore.
