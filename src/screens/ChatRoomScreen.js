@@ -1853,23 +1853,30 @@ export default function ChatRoomScreen({ route, navigation }) {
       <FlatList
         ref={listRef}
         data={(() => {
-          // Decrypt-failure handling — UNDONE the blanket-hide
-          // (2026-04-30 evening) because it was making real
-          // delivered messages invisible. Sam→Jon test showed Sam's
-          // messages were arriving but failing to decrypt and the
-          // filter was silently dropping them. Now we KEEP them in
-          // the list but transform the content into a sentinel
-          // _type='undecryptable' so renderItem dispatches a small
-          // neutral "🔒 Can't read this message" indicator instead
-          // of the alarming "[Can't decrypt this message on this
-          // device]" raw text. User sees something arrived; long-
-          // press to retry / report.
+          // Decrypt-failure handling, third iteration:
+          //   - Messages older than 24h that fail to decrypt are
+          //     forward-secrecy victims (the keys to open them are
+          //     gone forever). Hide them entirely — there's nothing
+          //     the user can do about them and a wall of "🔒 Can't
+          //     read this message" rows just frustrates everyone.
+          //   - Messages newer than 24h that fail to decrypt MIGHT
+          //     be live deliveries that haven't decrypted yet
+          //     because keys are still being negotiated. Keep them
+          //     visible as the neutral indicator so we don't
+          //     silently swallow real arrivals (which is what the
+          //     blanket-hide did to Sam's live messages earlier).
           const PLACEHOLDER = '[Can’t decrypt this message on this device]';
-          const transformed = messages.map(m =>
-            (m.content || '') === PLACEHOLDER
-              ? { ...m, _type: 'undecryptable' }
-              : m
-          );
+          const RECENT_MS = 24 * 60 * 60 * 1000;
+          const now = Date.now();
+          const transformed = messages
+            .map(m => {
+              if ((m.content || '') !== PLACEHOLDER) return m;
+              const ts = m.created_at ? new Date(m.created_at).getTime() : 0;
+              const isRecent = ts && (now - ts) < RECENT_MS;
+              if (!isRecent) return null;            // hide old dead msgs
+              return { ...m, _type: 'undecryptable' };
+            })
+            .filter(Boolean);
           const list = searchQuery.trim()
             ? transformed.filter(m => m._type !== 'undecryptable' && (m.content || '').toLowerCase().includes(searchQuery.toLowerCase()))
             : transformed;

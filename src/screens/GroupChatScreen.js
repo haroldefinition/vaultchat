@@ -1306,11 +1306,21 @@ export default function GroupChatScreen({ route, navigation }) {
       {/* Messages */}
       <FlatList
         ref={flatRef}
-        // Pass through all messages; the per-row renderer below
-        // soft-handles undecryptable ones with a neutral indicator
-        // instead of dropping them. Same policy as ChatRoomScreen
-        // (was hiding entirely; that swallowed real deliveries).
-        data={[...messages].reverse()}
+        // Same time-window policy as ChatRoomScreen: hide
+        // undecryptables older than 24h (forward-secrecy victims,
+        // dead forever) but keep recent ones visible so live
+        // delivery failures stay diagnosable.
+        data={(() => {
+          const PLACEHOLDER = '[Can’t decrypt this message on this device]';
+          const RECENT_MS = 24 * 60 * 60 * 1000;
+          const now = Date.now();
+          const visible = messages.filter(m => {
+            if ((m.content || '') !== PLACEHOLDER) return true;
+            const ts = m.created_at ? new Date(m.created_at).getTime() : 0;
+            return ts && (now - ts) < RECENT_MS;
+          });
+          return [...visible].reverse();
+        })()}
         keyExtractor={(item, i) => String(item.id || i)}
         inverted
         contentContainerStyle={{ padding: 12, paddingTop: 8 }}
