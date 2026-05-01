@@ -1350,9 +1350,16 @@ export default function SettingsScreen({ navigation }) {
                 setBackupBusy(true);
                 try {
                   if (backupMode === 'export') {
-                    const r = await exportVaultBackup(backupPin);
+                    backupCancelRef.current = { cancelled: false };
+                    setBackupProgress(0);
+                    const r = await exportVaultBackup(backupPin, {
+                      onProgress: pct => setBackupProgress(pct),
+                      isCancelled: () => backupCancelRef.current.cancelled,
+                    });
+                    setBackupProgress(null);
                     setBackupBusy(false);
                     setBackupModal(false);
+                    if (r.code === 'CANCELLED') return;
                     Alert.alert(r.ok ? 'Backup ready' : 'Backup failed', r.message);
                   } else if (backupMode === 'restore') {
                     // Pick a .vchat file via the system document picker.
@@ -1361,9 +1368,16 @@ export default function SettingsScreen({ navigation }) {
                       setBackupBusy(false);
                       return;
                     }
-                    const r = await restoreVaultBackup(pick.assets[0].uri, backupPin);
+                    backupCancelRef.current = { cancelled: false };
+                    setBackupProgress(0);
+                    const r = await restoreVaultBackup(pick.assets[0].uri, backupPin, {
+                      onProgress: pct => setBackupProgress(pct),
+                      isCancelled: () => backupCancelRef.current.cancelled,
+                    });
+                    setBackupProgress(null);
                     setBackupBusy(false);
                     setBackupModal(false);
+                    if (r.code === 'CANCELLED') return;
                     Alert.alert(r.ok ? 'Restored' : 'Restore failed', r.message);
                   } else if (backupMode === 'cloud-export') {
                     // 90-day history → Supabase. Yieldy PBKDF2
@@ -1423,9 +1437,12 @@ export default function SettingsScreen({ navigation }) {
               {backupBusy && <ActivityIndicator color="#fff" />}
               <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>
                 {backupBusy
-                  ? (backupMode === 'cloud-export'  ? `Encrypting… ${backupProgress != null ? backupProgress + '%' : ''}`.trim()
-                  :  backupMode === 'cloud-restore' ? `Decrypting… ${backupProgress != null ? backupProgress + '%' : ''}`.trim()
-                  :                                   'Working…')
+                  ? (() => {
+                      const isEncrypting = backupMode === 'export' || backupMode === 'cloud-export';
+                      const verb = isEncrypting ? 'Encrypting' : 'Decrypting';
+                      const pct = backupProgress != null ? ` ${backupProgress}%` : '';
+                      return `${verb}…${pct}`;
+                    })()
                   : (backupMode === 'export'        ? 'Encrypt & Export'
                   :  backupMode === 'restore'       ? 'Decrypt & Restore'
                   :  backupMode === 'cloud-export'  ? 'Encrypt & Upload'

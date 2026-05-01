@@ -34,67 +34,24 @@ import naclUtil from 'tweetnacl-util';
 import * as FileSystem from 'expo-file-system';
 import { Share, Platform } from 'react-native';
 import { listVaultedIds, addToVault } from './vault';
+import { deriveSecretboxKey } from './pbkdf2';
 
 const HEADER  = 'VBACKUP1:';
+// Iteration count baked into the V1 wire format. Don't change
+// this without also bumping HEADER + adding parse-time iter
+// detection — existing .vchat files would otherwise become
+// undecryptable. The new chat-history backup
+// (services/historyBackup.js) uses a different scheme where
+// per-row iters are stored alongside the ciphertext, which is
+// the right way to make this kind of change in the future.
 const PBKDF2_ITERS = 200000;
 
-// ── PBKDF2-HMAC-SHA512 (built on tweetnacl primitives) ────────
-// nacl.hash is SHA-512; we layer HMAC on top, then PBKDF2 on top
-// of that. Slow but correct — the iteration count is what makes
-// brute-forcing the PIN expensive.
-
-function _u8(arr) { return arr instanceof Uint8Array ? arr : new Uint8Array(arr); }
-
-function _hmacSha512(key, data) {
-  const BLOCK = 128;
-  let k = _u8(key);
-  if (k.length > BLOCK) k = nacl.hash(k);
-  if (k.length < BLOCK) {
-    const padded = new Uint8Array(BLOCK);
-    padded.set(k, 0);
-    k = padded;
-  }
-  const ipad = new Uint8Array(BLOCK);
-  const opad = new Uint8Array(BLOCK);
-  for (let i = 0; i < BLOCK; i++) {
-    ipad[i] = k[i] ^ 0x36;
-    opad[i] = k[i] ^ 0x5c;
-  }
-  const inner = new Uint8Array(BLOCK + data.length);
-  inner.set(ipad, 0); inner.set(data, BLOCK);
-  const innerHash = nacl.hash(inner);
-  const outer = new Uint8Array(BLOCK + innerHash.length);
-  outer.set(opad, 0); outer.set(innerHash, BLOCK);
-  return nacl.hash(outer); // 64 bytes
-}
-
-function _pbkdf2(pinBytes, salt, iters, dkLen) {
-  const out = new Uint8Array(dkLen);
-  let blockIdx = 1;
-  let outOffset = 0;
-  while (outOffset < dkLen) {
-    // T_i = F(pin, salt, iters, blockIdx)
-    const blockBE = new Uint8Array([(blockIdx>>24)&0xff,(blockIdx>>16)&0xff,(blockIdx>>8)&0xff,blockIdx&0xff]);
-    const saltConcat = new Uint8Array(salt.length + 4);
-    saltConcat.set(salt, 0); saltConcat.set(blockBE, salt.length);
-    let u = _hmacSha512(pinBytes, saltConcat);
-    let t = u.slice();
-    for (let i = 1; i < iters; i++) {
-      u = _hmacSha512(pinBytes, u);
-      for (let j = 0; j < t.length; j++) t[j] ^= u[j];
-    }
-    const copyLen = Math.min(t.length, dkLen - outOffset);
-    out.set(t.subarray(0, copyLen), outOffset);
-    outOffset += copyLen;
-    blockIdx += 1;
-  }
-  return out;
-}
-
-function _deriveKey(pin, salt) {
-  const pinBytes = naclUtil.decodeUTF8(String(pin));
-  // 32 bytes for nacl.secretbox
-  return _pbkdf2(pinBytes, salt, PBKDF2_ITERS, nacl.secretbox.keyLength);
+// PBKDF2 lives in services/pbkdf2.js (shared with historyBackup.js).
+// The deriveSecretboxKey wrapper handles the 32-byte AES key
+// derivation from a string PIN + salt. Yieldy + supports
+// onProgress + isCancelled via the opts arg.
+function _deriveKey(pin, salt, opts) {
+  return deriveSecretboxKey(pin, salt, PBKDF2_ITERS, opts);
 }
 
 // ── Snapshot collection / application ─────────────────────────
@@ -128,7 +85,8 @@ async function _applySnapshot(snap) {
  * Returns { ok, path, message } so the caller can show a toast
  * or alert.
  */
-export async function exportVaultBackup(pin) {
+export async function exportVaultBackup(pin, opts = {}) {
+  const { onProgress, isCancelled } = opts;
   if (!pin || String(pin).length < 4) {
     return { ok: false, message: 'PIN required to encrypt the backup.' };
   }
@@ -138,7 +96,10 @@ export async function exportVaultBackup(pin) {
     const data   = naclUtil.decodeUTF8(json);
     const salt   = nacl.randomBytes(16);
     const nonce  = nacl.randomBytes(nacl.secretbox.nonceLength);
-    const key    = _deriveKey(pin, salt);
+    const key    = await _deriveKey(pin, salt, { onProgress, isCancelled });
+    if (typeof isCancelled === 'function' && isCancelled()) {
+      return { ok: false, code: 'CANCELLED', message: 'Cancelled.' };
+    }
     const cipher = nacl.secretbox(data, nonce, key);
     if (!cipher) throw new Error('Encryption failed');
 
@@ -164,6 +125,9 @@ export async function exportVaultBackup(pin) {
 
     return { ok: true, path: uri, message: 'Vault backup ready to save.' };
   } catch (e) {
+    if (e?.message === 'CANCELLED') {
+      return { ok: false, code: 'CANCELLED', message: 'Cancelled.' };
+    }
     if (__DEV__) console.warn('exportVaultBackup error:', e?.message);
     return { ok: false, message: 'Couldn’t create backup.' };
   }
@@ -200,7 +164,7 @@ export async function silentAutoBackup(pin) {
     const data   = naclUtil.decodeUTF8(json);
     const salt   = nacl.randomBytes(16);
     const nonce  = nacl.randomBytes(nacl.secretbox.nonceLength);
-    const key    = _deriveKey(pin, salt);
+    const key    = await _deriveKey(pin, salt);
     const cipher = nacl.secretbox(data, nonce, key);
     if (!cipher) throw new Error('Encryption failed');
 
@@ -244,7 +208,8 @@ export async function silentAutoBackup(pin) {
  * Returns { ok, restored, message }. `restored` = number of
  * vaulted chat IDs successfully restored.
  */
-export async function restoreVaultBackup(uri, pin) {
+export async function restoreVaultBackup(uri, pin, opts = {}) {
+  const { onProgress, isCancelled } = opts;
   if (!uri) return { ok: false, message: 'No backup file selected.' };
   if (!pin) return { ok: false, message: 'PIN required to decrypt the backup.' };
   try {
@@ -259,7 +224,10 @@ export async function restoreVaultBackup(uri, pin) {
     const nonce  = naclUtil.decodeBase64(nonceB64);
     const cipher = naclUtil.decodeBase64(ctB64);
 
-    const key   = _deriveKey(pin, salt);
+    const key   = await _deriveKey(pin, salt, { onProgress, isCancelled });
+    if (typeof isCancelled === 'function' && isCancelled()) {
+      return { ok: false, code: 'CANCELLED', message: 'Cancelled.' };
+    }
     const plain = nacl.secretbox.open(cipher, nonce, key);
     if (!plain) {
       return { ok: false, message: 'Wrong PIN — couldn’t decrypt the backup.' };
@@ -269,6 +237,9 @@ export async function restoreVaultBackup(uri, pin) {
     const restored = await _applySnapshot(snap);
     return { ok: true, restored, message: `${restored} vaulted chat${restored === 1 ? '' : 's'} restored.` };
   } catch (e) {
+    if (e?.message === 'CANCELLED') {
+      return { ok: false, code: 'CANCELLED', message: 'Cancelled.' };
+    }
     if (__DEV__) console.warn('restoreVaultBackup error:', e?.message);
     return { ok: false, message: 'Couldn’t restore backup.' };
   }

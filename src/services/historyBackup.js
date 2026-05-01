@@ -47,6 +47,7 @@ import nacl from 'tweetnacl';
 import naclUtil from 'tweetnacl-util';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabase';
+import { deriveSecretboxKey } from './pbkdf2';
 
 // 100,000 iters is WhatsApp's encryption-key level for chat
 // backups — strong enough that a leaked blob with a 4-digit PIN
@@ -63,99 +64,10 @@ const PLAIN_PREFIX_GROUP   = 'vaultchat_gplain_';
 const LAST_BACKUP_AT_KEY   = 'vaultchat_last_history_backup';
 const BACKUP_THROTTLE_MS   = 6 * 60 * 60 * 1000; // 6 hours
 
-// ── PBKDF2-HMAC-SHA512 (built on tweetnacl primitives) ────────
-// Same construction used in vaultBackup.js. Slow by design; the
-// iteration count is what makes brute-forcing the PIN expensive.
-
-function _u8(arr) { return arr instanceof Uint8Array ? arr : new Uint8Array(arr); }
-
-function _hmacSha512(key, data) {
-  const BLOCK = 128;
-  let k = _u8(key);
-  if (k.length > BLOCK) k = nacl.hash(k);
-  if (k.length < BLOCK) {
-    const padded = new Uint8Array(BLOCK);
-    padded.set(k, 0);
-    k = padded;
-  }
-  const ipad = new Uint8Array(BLOCK);
-  const opad = new Uint8Array(BLOCK);
-  for (let i = 0; i < BLOCK; i++) {
-    ipad[i] = k[i] ^ 0x36;
-    opad[i] = k[i] ^ 0x5c;
-  }
-  const inner = new Uint8Array(BLOCK + data.length);
-  inner.set(ipad, 0); inner.set(data, BLOCK);
-  const innerHash = nacl.hash(inner);
-  const outer = new Uint8Array(BLOCK + innerHash.length);
-  outer.set(opad, 0); outer.set(innerHash, BLOCK);
-  return nacl.hash(outer); // 64 bytes
-}
-
-// Yieldy async PBKDF2. We can't move the work off the JS thread
-// (no native crypto, no worker threads in RN), but we can chunk
-// the iteration loop and await between chunks so the UI keeps
-// breathing — the cancel button stays tappable, progress
-// callbacks can fire and re-render, and the user doesn't see a
-// frozen "Working…". Total wallclock time is roughly the same;
-// it just doesn't block.
-//
-// Chunk size 2000 = ~30 yield points across 100k iters. Each
-// yield is a setTimeout(0) so the event loop runs a real tick
-// (resolve()/microtasks alone don't drain the touch queue).
-const _PBKDF2_CHUNK = 2000;
-
-function _yield() {
-  return new Promise(resolve => setTimeout(resolve, 0));
-}
-
-async function _pbkdf2(pinBytes, salt, iters, dkLen, opts = {}) {
-  const onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : null;
-  const isCancelled = typeof opts.isCancelled === 'function' ? opts.isCancelled : () => false;
-  const out = new Uint8Array(dkLen);
-  let blockIdx = 1;
-  let outOffset = 0;
-  let totalDone = 0;
-  const totalWork = iters * Math.ceil(dkLen / 64);  // ~iters per 64B block
-
-  while (outOffset < dkLen) {
-    const blockBE = new Uint8Array([(blockIdx>>24)&0xff,(blockIdx>>16)&0xff,(blockIdx>>8)&0xff,blockIdx&0xff]);
-    const saltConcat = new Uint8Array(salt.length + 4);
-    saltConcat.set(salt, 0); saltConcat.set(blockBE, salt.length);
-    let u = _hmacSha512(pinBytes, saltConcat);
-    let t = u.slice();
-
-    let i = 1;
-    while (i < iters) {
-      const prevI = i;
-      const stop = Math.min(i + _PBKDF2_CHUNK, iters);
-      while (i < stop) {
-        u = _hmacSha512(pinBytes, u);
-        for (let j = 0; j < t.length; j++) t[j] ^= u[j];
-        i++;
-      }
-      totalDone += (i - prevI);
-      if (isCancelled()) throw new Error('CANCELLED');
-      if (onProgress) {
-        const pct = Math.min(99, Math.round((totalDone / totalWork) * 100));
-        try { onProgress(pct); } catch {}
-      }
-      await _yield();
-    }
-
-    const copyLen = Math.min(t.length, dkLen - outOffset);
-    out.set(t.subarray(0, copyLen), outOffset);
-    outOffset += copyLen;
-    blockIdx += 1;
-  }
-  if (onProgress) { try { onProgress(100); } catch {} }
-  return out;
-}
-
-async function _deriveKey(pin, salt, iters, opts) {
-  const pinBytes = naclUtil.decodeUTF8(String(pin));
-  return _pbkdf2(pinBytes, salt, iters, nacl.secretbox.keyLength, opts); // 32 bytes
-}
+// PBKDF2 lives in services/pbkdf2.js (shared with vaultBackup.js).
+// Re-export for backward source compat with anyone reading this
+// file in isolation.
+const _deriveKey = deriveSecretboxKey;
 
 // ── Snapshot collection / application ─────────────────────────
 
