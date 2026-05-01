@@ -340,6 +340,28 @@ export default Sentry.wrap(function App() {
           } catch (e) {
             if (__DEV__) console.warn('[history-prune] dispatch failed:', e?.message || e);
           }
+
+          // Phase 2 (90-day history): silent encrypted upload of the
+          // 90-day plaintext snapshot to Supabase. Throttled to once
+          // every 6h inside runHistoryBackup. Skipped silently if no
+          // Vault PIN is set (the PIN is the encryption key) or if
+          // there's nothing cached locally yet. No UI on success or
+          // failure — manual "Back up Chats to Cloud" in Settings is
+          // the user-visible entry point if they want feedback.
+          try {
+            const { hasVaultPin } = require('./src/services/vault');
+            const has = await hasVaultPin();
+            if (has) {
+              const { getPin: spGet, PIN_KEY_VAULT } = require('./src/services/securePinStore');
+              const pin = await spGet(PIN_KEY_VAULT).catch(() => null);
+              if (pin) {
+                const { runHistoryBackup } = require('./src/services/historyBackup');
+                runHistoryBackup(pin).catch(() => {});
+              }
+            }
+          } catch (e) {
+            if (__DEV__) console.warn('[history-backup] dispatch failed:', e?.message || e);
+          }
         }
       });
 

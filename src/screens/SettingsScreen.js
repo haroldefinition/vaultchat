@@ -5,6 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { exportVaultBackup, restoreVaultBackup } from '../services/vaultBackup';
+import { runHistoryBackup, runHistoryRestore, fetchHistoryBackupMeta } from '../services/historyBackup';
 import { useTheme } from '../services/theme';
 import { requestContactsPermission, syncContacts, findFriendsOnVaultChat } from '../services/contacts';
 import { checkBiometricSupport } from '../services/biometric';
@@ -871,6 +872,38 @@ export default function SettingsScreen({ navigation }) {
                 setBackupModal(true);
               }}
             />
+            {/* ── 90-day chat history (Phase 2) ────────────────
+                Backup the rolling 90-day plaintext-cache snapshot
+                to Supabase, encrypted with the Vault PIN. The
+                server never sees plaintext or the PIN — see
+                services/historyBackup.js. Restore is the way to
+                get chat history back after a reinstall, or to
+                pull history onto a second device on the same
+                account. */}
+            <Row
+              icon="☁️"
+              label="Back up Chats to Cloud"
+              subText="Encrypted with your Vault PIN — restorable on this device or a new one"
+              onPress={() => {
+                if (!vaultPinSet) {
+                  Alert.alert('Set a Vault PIN first', 'The Vault PIN is the encryption key for your cloud backup. Set one above before backing up.');
+                  return;
+                }
+                setBackupMode('cloud-export');
+                setBackupPin('');
+                setBackupModal(true);
+              }}
+            />
+            <Row
+              icon="⬇️"
+              label="Restore Chats from Cloud"
+              subText="Pull your last 90 days of chats back from the encrypted backup"
+              onPress={() => {
+                setBackupMode('cloud-restore');
+                setBackupPin('');
+                setBackupModal(true);
+              }}
+            />
             <Row
               icon="🚫"
               label="Blocked Users"
@@ -1247,12 +1280,19 @@ export default function SettingsScreen({ navigation }) {
           onPress={() => !backupBusy && setBackupModal(false)}>
           <View style={{ backgroundColor: card, borderRadius: 18, padding: 24, width: '85%' }} onStartShouldSetResponder={() => true}>
             <Text style={{ color: tx, fontSize: 18, fontWeight: '800', textAlign: 'center', marginBottom: 6 }}>
-              {backupMode === 'export' ? 'Backup Vault' : 'Restore Vault'}
+              {backupMode === 'export'        ? 'Backup Vault'              :
+               backupMode === 'restore'       ? 'Restore Vault'             :
+               backupMode === 'cloud-export'  ? 'Back up Chats to Cloud'    :
+                                                'Restore Chats from Cloud'}
             </Text>
             <Text style={{ color: sub, fontSize: 13, textAlign: 'center', marginBottom: 18 }}>
               {backupMode === 'export'
                 ? 'Enter your Vault PIN — it will encrypt the backup. You\'ll need the same PIN to restore.'
-                : 'Enter the Vault PIN you used when you exported the backup.'}
+                : backupMode === 'restore'
+                  ? 'Enter the Vault PIN you used when you exported the backup.'
+                  : backupMode === 'cloud-export'
+                    ? 'Encrypts your last 90 days of chats with your Vault PIN and uploads to your private VaultChat backup. We never see your PIN or messages.'
+                    : 'Enter the Vault PIN that was set when the backup was made. Restore merges chats into this device — nothing is overwritten.'}
             </Text>
             <TextInput
               value={backupPin}
@@ -1277,7 +1317,7 @@ export default function SettingsScreen({ navigation }) {
                     setBackupBusy(false);
                     setBackupModal(false);
                     Alert.alert(r.ok ? 'Backup ready' : 'Backup failed', r.message);
-                  } else {
+                  } else if (backupMode === 'restore') {
                     // Pick a .vchat file via the system document picker.
                     const pick = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
                     if (pick.canceled || !pick.assets?.[0]?.uri) {
@@ -1288,6 +1328,51 @@ export default function SettingsScreen({ navigation }) {
                     setBackupBusy(false);
                     setBackupModal(false);
                     Alert.alert(r.ok ? 'Restored' : 'Restore failed', r.message);
+                  } else if (backupMode === 'cloud-export') {
+                    // 90-day history → Supabase. PBKDF2 1M iters
+                    // makes a 4-digit PIN brute-forceable in days.
+                    // Soft-warn the user if their PIN is short — they
+                    // can still proceed, but we want them to know.
+                    if (String(backupPin).length < 6) {
+                      const proceed = await new Promise(resolve => {
+                        Alert.alert(
+                          'Short PIN',
+                          'A 4-digit PIN can be brute-forced from a leaked backup blob in days. Use a 6+ digit PIN for serious protection. Back up anyway?',
+                          [
+                            { text: 'Cancel', onPress: () => resolve(false), style: 'cancel' },
+                            { text: 'Back up anyway', onPress: () => resolve(true) },
+                          ],
+                        );
+                      });
+                      if (!proceed) { setBackupBusy(false); return; }
+                    }
+                    const r = await runHistoryBackup(backupPin, { force: true });
+                    setBackupBusy(false);
+                    setBackupModal(false);
+                    if (r.ok && r.skipped) {
+                      Alert.alert('Nothing to back up', 'No cached messages were found on this device yet.');
+                    } else if (r.ok) {
+                      Alert.alert(
+                        'Backed up',
+                        `Encrypted ${r.bytes ? Math.round(r.bytes/1024) + ' KB' : 'snapshot'} across ${r.rooms || 0} chats and ${r.groups || 0} groups uploaded.`,
+                      );
+                    } else {
+                      Alert.alert('Backup failed', r.message || 'Try again in a moment.');
+                    }
+                  } else {
+                    // cloud-restore
+                    const r = await runHistoryRestore(backupPin);
+                    setBackupBusy(false);
+                    setBackupModal(false);
+                    if (r.ok) {
+                      Alert.alert('Restored', `${r.restored || 0} message${r.restored === 1 ? '' : 's'} merged into this device. Open a chat to see them.`);
+                    } else if (r.code === 'NO_BACKUP') {
+                      Alert.alert('No backup found', 'There is no cloud backup for this account yet. Run "Back up Chats to Cloud" first on the device that has your history.');
+                    } else if (r.code === 'WRONG_PIN') {
+                      Alert.alert('Wrong PIN', 'The PIN didn\'t decrypt the backup. Make sure it\'s the same Vault PIN that was set when the backup was made.');
+                    } else {
+                      Alert.alert('Restore failed', r.message || 'Try again in a moment.');
+                    }
                   }
                 } catch (e) {
                   setBackupBusy(false);
@@ -1295,7 +1380,11 @@ export default function SettingsScreen({ navigation }) {
                 }
               }}>
               <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>
-                {backupBusy ? 'Working…' : (backupMode === 'export' ? 'Encrypt & Export' : 'Decrypt & Restore')}
+                {backupBusy ? 'Working…' :
+                  backupMode === 'export'        ? 'Encrypt & Export'   :
+                  backupMode === 'restore'       ? 'Decrypt & Restore'  :
+                  backupMode === 'cloud-export'  ? 'Encrypt & Upload'   :
+                                                   'Download & Decrypt'}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => !backupBusy && setBackupModal(false)} style={{ alignItems: 'center', paddingVertical: 12, marginTop: 4 }}>
