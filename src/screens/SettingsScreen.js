@@ -498,6 +498,184 @@ export default function SettingsScreen({ navigation }) {
     </View>
   );
 
+  // ── Modal hosts — extracted so any sub-page return can mount
+  // them. The Settings screen has multiple early returns keyed
+  // off the `page` state. The backup + pin modals were originally
+  // declared only in the main return, which meant tapping a row
+  // from a sub-page (e.g. Privacy) would set state to open a
+  // modal but no Modal would actually be in the React tree to
+  // render. We hoist the JSX into a const here so each sub-page
+  // can mount {portalModals} in its return tree. Mutually
+  // exclusive returns mean only one mount is live at a time.
+  const portalModals = (
+    <>
+      {/* ── Vault backup modal (Phase XX) ────────────────
+          Single modal with both vault export/restore + cloud
+          export/restore flows; the `backupMode` state switches
+          the title/CTA. PIN is the encryption key — never
+          stored, only used to derive the AES key in the backup
+          service (vault file backup OR cloud history backup). */}
+      <Modal visible={backupModal} transparent animationType="fade" onRequestClose={() => setBackupModal(false)}>
+        <TouchableOpacity
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center' }}
+          activeOpacity={1}
+          onPress={() => !backupBusy && setBackupModal(false)}>
+          <View style={{ backgroundColor: card, borderRadius: 18, padding: 24, width: '85%' }} onStartShouldSetResponder={() => true}>
+            <Text style={{ color: tx, fontSize: 18, fontWeight: '800', textAlign: 'center', marginBottom: 6 }}>
+              {backupMode === 'export'        ? 'Backup Vault'              :
+               backupMode === 'restore'       ? 'Restore Vault'             :
+               backupMode === 'cloud-export'  ? 'Back up Chats to Cloud'    :
+                                                'Restore Chats from Cloud'}
+            </Text>
+            <Text style={{ color: sub, fontSize: 13, textAlign: 'center', marginBottom: 18 }}>
+              {backupMode === 'export'
+                ? 'Enter your Vault PIN — it will encrypt the backup. You\'ll need the same PIN to restore.'
+                : backupMode === 'restore'
+                  ? 'Enter the Vault PIN you used when you exported the backup.'
+                  : backupMode === 'cloud-export'
+                    ? 'Encrypts your last 90 days of chats with your Vault PIN and uploads to your private VaultChat backup. We never see your PIN or messages.'
+                    : 'Enter the Vault PIN that was set when the backup was made. Restore merges chats into this device — nothing is overwritten.'}
+            </Text>
+            <TextInput
+              value={backupPin}
+              onChangeText={setBackupPin}
+              placeholder="Vault PIN"
+              placeholderTextColor={sub}
+              secureTextEntry
+              keyboardType="number-pad"
+              maxLength={12}
+              autoFocus
+              style={{ backgroundColor: bg, color: tx, borderColor: border, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 18, textAlign: 'center', letterSpacing: 4, marginBottom: 14 }}
+              editable={!backupBusy}
+            />
+            <TouchableOpacity
+              style={{ backgroundColor: accent, paddingVertical: 14, borderRadius: 12, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8, opacity: backupPin && !backupBusy ? 1 : 0.5 }}
+              disabled={!backupPin || backupBusy}
+              onPress={async () => {
+                setBackupBusy(true);
+                try {
+                  if (backupMode === 'export') {
+                    backupCancelRef.current = { cancelled: false };
+                    setBackupProgress(0);
+                    const r = await exportVaultBackup(backupPin, {
+                      onProgress: pct => setBackupProgress(pct),
+                      isCancelled: () => backupCancelRef.current.cancelled,
+                    });
+                    setBackupProgress(null);
+                    setBackupBusy(false);
+                    setBackupModal(false);
+                    if (r.code === 'CANCELLED') return;
+                    Alert.alert(r.ok ? 'Backup ready' : 'Backup failed', r.message);
+                  } else if (backupMode === 'restore') {
+                    const pick = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
+                    if (pick.canceled || !pick.assets?.[0]?.uri) {
+                      setBackupBusy(false);
+                      return;
+                    }
+                    backupCancelRef.current = { cancelled: false };
+                    setBackupProgress(0);
+                    const r = await restoreVaultBackup(pick.assets[0].uri, backupPin, {
+                      onProgress: pct => setBackupProgress(pct),
+                      isCancelled: () => backupCancelRef.current.cancelled,
+                    });
+                    setBackupProgress(null);
+                    setBackupBusy(false);
+                    setBackupModal(false);
+                    if (r.code === 'CANCELLED') return;
+                    Alert.alert(r.ok ? 'Restored' : 'Restore failed', r.message);
+                  } else if (backupMode === 'cloud-export') {
+                    backupCancelRef.current = { cancelled: false };
+                    setBackupProgress(0);
+                    const r = await runHistoryBackup(backupPin, {
+                      force: true,
+                      onProgress: pct => setBackupProgress(pct),
+                      isCancelled: () => backupCancelRef.current.cancelled,
+                    });
+                    setBackupProgress(null);
+                    setBackupBusy(false);
+                    setBackupModal(false);
+                    if (r.code === 'CANCELLED') return;
+                    if (r.ok && r.skipped) {
+                      Alert.alert('Nothing to back up', 'No cached messages were found on this device yet.');
+                    } else if (r.ok) {
+                      Alert.alert(
+                        'Backed up',
+                        `Encrypted ${r.bytes ? Math.round(r.bytes/1024) + ' KB' : 'snapshot'} across ${r.rooms || 0} chats and ${r.groups || 0} groups uploaded.`,
+                      );
+                    } else {
+                      Alert.alert('Backup failed', r.message || 'Try again in a moment.');
+                    }
+                  } else {
+                    backupCancelRef.current = { cancelled: false };
+                    setBackupProgress(0);
+                    const r = await runHistoryRestore(backupPin, {
+                      onProgress: pct => setBackupProgress(pct),
+                      isCancelled: () => backupCancelRef.current.cancelled,
+                    });
+                    setBackupProgress(null);
+                    setBackupBusy(false);
+                    setBackupModal(false);
+                    if (r.code === 'CANCELLED') return;
+                    if (r.ok) {
+                      Alert.alert('Restored', `${r.restored || 0} message${r.restored === 1 ? '' : 's'} merged into this device. Open a chat to see them.`);
+                    } else if (r.code === 'NO_BACKUP') {
+                      Alert.alert('No backup found', 'There is no cloud backup for this account yet. Run "Back up Chats to Cloud" first on the device that has your history.');
+                    } else if (r.code === 'WRONG_PIN') {
+                      Alert.alert('Wrong PIN', 'The PIN didn\'t decrypt the backup. Make sure it\'s the same Vault PIN that was set when the backup was made.');
+                    } else {
+                      Alert.alert('Restore failed', r.message || 'Try again in a moment.');
+                    }
+                  }
+                } catch (e) {
+                  setBackupBusy(false);
+                  Alert.alert('Error', e?.message || 'Something went wrong.');
+                }
+              }}>
+              {backupBusy && <ActivityIndicator color="#fff" />}
+              <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>
+                {backupBusy
+                  ? (() => {
+                      const isEncrypting = backupMode === 'export' || backupMode === 'cloud-export';
+                      const verb = isEncrypting ? 'Encrypting' : 'Decrypting';
+                      const pct = backupProgress != null ? ` ${backupProgress}%` : '';
+                      return `${verb}…${pct}`;
+                    })()
+                  : (backupMode === 'export'        ? 'Encrypt & Export'
+                  :  backupMode === 'restore'       ? 'Decrypt & Restore'
+                  :  backupMode === 'cloud-export'  ? 'Encrypt & Upload'
+                  :                                   'Download & Decrypt')}
+              </Text>
+            </TouchableOpacity>
+            {backupBusy && backupProgress != null && (
+              <View style={{
+                marginTop: 12, height: 6, backgroundColor: 'rgba(255,255,255,0.08)',
+                borderRadius: 3, overflow: 'hidden',
+              }}>
+                <View style={{
+                  width: `${backupProgress}%`, height: '100%', backgroundColor: accent,
+                }} />
+              </View>
+            )}
+            <TouchableOpacity
+              onPress={() => {
+                if (backupBusy) {
+                  backupCancelRef.current.cancelled = true;
+                } else {
+                  setBackupModal(false);
+                }
+              }}
+              style={{ alignItems: 'center', paddingVertical: 14, marginTop: 6 }}
+            >
+              <Text style={{ color: sub, fontSize: 14, fontWeight: '600' }}>
+                {backupBusy ? 'Stop' : 'Cancel'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+    </>
+  );
+
   // EDIT PROFILE
   if (page === 'profile') {
     return (
@@ -975,15 +1153,18 @@ export default function SettingsScreen({ navigation }) {
           </Section>
         </ScrollView>
 
-        {/* VaultPinSetupModal mounted inside the privacy sub-page
-            so a tap on the "Vault PIN" row immediately surfaces
-            the setup form. The main return at the bottom of this
-            file ALSO mounts this modal — but the privacy branch
-            short-circuits before reaching that, which is why
-            users had to back out and re-enter Settings before the
-            modal appeared. Keeping both mounts is harmless: only
-            one is in the React tree at any given time because
-            they're in mutually exclusive return branches. */}
+        {/* Backup + PIN modals — mounted here so a tap on
+            "Vault PIN", "Backup Vault", "Restore Vault",
+            "Back up Chats to Cloud", or "Restore Chats from
+            Cloud" from the Privacy sub-page surfaces the modal
+            on the first tap. Without this, the modal lives only
+            in the main return (page === 'main') and isn't in the
+            React tree when the user is on Privacy — they had to
+            back out and re-enter Settings before the modal
+            appeared. Mutually exclusive returns mean each modal
+            is mounted in only one branch at a time. */}
+        {portalModals}
+
         <VaultPinSetupModal
           visible={vaultSetupModal}
           onClose={() => setVaultSetupModal(false)}
@@ -1305,187 +1486,10 @@ export default function SettingsScreen({ navigation }) {
           6-digit PIN via a numeric keypad, saves it to AsyncStorage under
           the appropriate key (vaultchat_real_pin or vaultchat_decoy_pin)
           which BiometricLockScreen already reads to validate entries. */}
-      {/* ── Vault backup modal (Phase XX) ────────────────
-          Single modal with both export + restore flows; the
-          `backupMode` state switches the title/CTA. PIN is the
-          encryption key — never stored, only used to derive the
-          AES-GCM key in vaultBackup.js. */}
-      <Modal visible={backupModal} transparent animationType="fade" onRequestClose={() => setBackupModal(false)}>
-        <TouchableOpacity
-          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center' }}
-          activeOpacity={1}
-          onPress={() => !backupBusy && setBackupModal(false)}>
-          <View style={{ backgroundColor: card, borderRadius: 18, padding: 24, width: '85%' }} onStartShouldSetResponder={() => true}>
-            <Text style={{ color: tx, fontSize: 18, fontWeight: '800', textAlign: 'center', marginBottom: 6 }}>
-              {backupMode === 'export'        ? 'Backup Vault'              :
-               backupMode === 'restore'       ? 'Restore Vault'             :
-               backupMode === 'cloud-export'  ? 'Back up Chats to Cloud'    :
-                                                'Restore Chats from Cloud'}
-            </Text>
-            <Text style={{ color: sub, fontSize: 13, textAlign: 'center', marginBottom: 18 }}>
-              {backupMode === 'export'
-                ? 'Enter your Vault PIN — it will encrypt the backup. You\'ll need the same PIN to restore.'
-                : backupMode === 'restore'
-                  ? 'Enter the Vault PIN you used when you exported the backup.'
-                  : backupMode === 'cloud-export'
-                    ? 'Encrypts your last 90 days of chats with your Vault PIN and uploads to your private VaultChat backup. We never see your PIN or messages.'
-                    : 'Enter the Vault PIN that was set when the backup was made. Restore merges chats into this device — nothing is overwritten.'}
-            </Text>
-            <TextInput
-              value={backupPin}
-              onChangeText={setBackupPin}
-              placeholder="Vault PIN"
-              placeholderTextColor={sub}
-              secureTextEntry
-              keyboardType="number-pad"
-              maxLength={12}
-              autoFocus
-              style={{ backgroundColor: bg, color: tx, borderColor: border, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 18, textAlign: 'center', letterSpacing: 4, marginBottom: 14 }}
-              editable={!backupBusy}
-            />
-            <TouchableOpacity
-              style={{ backgroundColor: accent, paddingVertical: 14, borderRadius: 12, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8, opacity: backupPin && !backupBusy ? 1 : 0.5 }}
-              disabled={!backupPin || backupBusy}
-              onPress={async () => {
-                setBackupBusy(true);
-                try {
-                  if (backupMode === 'export') {
-                    backupCancelRef.current = { cancelled: false };
-                    setBackupProgress(0);
-                    const r = await exportVaultBackup(backupPin, {
-                      onProgress: pct => setBackupProgress(pct),
-                      isCancelled: () => backupCancelRef.current.cancelled,
-                    });
-                    setBackupProgress(null);
-                    setBackupBusy(false);
-                    setBackupModal(false);
-                    if (r.code === 'CANCELLED') return;
-                    Alert.alert(r.ok ? 'Backup ready' : 'Backup failed', r.message);
-                  } else if (backupMode === 'restore') {
-                    // Pick a .vchat file via the system document picker.
-                    const pick = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
-                    if (pick.canceled || !pick.assets?.[0]?.uri) {
-                      setBackupBusy(false);
-                      return;
-                    }
-                    backupCancelRef.current = { cancelled: false };
-                    setBackupProgress(0);
-                    const r = await restoreVaultBackup(pick.assets[0].uri, backupPin, {
-                      onProgress: pct => setBackupProgress(pct),
-                      isCancelled: () => backupCancelRef.current.cancelled,
-                    });
-                    setBackupProgress(null);
-                    setBackupBusy(false);
-                    setBackupModal(false);
-                    if (r.code === 'CANCELLED') return;
-                    Alert.alert(r.ok ? 'Restored' : 'Restore failed', r.message);
-                  } else if (backupMode === 'cloud-export') {
-                    // 90-day history → Supabase. Yieldy PBKDF2
-                    // reports progress + checks cancel between
-                    // chunks so the UI stays interactive.
-                    backupCancelRef.current = { cancelled: false };
-                    setBackupProgress(0);
-                    const r = await runHistoryBackup(backupPin, {
-                      force: true,
-                      onProgress: pct => setBackupProgress(pct),
-                      isCancelled: () => backupCancelRef.current.cancelled,
-                    });
-                    setBackupProgress(null);
-                    setBackupBusy(false);
-                    setBackupModal(false);
-                    if (r.code === 'CANCELLED') {
-                      // User aborted — no toast, just close.
-                      return;
-                    }
-                    if (r.ok && r.skipped) {
-                      Alert.alert('Nothing to back up', 'No cached messages were found on this device yet.');
-                    } else if (r.ok) {
-                      Alert.alert(
-                        'Backed up',
-                        `Encrypted ${r.bytes ? Math.round(r.bytes/1024) + ' KB' : 'snapshot'} across ${r.rooms || 0} chats and ${r.groups || 0} groups uploaded.`,
-                      );
-                    } else {
-                      Alert.alert('Backup failed', r.message || 'Try again in a moment.');
-                    }
-                  } else {
-                    // cloud-restore — same progress + cancel wiring.
-                    backupCancelRef.current = { cancelled: false };
-                    setBackupProgress(0);
-                    const r = await runHistoryRestore(backupPin, {
-                      onProgress: pct => setBackupProgress(pct),
-                      isCancelled: () => backupCancelRef.current.cancelled,
-                    });
-                    setBackupProgress(null);
-                    setBackupBusy(false);
-                    setBackupModal(false);
-                    if (r.code === 'CANCELLED') return;
-                    if (r.ok) {
-                      Alert.alert('Restored', `${r.restored || 0} message${r.restored === 1 ? '' : 's'} merged into this device. Open a chat to see them.`);
-                    } else if (r.code === 'NO_BACKUP') {
-                      Alert.alert('No backup found', 'There is no cloud backup for this account yet. Run "Back up Chats to Cloud" first on the device that has your history.');
-                    } else if (r.code === 'WRONG_PIN') {
-                      Alert.alert('Wrong PIN', 'The PIN didn\'t decrypt the backup. Make sure it\'s the same Vault PIN that was set when the backup was made.');
-                    } else {
-                      Alert.alert('Restore failed', r.message || 'Try again in a moment.');
-                    }
-                  }
-                } catch (e) {
-                  setBackupBusy(false);
-                  Alert.alert('Error', e?.message || 'Something went wrong.');
-                }
-              }}>
-              {backupBusy && <ActivityIndicator color="#fff" />}
-              <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>
-                {backupBusy
-                  ? (() => {
-                      const isEncrypting = backupMode === 'export' || backupMode === 'cloud-export';
-                      const verb = isEncrypting ? 'Encrypting' : 'Decrypting';
-                      const pct = backupProgress != null ? ` ${backupProgress}%` : '';
-                      return `${verb}…${pct}`;
-                    })()
-                  : (backupMode === 'export'        ? 'Encrypt & Export'
-                  :  backupMode === 'restore'       ? 'Decrypt & Restore'
-                  :  backupMode === 'cloud-export'  ? 'Encrypt & Upload'
-                  :                                   'Download & Decrypt')}
-              </Text>
-            </TouchableOpacity>
-
-            {/* Determinate progress bar — only visible while a
-                cloud op is running. The yieldy PBKDF2 fires
-                onProgress between chunks, which keeps backupProgress
-                ticking up to ~99% during key derivation. The final
-                upload step jumps straight to 100% on success. */}
-            {backupBusy && backupProgress != null && (
-              <View style={{
-                marginTop: 12, height: 6, backgroundColor: 'rgba(255,255,255,0.08)',
-                borderRadius: 3, overflow: 'hidden',
-              }}>
-                <View style={{
-                  width: `${backupProgress}%`, height: '100%', backgroundColor: accent,
-                }} />
-              </View>
-            )}
-
-            {/* Cancel — always reachable. While busy, taps flip the
-                cancellation flag so the next PBKDF2 chunk throws
-                CANCELLED and the modal closes cleanly. */}
-            <TouchableOpacity
-              onPress={() => {
-                if (backupBusy) {
-                  backupCancelRef.current.cancelled = true;
-                } else {
-                  setBackupModal(false);
-                }
-              }}
-              style={{ alignItems: 'center', paddingVertical: 14, marginTop: 6 }}
-            >
-              <Text style={{ color: sub, fontSize: 14, fontWeight: '600' }}>
-                {backupBusy ? 'Stop' : 'Cancel'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      </Modal>
+      {/* Backup modal — extracted to `portalModals` above so any
+          sub-page that has rows opening it (Privacy) can mount
+          the same JSX. See the const declaration for full source. */}
+      {portalModals}
 
       <Modal visible={pinModal} transparent animationType="fade" onRequestClose={() => setPinModal(false)}>
         <TouchableOpacity
