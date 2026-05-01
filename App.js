@@ -328,6 +328,18 @@ export default Sentry.wrap(function App() {
           } catch (e) {
             if (__DEV__) console.warn('[auto-backup] check failed:', e?.message || e);
           }
+
+          // Phase 1 (90-day history): sweep all per-room and
+          // per-group plaintext caches and drop entries older than
+          // 90 days. Throttled to once per day inside the helper
+          // so the O(rooms) AsyncStorage walk doesn't run on every
+          // brief background→foreground transition.
+          try {
+            const { pruneOldPlaintextCaches } = require('./src/services/historyPruner');
+            pruneOldPlaintextCaches().catch(() => {});
+          } catch (e) {
+            if (__DEV__) console.warn('[history-prune] dispatch failed:', e?.message || e);
+          }
         }
       });
 

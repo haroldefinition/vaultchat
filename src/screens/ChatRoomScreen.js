@@ -67,19 +67,59 @@ import {
   isRatchetEnvelope,
 } from '../services/ratchetService';
 
-// ── Phase YY: per-room sender-plaintext disk cache ────────────
-// Ratchet wires can't be self-decrypted (the chain key has been
-// rotated by the next send). To let the sender re-read their own
-// history after a cold restart we mirror plaintext to AsyncStorage
-// here. Wrapped in tiny try/catch helpers since this is best-effort.
+// ── Phase YY+: per-room plaintext disk cache (90-day window) ──
+// Originally added to let the sender re-read their own ratchet
+// history after a cold restart (ratchet wires can't be self-
+// decrypted because the chain key has rotated). Phase 1 of the
+// 90-day-history feature widens this to ALL successfully
+// decrypted messages — sender or recipient — so chats stay
+// readable for a rolling 90-day window even if the ratchet
+// rotates, key material gets stale, or a wire becomes
+// undecryptable mid-conversation. Storage shape:
+//
+//   { [msgId]: { t: <plaintext>, ts: <ms epoch> } }
+//
+// Legacy shape (string plaintext at the key) is auto-upgraded
+// on hydrate so we don't lose anything on the rollout.
 const _plainKey = (roomId) => `vaultchat_plain_${roomId}`;
+const PLAIN_TTL_MS = 90 * 24 * 60 * 60 * 1000;  // 90 days
 
+// Write a single message's plaintext to disk (read-modify-write).
+// Used for the immediate sender-side ratchet write path. For batch
+// persistence after decryptRows, prefer persistCacheToDisk below.
 async function persistSenderPlaintext(roomId, msgId, plaintext) {
   try {
     const raw = await AsyncStorage.getItem(_plainKey(roomId));
     const map = raw ? JSON.parse(raw) : {};
-    map[msgId] = plaintext;
+    map[msgId] = { t: plaintext, ts: Date.now() };
     await AsyncStorage.setItem(_plainKey(roomId), JSON.stringify(map));
+  } catch {}
+}
+
+// Bulk-flush the in-memory plaintext cache to disk. Cheap to call
+// after decryptRows since the in-memory Map is already the
+// superset of what's on disk (we hydrate at mount). Drops anything
+// older than PLAIN_TTL_MS so the file doesn't grow forever.
+async function persistCacheToDisk(roomId, cacheMap) {
+  try {
+    if (!cacheMap || cacheMap.size === 0) return;
+    // Pull the existing on-disk map so we preserve timestamps for
+    // entries that the in-memory cache has touched but didn't
+    // write a fresh ts for (keeps TTL accurate to first-decrypt).
+    const raw = await AsyncStorage.getItem(_plainKey(roomId));
+    const onDisk = raw ? JSON.parse(raw) : {};
+    const now = Date.now();
+    const out = {};
+    for (const [id, plaintext] of cacheMap.entries()) {
+      if (typeof plaintext !== 'string') continue;
+      const existing = onDisk[id];
+      const ts = (existing && typeof existing === 'object' && typeof existing.ts === 'number')
+        ? existing.ts
+        : now;  // first time we're persisting this id
+      if (now - ts > PLAIN_TTL_MS) continue;  // stale, drop
+      out[id] = { t: plaintext, ts };
+    }
+    await AsyncStorage.setItem(_plainKey(roomId), JSON.stringify(out));
   } catch {}
 }
 
@@ -103,13 +143,33 @@ function formatDateLabel(d) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+// Hydrate the in-memory plaintext cache from disk. Handles both
+// legacy shape (string plaintext) and new shape ({t, ts}). Drops
+// entries older than PLAIN_TTL_MS during hydrate so the user
+// never sees plaintext for a message they shouldn't be able to
+// recover anymore. Returns true if hydrate did pruning so the
+// caller can re-flush to persist the trimmed map.
 async function hydrateSenderPlaintext(roomId, cacheRef) {
   try {
     const raw = await AsyncStorage.getItem(_plainKey(roomId));
-    if (!raw) return;
+    if (!raw) return false;
     const map = JSON.parse(raw);
-    for (const [k, v] of Object.entries(map)) cacheRef.current.set(k, v);
+    const now = Date.now();
+    let didPrune = false;
+    for (const [k, v] of Object.entries(map)) {
+      if (typeof v === 'string') {
+        // Legacy shape — no timestamp, treat as fresh-now (it'll
+        // age out naturally on subsequent persists).
+        cacheRef.current.set(k, v);
+      } else if (v && typeof v === 'object' && typeof v.t === 'string') {
+        const ts = typeof v.ts === 'number' ? v.ts : now;
+        if (now - ts > PLAIN_TTL_MS) { didPrune = true; continue; }
+        cacheRef.current.set(k, v.t);
+      }
+    }
+    return didPrune;
   } catch {}
+  return false;
 }
 
 // ── GIFs & Emojis ─────────────────────────────────────────────
@@ -629,10 +689,15 @@ export default function ChatRoomScreen({ route, navigation }) {
     }
   }
 
-  // Decrypt many in parallel. Preserves order.
+  // Decrypt many in parallel. Preserves order. After the batch
+  // settles we flush the in-memory plaintext cache to disk so the
+  // 90-day window survives cold restarts (Phase 1 of 90-day
+  // history feature). Best-effort write — errors are swallowed.
   async function decryptRows(rows) {
     if (!Array.isArray(rows) || !rows.length) return rows;
-    return Promise.all(rows.map(decryptRow));
+    const decrypted = await Promise.all(rows.map(decryptRow));
+    persistCacheToDisk(roomId, plaintextCacheRef.current).catch(() => {});
+    return decrypted;
   }
 
   // ── Resolve recipient + publish my pubkey on mount ────────────
@@ -750,10 +815,14 @@ export default function ChatRoomScreen({ route, navigation }) {
 
   useEffect(() => {
     loadUser();
-    // Phase YY: hydrate sender-plaintext disk cache BEFORE fetchMessages
-    // so freshly-decrypted ratchet sender rows hit the cache instead of
-    // tripping the "[Can't decrypt...]" placeholder.
-    hydrateSenderPlaintext(roomId, plaintextCacheRef).then(() => {
+    // Phase YY+: hydrate the per-room plaintext disk cache BEFORE
+    // fetchMessages so any wire that fails to decrypt (rotated
+    // ratchet, stale key) hits the cache and renders instead of
+    // tripping the "[Can't decrypt...]" placeholder. If hydrate
+    // pruned anything older than the 90-day TTL, flush the
+    // trimmed map back to disk so the file doesn't grow forever.
+    hydrateSenderPlaintext(roomId, plaintextCacheRef).then((didPrune) => {
+      if (didPrune) persistCacheToDisk(roomId, plaintextCacheRef.current).catch(() => {});
       fetchMessages();
     });
     // Flush any queued messages from offline period

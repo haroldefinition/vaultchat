@@ -51,6 +51,61 @@ import {
 } from '../services/groupCrypto';
 import { loadLatest, loadOlder } from '../services/messagePager';
 
+// ── Phase 1 (90-day history): per-group plaintext disk cache ──
+// Mirror of the per-room cache in ChatRoomScreen.js. When a group
+// row decrypts successfully we persist the plaintext to AsyncStorage
+// so a subsequent stale-wire (rotated key, missing slot, etc.)
+// renders from cache instead of the "🔒 Encrypted message"
+// placeholder. Entries older than 90 days are pruned during
+// hydrate so the file doesn't grow forever and the group history
+// stays anchored to a rolling 90-day window.
+const _gPlainKey = (groupId) => `vaultchat_gplain_${groupId}`;
+const G_PLAIN_TTL_MS = 90 * 24 * 60 * 60 * 1000;  // 90 days
+const G_LOCKED_PLACEHOLDER = '🔒 Encrypted message';
+
+async function hydrateGroupPlaintext(groupId, cacheRef) {
+  try {
+    const raw = await AsyncStorage.getItem(_gPlainKey(groupId));
+    if (!raw) return false;
+    const map = JSON.parse(raw);
+    const now = Date.now();
+    let didPrune = false;
+    for (const [k, v] of Object.entries(map)) {
+      if (typeof v === 'string') {
+        // Legacy/no-ts shape — treat as fresh-now.
+        cacheRef.current.set(k, v);
+      } else if (v && typeof v === 'object' && typeof v.t === 'string') {
+        const ts = typeof v.ts === 'number' ? v.ts : now;
+        if (now - ts > G_PLAIN_TTL_MS) { didPrune = true; continue; }
+        cacheRef.current.set(k, v.t);
+      }
+    }
+    return didPrune;
+  } catch {}
+  return false;
+}
+
+async function persistGroupCacheToDisk(groupId, cacheMap) {
+  try {
+    if (!cacheMap || cacheMap.size === 0) return;
+    const raw = await AsyncStorage.getItem(_gPlainKey(groupId));
+    const onDisk = raw ? JSON.parse(raw) : {};
+    const now = Date.now();
+    const out = {};
+    for (const [id, plaintext] of cacheMap.entries()) {
+      if (typeof plaintext !== 'string') continue;
+      if (plaintext === G_LOCKED_PLACEHOLDER) continue;  // never cache the placeholder itself
+      const existing = onDisk[id];
+      const ts = (existing && typeof existing === 'object' && typeof existing.ts === 'number')
+        ? existing.ts
+        : now;
+      if (now - ts > G_PLAIN_TTL_MS) continue;
+      out[id] = { t: plaintext, ts };
+    }
+    await AsyncStorage.setItem(_gPlainKey(groupId), JSON.stringify(out));
+  } catch {}
+}
+
 // ── Media helpers ─────────────────────────────────────────────
 function SinglePhoto({ msgKey, isLocal, onOpen, onLongPress }) {
   const [uri,    setUri]    = useState(null);
@@ -360,6 +415,34 @@ export default function GroupChatScreen({ route, navigation }) {
   const pollRef      = useRef(null);
   const pendingRef   = useRef(null);
   const SKEY         = `vaultchat_gmsgs_${groupId}`;
+  // Phase 1 (90-day history): in-memory plaintext cache keyed by
+  // message id. Hydrated from AsyncStorage on mount; written to
+  // disk after each batch decrypt. See decryptGroupRowCached.
+  const gPlaintextCacheRef = useRef(new Map());
+
+  // Decrypt one row through the cache so a stale wire (rotated key,
+  // missing slot) falls back to the cached plaintext from a prior
+  // session instead of rendering the "🔒 Encrypted message"
+  // placeholder. Returns plaintext (or the placeholder if no path
+  // recovered the message).
+  async function decryptGroupRowCached(row) {
+    if (!row?.id) {
+      return await decryptGroupMessageForMe(row, currentUserId);
+    }
+    // Cache hit — skip the crypto path entirely.
+    const cached = gPlaintextCacheRef.current.get(row.id);
+    if (cached != null && cached !== G_LOCKED_PLACEHOLDER) return cached;
+    // Try the live wire.
+    const fresh = await decryptGroupMessageForMe(row, currentUserId);
+    if (fresh && fresh !== G_LOCKED_PLACEHOLDER) {
+      gPlaintextCacheRef.current.set(row.id, fresh);
+      return fresh;
+    }
+    // Wire failed — fall back to cache (covers the case where we
+    // had cached plaintext earlier and the wire later went stale).
+    if (cached != null) return cached;
+    return fresh;  // still the placeholder; render layer will hide it
+  }
 
   // ── Load messages from AsyncStorage first, then sync with Supabase ──
   useEffect(() => {
@@ -367,6 +450,12 @@ export default function GroupChatScreen({ route, navigation }) {
     loadLocal();        // show cached messages immediately
     syncSupabase();
     flushQueue().catch(() => {});
+    // Phase 1: hydrate the per-group plaintext cache from disk so
+    // the first decrypt batch picks up cached entries. Re-flush
+    // afterward if hydrate pruned anything past the 90-day TTL.
+    hydrateGroupPlaintext(groupId, gPlaintextCacheRef).then((didPrune) => {
+      if (didPrune) persistGroupCacheToDisk(groupId, gPlaintextCacheRef.current).catch(() => {});
+    });
 
     // Realtime subscription for instant group messages.
     // resolveIncoming() decrypts our own per-recipient envelope on
@@ -376,7 +465,10 @@ export default function GroupChatScreen({ route, navigation }) {
     const resolveIncoming = async (raw) => {
       if (!raw) return raw;
       if (isGroupEnvelope(raw)) {
-        const plain = await decryptGroupMessageForMe(raw, currentUserId);
+        const plain = await decryptGroupRowCached(raw);
+        // Realtime hits one row at a time; persist incrementally so
+        // the cache survives an immediate cold restart.
+        persistGroupCacheToDisk(groupId, gPlaintextCacheRef.current).catch(() => {});
         return { ...raw, text: plain };
       }
       return raw;
@@ -613,9 +705,12 @@ export default function GroupChatScreen({ route, navigation }) {
         // older messages).
         const decrypted = await Promise.all(real.map(async row => {
           if (!isGroupEnvelope(row)) return row;
-          const plain = await decryptGroupMessageForMe(row, currentUserId);
+          const plain = await decryptGroupRowCached(row);
           return { ...row, text: plain };
         }));
+        // Phase 1: flush the cache after the batch so the 90-day
+        // window survives cold restarts. Best-effort.
+        persistGroupCacheToDisk(groupId, gPlaintextCacheRef.current).catch(() => {});
         // Merge instead of overwrite — preserve any optimistic
         // temp_-id messages (replies and regular sends) that haven't
         // been confirmed yet, so a poll firing in the half-second
@@ -702,9 +797,11 @@ export default function GroupChatScreen({ route, navigation }) {
       if (page.items?.length) {
         const decrypted = await Promise.all(page.items.map(async row => {
           if (!isGroupEnvelope(row)) return row;
-          const plain = await decryptGroupMessageForMe(row, currentUserId);
+          const plain = await decryptGroupRowCached(row);
           return { ...row, text: plain };
         }));
+        // Phase 1: flush after pagination batch as well.
+        persistGroupCacheToDisk(groupId, gPlaintextCacheRef.current).catch(() => {});
         setMessages(prev => {
           const seen = new Set(prev.map(m => m.id));
           const fresh = decrypted.filter(m => !seen.has(m.id));
@@ -1308,10 +1405,19 @@ export default function GroupChatScreen({ route, navigation }) {
         ref={flatRef}
         // Blanket-hide undecryptables (Harold's product call) —
         // matches WhatsApp / Signal / iMessage behavior. Diagnostic
-        // value moves to Sentry, not the UI.
+        // value moves to Sentry, not the UI. Group messages render
+        // their plaintext into `text` (not `content`), and the group
+        // crypto path returns `🔒 Encrypted message` on failure, so
+        // we filter on both shapes. After the 90-day plaintext
+        // cache (Phase 1) most stale wires resolve through cache —
+        // this filter only catches what's truly unrecoverable.
         data={(() => {
-          const PLACEHOLDER = '[Can’t decrypt this message on this device]';
-          const visible = messages.filter(m => (m.content || '') !== PLACEHOLDER);
+          const PH_RAW   = '[Can’t decrypt this message on this device]';
+          const PH_GROUP = G_LOCKED_PLACEHOLDER;
+          const visible = messages.filter(m => {
+            const body = m.text != null ? m.text : (m.content || '');
+            return body !== PH_RAW && body !== PH_GROUP;
+          });
           return [...visible].reverse();
         })()}
         keyExtractor={(item, i) => String(item.id || i)}
