@@ -31,7 +31,13 @@
 
 import nacl from 'tweetnacl';
 import naclUtil from 'tweetnacl-util';
-import * as FileSystem from 'expo-file-system';
+// Expo SDK 54 split expo-file-system into a new File/Directory
+// class API (root import) and the legacy enum-based API (this
+// path). EncodingType.UTF8 / writeAsStringAsync / etc. only
+// exist on the legacy module — importing from 'expo-file-system'
+// without /legacy gave "Cannot read property 'UTF8' of undefined"
+// at backup time. Same import that mediaUpload.js uses.
+import * as FileSystem from 'expo-file-system/legacy';
 import { Share, Platform } from 'react-native';
 import { listVaultedIds, addToVault } from './vault';
 import { deriveSecretboxKey } from './pbkdf2';
