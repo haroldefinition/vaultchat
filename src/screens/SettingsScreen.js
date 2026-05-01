@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, Alert, Image, TextInput, Modal, Linking } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, Alert, Image, TextInput, Modal, Linking, ActivityIndicator } from 'react-native';
 import { supabase } from '../services/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
@@ -765,8 +765,15 @@ export default function SettingsScreen({ navigation }) {
               icon="🛡️"
               label="Vault PIN"
               subText={vaultPinSet ? 'Set — long-press Chats title to unlock' : 'Tap to set up — locks chats behind a PIN'}
-              onPress={() => {
-                if (vaultPinSet) {
+              onPress={async () => {
+                // Re-read on tap so a stale state value can't route
+                // the user to the wrong modal. The mounted state
+                // hydrates lazily and could still be `false` even
+                // after the user set a PIN earlier in the session.
+                let nowSet = vaultPinSet;
+                try { nowSet = await hasVaultPin(); } catch {}
+                if (nowSet !== vaultPinSet) setVaultPinSet(nowSet);
+                if (nowSet) {
                   // Already set: open the legacy 6-digit keypad to
                   // change/remove the existing PIN.
                   setPinType('vault'); setPinInput(''); setPinModal(true);
@@ -957,6 +964,26 @@ export default function SettingsScreen({ navigation }) {
             <Row icon="❌" label="Delete Account" subText="Permanently remove your VaultChat account" danger onPress={deleteAccount} />
           </Section>
         </ScrollView>
+
+        {/* VaultPinSetupModal mounted inside the privacy sub-page
+            so a tap on the "Vault PIN" row immediately surfaces
+            the setup form. The main return at the bottom of this
+            file ALSO mounts this modal — but the privacy branch
+            short-circuits before reaching that, which is why
+            users had to back out and re-enter Settings before the
+            modal appeared. Keeping both mounts is harmless: only
+            one is in the React tree at any given time because
+            they're in mutually exclusive return branches. */}
+        <VaultPinSetupModal
+          visible={vaultSetupModal}
+          onClose={() => setVaultSetupModal(false)}
+          onCreated={async () => {
+            setVaultSetupModal(false);
+            setVaultPinSet(true);
+            try { await AsyncStorage.setItem('vaultchat_vault_setup_seen', '1'); } catch {}
+            Alert.alert('Vault PIN created', 'You can now move chats into the vault from the chat list (long-press a row → Move to Vault).');
+          }}
+        />
       </View>
     );
   }
@@ -1307,7 +1334,7 @@ export default function SettingsScreen({ navigation }) {
               editable={!backupBusy}
             />
             <TouchableOpacity
-              style={{ backgroundColor: accent, paddingVertical: 14, borderRadius: 12, alignItems: 'center', opacity: backupPin && !backupBusy ? 1 : 0.5 }}
+              style={{ backgroundColor: accent, paddingVertical: 14, borderRadius: 12, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8, opacity: backupPin && !backupBusy ? 1 : 0.5 }}
               disabled={!backupPin || backupBusy}
               onPress={async () => {
                 setBackupBusy(true);
@@ -1368,12 +1395,16 @@ export default function SettingsScreen({ navigation }) {
                   Alert.alert('Error', e?.message || 'Something went wrong.');
                 }
               }}>
+              {backupBusy && <ActivityIndicator color="#fff" />}
               <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>
-                {backupBusy ? 'Working…' :
-                  backupMode === 'export'        ? 'Encrypt & Export'   :
-                  backupMode === 'restore'       ? 'Decrypt & Restore'  :
-                  backupMode === 'cloud-export'  ? 'Encrypt & Upload'   :
-                                                   'Download & Decrypt'}
+                {backupBusy
+                  ? (backupMode === 'cloud-export'  ? 'Encrypting…'
+                  :  backupMode === 'cloud-restore' ? 'Decrypting…'
+                  :                                   'Working…')
+                  : (backupMode === 'export'        ? 'Encrypt & Export'
+                  :  backupMode === 'restore'       ? 'Decrypt & Restore'
+                  :  backupMode === 'cloud-export'  ? 'Encrypt & Upload'
+                  :                                   'Download & Decrypt')}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => !backupBusy && setBackupModal(false)} style={{ alignItems: 'center', paddingVertical: 12, marginTop: 4 }}>

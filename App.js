@@ -76,6 +76,7 @@ import RegisterScreen      from './src/screens/RegisterScreen';
 import EncryptionInfoScreen from './src/screens/EncryptionInfoScreen';
 import PremiumUpgradeSplash from './src/components/PremiumUpgradeSplash';
 import HistoryRestorePrompt from './src/components/HistoryRestorePrompt';
+import RequiredPinSetupGate from './src/components/RequiredPinSetupGate';
 import BiometricLockScreen from './src/screens/BiometricLockScreen';
 import ChatsScreen         from './src/screens/ChatsScreen';
 import ChatRoomScreen      from './src/screens/ChatRoomScreen';
@@ -649,6 +650,13 @@ export default Sentry.wrap(function App() {
           for the Vault PIN to restore. Self-gated: bails if the
           user isn't signed in or no backup row exists. */}
       <HistoryRestorePrompt />
+
+      {/* Mandatory PIN setup for existing signed-in users who
+          never went through the new RegisterScreen PIN step. Forces
+          them to set a Vault PIN before they can use the app —
+          ensures cloud chat backup actually has an encryption key
+          for everyone, not just brand-new accounts. */}
+      <RequiredPinSetupGate />
     </ThemeProvider>
     </UnreadProvider>
     </GestureHandlerRootView>

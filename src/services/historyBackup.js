@@ -14,19 +14,20 @@
 //      protected by RLS so only the row owner can read it.
 //    - The blob itself is AES-via-tweetnacl-secretbox encrypted with
 //      a key derived from the user's Vault PIN via PBKDF2-HMAC-SHA512
-//      (1,000,000 iterations). The server never sees plaintext or
-//      the PIN.
+//      (100,000 iterations — matches WhatsApp's chat-backup level).
+//      The server never sees plaintext or the PIN.
 //    - The Vault PIN is the SOLE key. If the user forgets it, the
 //      backup is unrecoverable — by design, this is what keeps it
 //      end-to-end encrypted from the server.
 //
-//  PIN strength:
-//    - PBKDF2 1M iters on a 4-digit PIN: ~30s × 10000 = ~3.5 days
-//      to brute-force the encrypted blob. Marginal.
-//    - 6-digit PIN: ~30s × 1M = ~347 days. Acceptable.
-//    - 8-digit PIN: years. Strong.
-//    - We bake a 6-digit floor at the call sites that enable
-//      backup. See VaultPinSetupModal upgrade.
+//  PIN strength (PBKDF2 100k iters):
+//    - 4-digit PIN: ~3s × 10000 = ~8 hours to brute-force a leaked
+//      blob. Fine for casual attacker, weak vs. determined one.
+//    - 6-digit PIN: ~3s × 1M = ~35 days. Acceptable.
+//    - 8-digit PIN: ~3s × 100M = ~9.5 years. Strong.
+//    - 4-digit floor matches the rest of VaultChat's PIN UX (per
+//      Harold's product call). Upgrade path: bump to 6-digit
+//      minimum once we have telemetry on actual abuse.
 //
 //  Snapshot shape (what we encrypt):
 //    {
@@ -47,7 +48,14 @@ import naclUtil from 'tweetnacl-util';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabase';
 
-const PBKDF2_ITERS_DEFAULT = 1000000;
+// 100,000 iters is WhatsApp's encryption-key level for chat
+// backups — strong enough that a leaked blob with a 4-digit PIN
+// still takes hours of sustained effort to brute-force, but fast
+// enough on a phone that the "Working..." spinner is short
+// (single-digit seconds rather than 10-30s at 1M iters).
+// Per-row pbkdf2_iters in the schema means existing 1M backups
+// remain decryptable; only new uploads use 100k.
+const PBKDF2_ITERS_DEFAULT = 100000;
 const TTL_MS               = 90 * 24 * 60 * 60 * 1000;
 const SCHEMA_VERSION       = 1;
 const PLAIN_PREFIX_ROOM    = 'vaultchat_plain_';
