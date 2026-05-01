@@ -1329,23 +1329,12 @@ export default function SettingsScreen({ navigation }) {
                     setBackupModal(false);
                     Alert.alert(r.ok ? 'Restored' : 'Restore failed', r.message);
                   } else if (backupMode === 'cloud-export') {
-                    // 90-day history → Supabase. PBKDF2 1M iters
-                    // makes a 4-digit PIN brute-forceable in days.
-                    // Soft-warn the user if their PIN is short — they
-                    // can still proceed, but we want them to know.
-                    if (String(backupPin).length < 6) {
-                      const proceed = await new Promise(resolve => {
-                        Alert.alert(
-                          'Short PIN',
-                          'A 4-digit PIN can be brute-forced from a leaked backup blob in days. Use a 6+ digit PIN for serious protection. Back up anyway?',
-                          [
-                            { text: 'Cancel', onPress: () => resolve(false), style: 'cancel' },
-                            { text: 'Back up anyway', onPress: () => resolve(true) },
-                          ],
-                        );
-                      });
-                      if (!proceed) { setBackupBusy(false); return; }
-                    }
+                    // 90-day history → Supabase. Per Harold (product
+                    // call 2026-04-30): keep the 4-digit PIN floor —
+                    // matches the rest of VaultChat's PIN UX. The
+                    // PBKDF2 1M iter cost helps but a leaked blob is
+                    // still brute-forceable from a short PIN; that
+                    // trade-off is documented in historyBackup.js.
                     const r = await runHistoryBackup(backupPin, { force: true });
                     setBackupBusy(false);
                     setBackupModal(false);

@@ -253,8 +253,10 @@ function _decryptSnapshot(blob, pin) {
  * to surface success/failure to the user.
  */
 export async function runHistoryBackup(pin, { force = false } = {}) {
-  if (!pin || String(pin).length < 6) {
-    return { ok: false, message: 'PIN too short. Use 6+ digits to enable backup.' };
+  // 4-digit PIN floor matches the rest of VaultChat's PIN UX. The
+  // backup-attack trade-off is documented in the file header.
+  if (!pin || String(pin).length < 4) {
+    return { ok: false, message: 'PIN too short.' };
   }
   try {
     if (!force) {

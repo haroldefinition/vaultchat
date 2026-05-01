@@ -75,6 +75,7 @@ import RegisterScreen      from './src/screens/RegisterScreen';
 // kept on disk for future reference.
 import EncryptionInfoScreen from './src/screens/EncryptionInfoScreen';
 import PremiumUpgradeSplash from './src/components/PremiumUpgradeSplash';
+import HistoryRestorePrompt from './src/components/HistoryRestorePrompt';
 import BiometricLockScreen from './src/screens/BiometricLockScreen';
 import ChatsScreen         from './src/screens/ChatsScreen';
 import ChatRoomScreen      from './src/screens/ChatRoomScreen';
@@ -641,6 +642,13 @@ export default Sentry.wrap(function App() {
         visible={showUpgradeSplash}
         onDone={() => setShowUpgradeSplash(false)}
       />
+
+      {/* First-run "We found your chat backup" prompt — checks for
+          a message_history_blob row on mount; if present and we
+          haven't already offered restore on this install, prompts
+          for the Vault PIN to restore. Self-gated: bails if the
+          user isn't signed in or no backup row exists. */}
+      <HistoryRestorePrompt />
     </ThemeProvider>
     </UnreadProvider>
     </GestureHandlerRootView>
