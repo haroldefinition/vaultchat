@@ -1,5 +1,10 @@
 node_modules
 .expo/
+
+# macOS junk
+.DS_Store
+**/.DS_Store
+*.textClipping
 # Phase AAA: google-services.json must be committed so EAS Cloud
 # builds include it. Firebase API keys are designed to be public —
 # they're restricted by SHA-1 + package name in the Firebase console.
