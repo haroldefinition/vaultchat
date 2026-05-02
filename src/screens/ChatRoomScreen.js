@@ -56,7 +56,7 @@ import {
   isEncryptedEnvelope,
   isMultiDeviceEnvelope,
 } from '../crypto/encryption';
-import { getDeviceKeysForUser, publishMyDeviceKey } from '../services/deviceKeys';
+import { getDeviceKeysForUser, publishMyDeviceKey, invalidateUserDevices } from '../services/deviceKeys';
 import { getDeviceId } from '../services/deviceIdentity';
 import { loadLatest, loadOlder } from '../services/messagePager';
 import {
@@ -730,6 +730,21 @@ export default function ChatRoomScreen({ route, navigation }) {
         if (cancelled) return;
         setRecipientId(otherId);
         if (otherId) {
+          // Bug fix #131: force-evict the cached device list for both
+          // recipient and self before fetching. The 5-min TTL on the
+          // device-keys cache (services/deviceKeys.js) caused stale
+          // sends to fail silently when a peer signed in on a fresh
+          // install — old cached keys were used to encrypt, but the
+          // new install's private key couldn't decrypt, and the
+          // blanket-hide-undecryptables filter (task #46) swept the
+          // ghost messages out of view. Invalidating on chat-open
+          // guarantees Adam (sender) always sees vcreviewer's CURRENT
+          // device list, including any new device registered since the
+          // last cache. Cost: one extra Supabase round-trip per chat
+          // open; benefit: messaging works reliably across reinstalls
+          // and second-device sign-ins.
+          invalidateUserDevices(otherId);
+          invalidateUserDevices(myId);
           // Resolve BOTH the multi-device list (preferred), the
           // legacy single pubkey (fallback), AND my own other
           // devices (so by_dev can fan out to them — Phase ZZ) in

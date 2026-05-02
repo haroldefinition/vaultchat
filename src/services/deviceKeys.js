@@ -29,8 +29,21 @@ try { supabase = require('./supabase').supabase; } catch {}
 
 // ── Per-user cache for hot-path lookups ────────────────────────
 // userId → { devices: [{device_id, public_key}], ts }
+//
+// Bug fix #131: TTL reduced from 5 min → 30 sec. Reason: when a peer
+// signs in on a fresh install (new device_id, new keypair), the
+// sender's cached device list goes stale and they encrypt to the
+// peer's old device keys only. The new install can't decrypt, and
+// the blanket-hide-undecryptables filter (task #46) made the failed
+// messages invisible — looked like messaging was just broken. With
+// a 30-sec TTL the worst-case stale-key window is short enough that
+// users barely notice. Bandwidth cost: ~4× more device-key fetches
+// vs the old TTL, but still ~2/min per active peer in a busy chat.
+// Negligible at our scale. (1:1 chats also force-invalidate at
+// chat-open — see ChatRoomScreen useEffect — for the most common
+// "I just reinstalled, why are messages broken" case.)
 const _devicesCache = new Map();
-const CACHE_TTL_MS  = 5 * 60 * 1000;
+const CACHE_TTL_MS  = 30 * 1000;
 
 function _cached(userId) {
   const e = _devicesCache.get(userId);
