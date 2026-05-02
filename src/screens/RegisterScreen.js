@@ -8,6 +8,7 @@ import { supabase } from '../services/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { saveHandle } from '../services/vaultHandle';
 import { publishMyPublicKey } from '../services/keyExchange';
+import { publishMyDeviceKey } from '../services/deviceKeys';
 import { hasVaultPin, setVaultPin } from '../services/vault';
 
 const LOGO    = require('../../assets/vaultchat-logo.png');
@@ -261,6 +262,18 @@ export default function RegisterScreen({ route, onLoginCallback }) {
       // Publish this device's NaCl public key so peers can encrypt to us.
       // Best-effort — never blocks login.
       publishMyPublicKey(userId).catch(() => {});
+      // Bug fix #131 follow-up: also publish the per-device key
+      // (multi-device E2E support — services/deviceKeys.js). Previously
+      // device keys only got published when the user opened a chat,
+      // which meant a fresh install + sign-in had ZERO published device
+      // keys until they tapped into a conversation. Peers messaging the
+      // new install would encrypt to the OLD device's public key
+      // (still cached server-side), and the new install couldn't
+      // decrypt — silent message drop after the blanket-hide filter.
+      // Calling publishMyDeviceKey here ensures the new device is
+      // discoverable the moment sign-in completes.
+      const myPhone = sentTo.method === 'phone' ? sentTo.value : null;
+      publishMyDeviceKey(userId, myPhone).catch(() => {});
     } catch {}
     setLoading(false);
     onLogin?.();

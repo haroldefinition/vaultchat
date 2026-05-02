@@ -720,7 +720,16 @@ export default function ChatRoomScreen({ route, navigation }) {
         // encrypt to us. Both are best-effort — silent on failure
         // so a slow Supabase doesn't strand the user.
         publishMyPublicKey(myId).catch(() => {});
-        publishMyDeviceKey(myId, recipientPhone).catch(() => {});
+        // Bug fix #131 follow-up: previously passed `recipientPhone`
+        // (the OTHER user's phone) to publishMyDeviceKey, but the
+        // function expects `myPhone` (current user's phone) for the
+        // RPC fallback path's phone-match validation. Wrong phone →
+        // RPC silently rejected → no device key published if Path 1
+        // (direct upsert) was also blocked by RLS. Drop the arg
+        // entirely — the function's auth-session path (Path 1) is
+        // what we rely on here; RegisterScreen handles the initial
+        // publish with the correct phone on sign-in.
+        publishMyDeviceKey(myId).catch(() => {});
         // Phase YY: publish my ratchet pre-key bundle alongside the
         // device key so peers can bootstrap a Double Ratchet session.
         publishMyRatchetPreKey(myId).catch(() => {});
