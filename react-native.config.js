@@ -1,33 +1,23 @@
 // ============================================================
-//  react-native.config.js — RN CLI autolinking overrides
+//  react-native.config.js — RN CLI autolinking config
 //
-//  Why this file exists: VaultChat uses @react-native-firebase
-//  ONLY on Android, for FCM-based push wake of the killed app.
-//  iOS uses PushKit + APNS via src/services/voipPushService.js
-//  and never imports Firebase. Without this override, RN CLI
-//  autolinking installs the Firebase iOS pods anyway, the
-//  Firebase native library compiles in, and on every launch we
-//  see:
+//  Currently a no-op (default autolinking applies to all
+//  platforms). Earlier today this file excluded
+//  @react-native-firebase/app + /messaging from iOS to clean up
+//  the "FirebaseApp.configure() not called" warning. That
+//  exclusion broke Android autolinking — it caused
+//  ReactNativeFirebaseAppPackage to be referenced in the
+//  generated PackageList.java but the actual Java class wasn't
+//  on the Android classpath, so :app:compileReleaseJavaWithJavac
+//  failed.
 //
-//    [FirebaseCore] The default Firebase app has not yet been
-//    configured. Add `FirebaseApp.configure()` ...
+//  The iOS Firebase warning is harmless (Firebase iOS SDK is
+//  loaded but unused; we use PushKit + APNS for iOS push). The
+//  cost of fighting it via this file is too high.
 //
-//  Excluding the iOS platform from these two packages keeps the
-//  warning out of the logs AND drops several MB from the iOS
-//  binary. Android autolinking is untouched.
-//
-//  After changing this file, run `pod install` (or
-//  `npx expo prebuild --clean` for managed Expo) before the
-//  next iOS rebuild so the Podfile.lock reflects the change.
+//  Better long-term fix (v1.1): exclude Firebase iOS pods at the
+//  Podfile level instead of via RN CLI autolinking. Until then
+//  we accept the log noise on iOS to keep Android building.
 // ============================================================
 
-module.exports = {
-  dependencies: {
-    '@react-native-firebase/app': {
-      platforms: { ios: null },
-    },
-    '@react-native-firebase/messaging': {
-      platforms: { ios: null },
-    },
-  },
-};
+module.exports = {};
