@@ -130,7 +130,13 @@ function MoreScreen({ navigation }) {
   const { bg, card, tx, sub, border, accent } = useTheme();
   const items = [
     { icon:'🏪', label:'Business',        screen:'Business',      desc:'Dashboard, inbox & plans' },
-    { icon:'🤖', label:'AI Assistant',    screen:'AIAssistant',   desc:'Private, on-device AI' },
+    // AI Assistant deferred to v1.1 — the current implementation
+    // hits Anthropic's API directly with no auth header (would
+    // require a hardcoded client-side key, which Apple rejects).
+    // Proper Railway proxy is the v1.1 follow-up. Stack.Screen
+    // route + AIAssistantScreen file kept registered so we can
+    // restore the menu entry with a single line when it's wired.
+    // { icon:'🤖', label:'AI Assistant',    screen:'AIAssistant',   desc:'Private, on-device AI' },
     // Discover used to be a top-level bottom tab. With the tab-bar
     // refresh it lives here in the overflow page so we keep the
     // surface accessible without crowding the bottom dock.

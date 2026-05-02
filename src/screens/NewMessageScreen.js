@@ -68,6 +68,11 @@ export default function NewMessageScreen({ navigation, route }) {
   const [toInput,       setToInput]       = useState('');
   const [msg,           setMsg]           = useState('');
   const [user,          setUser]          = useState(null);
+  // In-flight flag for the Start button — flips to a spinner
+  // while the supabase findByHandleOrPhone resolves so the user
+  // gets visible feedback. Apple Guideline 2.1: no frozen UI on
+  // a tap. Also prevents double-tap creating two rooms.
+  const [starting,      setStarting]      = useState(false);
   const [selectedName,  setSelectedName]  = useState('');
   const [myHandle,      setMyHandle]      = useState('');
   // Attachment modals — exact mirror of ChatRoomScreen
@@ -201,8 +206,18 @@ export default function NewMessageScreen({ navigation, route }) {
 
 
   async function startChat() {
+    if (starting) return;  // double-tap guard
     const cleaned = toInput.trim();
     if (!cleaned) { Alert.alert('To:', 'Enter a phone number or @handle.'); return; }
+    setStarting(true);
+    try {
+      await _startChatInner(cleaned);
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  async function _startChatInner(cleaned) {
 
     // Must be logged in — we need our own userId to build the rooms row.
     // Fetch the session fresh instead of relying on the cached `user` state,
@@ -362,10 +377,15 @@ export default function NewMessageScreen({ navigation, route }) {
           <Text style={{ color: accent, fontSize: 16, fontWeight: '600' }}>Cancel</Text>
         </TouchableOpacity>
         <Text style={[s.headerTitle, { color: tx }]}>New Message</Text>
-        <TouchableOpacity onPress={startChat} disabled={toInput.trim().length < 3} style={[s.headerSide, { alignItems: 'flex-end' }]}>
-          <Text style={{ color: toInput.trim().length >= 3 ? accent : sub, fontWeight: '700', fontSize: 16 }}>
-            Start
-          </Text>
+        <TouchableOpacity
+          onPress={startChat}
+          disabled={toInput.trim().length < 3 || starting}
+          style={[s.headerSide, { alignItems: 'flex-end' }]}>
+          {starting
+            ? <ActivityIndicator size="small" color={accent} />
+            : <Text style={{ color: toInput.trim().length >= 3 ? accent : sub, fontWeight: '700', fontSize: 16 }}>
+                Start
+              </Text>}
         </TouchableOpacity>
       </View>
 

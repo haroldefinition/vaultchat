@@ -1429,17 +1429,23 @@ export default function GroupChatScreen({ route, navigation }) {
           <Text style={{ color: sub, textAlign: 'center', paddingVertical: 12, fontSize: 12 }}>Loading older…</Text>
         ) : null}
         renderItem={({ item }) => {
-
+          // Sending indicator — temp_-id rows are still in flight.
+          // Faded opacity tells the user "delivering" without
+          // adding a separate badge. Same pattern as 1:1
+          // ChatRoomScreen for Apple Guideline 2.1 compliance.
+          const isSending = typeof item.id === 'string' && item.id.startsWith('temp_');
           return (
-            <Bubble item={item} currentUserId={currentUserId} colors={colors}
-              onFullScreen={uri => setFullImgUri(uri)}
-              onPlay={uri => setVidUri(uri)}
-              onLongPress={() => { longPressFeedback(); setPickerMsg(item); }}
-              tappedId={tappedId}
-              onTap={id => setTappedId(prev => prev === id ? null : id)}
-              onReply={() => setReplyingTo({ id: item.id, text: item.text, sender: item.sender_handle })}
-              reactions={reactions[item.id] || []}
-              onReact={emoji => toggleGroupReaction(item.id, emoji)} />
+            <View style={{ opacity: isSending ? 0.55 : 1 }}>
+              <Bubble item={item} currentUserId={currentUserId} colors={colors}
+                onFullScreen={uri => setFullImgUri(uri)}
+                onPlay={uri => setVidUri(uri)}
+                onLongPress={() => { longPressFeedback(); setPickerMsg(item); }}
+                tappedId={tappedId}
+                onTap={id => setTappedId(prev => prev === id ? null : id)}
+                onReply={() => setReplyingTo({ id: item.id, text: item.text, sender: item.sender_handle })}
+                reactions={reactions[item.id] || []}
+                onReact={emoji => toggleGroupReaction(item.id, emoji)} />
+            </View>
           );
         }}
         ListEmptyComponent={

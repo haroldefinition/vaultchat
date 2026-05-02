@@ -82,6 +82,18 @@ export default function SettingsScreen({ navigation }) {
   // null when not running so we can render the static button label
   // instead of the progress UI.
   const [backupProgress, setBackupProgress] = useState(null);
+  // Account deletion overlay — Alert.alert can't host a spinner,
+  // so we render a separate full-screen Modal that mounts the
+  // moment the destructive press fires and stays up until the
+  // edge-function + table scrubs complete. Without this the user
+  // taps "Delete Account" and stares at a frozen screen for 1-3s
+  // while the network round-trips run, which Apple flags under
+  // Guideline 2.1 (Performance).
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  // Profile-save in-flight flag — flips the NavBar Save button to
+  // a spinner so the user can't double-tap during the supabase
+  // round-trip and knows the save is running. Apple Guideline 2.1.
+  const [savingProfile, setSavingProfile] = useState(false);
   // Cancellation token shared with runHistoryBackup/Restore. When
   // the user taps Cancel we flip the .cancelled flag; the yieldy
   // PBKDF2 checks it between chunks and throws CANCELLED. Using a
@@ -207,6 +219,7 @@ export default function SettingsScreen({ navigation }) {
   }
 
   async function saveProfile() {
+    setSavingProfile(true);
     // Local cache first — these are read on the next app launch before
     // the Supabase round-trip lands, so writing them locally makes the
     // edits feel instant.
@@ -262,6 +275,7 @@ export default function SettingsScreen({ navigation }) {
       }
     } catch {}
 
+    setSavingProfile(false);
     Alert.alert('Saved ✓', 'Profile updated!');
     setPage('main');
   }
@@ -353,6 +367,7 @@ export default function SettingsScreen({ navigation }) {
                   text: 'Delete Account',
                   style: 'destructive',
                   onPress: async () => {
+                    setDeletingAccount(true);
                     try {
                       const { data: { session } } = await supabase.auth.getSession();
                       const myUserId = session?.user?.id;
@@ -396,11 +411,13 @@ export default function SettingsScreen({ navigation }) {
                       }
                       try { await supabase.auth.signOut(); } catch {}
                       try { await AsyncStorage.clear(); } catch {}
+                      setDeletingAccount(false);
                       Alert.alert(
                         'Account deleted',
                         'Your VaultChat profile, encryption keys, contacts, folders, and preferences have been removed from our servers. Messages you sent to other people stay on their devices — that\'s the nature of end-to-end encrypted messaging.'
                       );
                     } catch (e) {
+                      setDeletingAccount(false);
                       Alert.alert('Delete failed', e?.message || 'Could not delete the account. Try again or contact support.');
                     }
                   },
@@ -415,13 +432,15 @@ export default function SettingsScreen({ navigation }) {
 
   const NavBar = ({ title, onSave }) => (
     <View style={[st.navBar, { backgroundColor: card, borderBottomColor: border }]}>
-      <TouchableOpacity onPress={() => setPage('main')} style={{ width: 60 }}>
-        <Text style={{ color: accent, fontSize: 16 }}>‹ Back</Text>
+      <TouchableOpacity onPress={() => setPage('main')} style={{ width: 60 }} disabled={savingProfile}>
+        <Text style={{ color: accent, fontSize: 16, opacity: savingProfile ? 0.4 : 1 }}>‹ Back</Text>
       </TouchableOpacity>
       <Text style={[st.navTitle, { color: tx }]}>{title}</Text>
       {onSave
-        ? <TouchableOpacity onPress={onSave} style={{ width: 60, alignItems: 'flex-end' }}>
-            <Text style={{ color: accent, fontWeight: 'bold', fontSize: 16 }}>Save</Text>
+        ? <TouchableOpacity onPress={onSave} disabled={savingProfile} style={{ width: 60, alignItems: 'flex-end' }}>
+            {savingProfile
+              ? <ActivityIndicator size="small" color={accent} />
+              : <Text style={{ color: accent, fontWeight: 'bold', fontSize: 16 }}>Save</Text>}
           </TouchableOpacity>
         : <View style={{ width: 60 }} />}
     </View>
@@ -509,6 +528,24 @@ export default function SettingsScreen({ navigation }) {
   // exclusive returns mean only one mount is live at a time.
   const portalModals = (
     <>
+      {/* Account-deletion overlay — visible the entire time
+          delete-account is running (table scrubs + Edge Function
+          + auth signOut + AsyncStorage clear). Without this the
+          app would look frozen for 1-3s after the destructive
+          press. Non-dismissible: once the user confirms, we
+          commit until the work finishes. */}
+      <Modal visible={deletingAccount} transparent animationType="fade" onRequestClose={() => {}}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center' }}>
+          <View style={{ backgroundColor: card, borderRadius: 18, padding: 28, alignItems: 'center', minWidth: 240 }}>
+            <ActivityIndicator size="large" color={accent} />
+            <Text style={{ color: tx, fontSize: 16, fontWeight: '700', marginTop: 16 }}>Deleting account…</Text>
+            <Text style={{ color: sub, fontSize: 12, textAlign: 'center', marginTop: 6 }}>
+              Scrubbing your data from our servers. This usually takes 2–5 seconds.
+            </Text>
+          </View>
+        </View>
+      </Modal>
+
       {/* ── Vault backup modal (Phase XX) ────────────────
           Single modal with both vault export/restore + cloud
           export/restore flows; the `backupMode` state switches

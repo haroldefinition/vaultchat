@@ -2009,20 +2009,31 @@ export default function ChatRoomScreen({ route, navigation }) {
           }
           // (Undecryptable sentinel branch removed — see data:
           //  blanket-hide policy filters them upstream now.)
+          // Sending indicator — temp_ id rows are still in flight
+          // (Supabase insert hasn't echoed back yet). Faded
+          // opacity tells the user the message is being delivered
+          // without needing a separate "sending..." badge. The
+          // bubble flips back to full opacity the instant the
+          // server confirms and we replace the temp_ id with the
+          // real one. Apple Guideline 2.1: every async action
+          // needs visual feedback.
+          const isSending = typeof item.id === 'string' && item.id.startsWith('temp_');
           return (
-            <Bubble
-              item={item} myId={myId} tx={tx} sub={sub} card={card} accent={accent}
-              bubbleOut={bubbleOut} bubbleIn={bubbleIn}
-              bubbleOutTx={bubbleOutTx} bubbleInTx={bubbleInTx}
-              onOpenImg={uri => setFullImgUri(uri)}
-              onPlayVid={uri => setVidUri(uri)}
-              onLongPress={item => { longPressFeedback(); setPickerMsg(item); }}
-              onReply={() => setReplyTo(item)}
-              tappedId={tappedId}
-              onTap={id => setTappedId(prev => prev === id ? null : id)}
-              reactions={reactions[item.id] || []}
-              onReact={emoji => toggleReaction(item.id, emoji)}
-            />
+            <View style={{ opacity: isSending ? 0.55 : 1 }}>
+              <Bubble
+                item={item} myId={myId} tx={tx} sub={sub} card={card} accent={accent}
+                bubbleOut={bubbleOut} bubbleIn={bubbleIn}
+                bubbleOutTx={bubbleOutTx} bubbleInTx={bubbleInTx}
+                onOpenImg={uri => setFullImgUri(uri)}
+                onPlayVid={uri => setVidUri(uri)}
+                onLongPress={item => { longPressFeedback(); setPickerMsg(item); }}
+                onReply={() => setReplyTo(item)}
+                tappedId={tappedId}
+                onTap={id => setTappedId(prev => prev === id ? null : id)}
+                reactions={reactions[item.id] || []}
+                onReact={emoji => toggleReaction(item.id, emoji)}
+              />
+            </View>
           );
         }}
         ListEmptyComponent={

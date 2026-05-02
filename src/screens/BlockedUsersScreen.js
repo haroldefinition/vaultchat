@@ -23,6 +23,10 @@ export default function BlockedUsersScreen({ navigation }) {
   const { bg, card, tx, sub, border, accent } = useTheme();
   const [rows,       setRows]       = useState([]);
   const [loading,    setLoading]    = useState(true);
+  // Per-row busy id — when an unblock is in flight for a specific
+  // user, that row's button shows a spinner and is disabled. Apple
+  // Guideline 2.1: every async action needs visible feedback.
+  const [unblockingId, setUnblockingId] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
@@ -57,11 +61,16 @@ export default function BlockedUsersScreen({ navigation }) {
           style: 'destructive',
           onPress: async () => {
             taptic();
-            await unblockUser(row.blocked_id);
-            // The subscribe() listener triggers reload, but call load()
-            // directly too for instant UI feedback in case the listener
-            // fires after the optimistic cache update.
-            load();
+            setUnblockingId(row.blocked_id);
+            try {
+              await unblockUser(row.blocked_id);
+              // The subscribe() listener triggers reload, but call
+              // load() directly too for instant UI feedback in case
+              // the listener fires after the optimistic cache update.
+              await load();
+            } finally {
+              setUnblockingId(null);
+            }
           },
         },
       ],
@@ -89,9 +98,12 @@ export default function BlockedUsersScreen({ navigation }) {
           <Text style={[s.handle, { color: sub }]} numberOfLines={1}>{handle}</Text>
         </View>
         <TouchableOpacity
-          style={[s.unblockBtn, { borderColor: accent }]}
+          style={[s.unblockBtn, { borderColor: accent, opacity: unblockingId === item.blocked_id ? 0.5 : 1 }]}
+          disabled={unblockingId === item.blocked_id}
           onPress={() => confirmUnblock(item)}>
-          <Text style={[s.unblockTx, { color: accent }]}>Unblock</Text>
+          {unblockingId === item.blocked_id
+            ? <ActivityIndicator size="small" color={accent} />
+            : <Text style={[s.unblockTx, { color: accent }]}>Unblock</Text>}
         </TouchableOpacity>
       </View>
     );

@@ -202,13 +202,18 @@ export default function PremiumModal({ visible, onClose, onUpgraded, colors }) {
             Manage or cancel anytime in your App Store account settings.
           </Text>
           <View style={styles.legalLinks}>
+            {/* Domain is vaultchat.co (where the policy is hosted on
+                Lovable). The /terms and /privacy paths must exist
+                or App Review will flag a 404 from the upgrade modal.
+                Privacy file is hosted at the long path, mirrored
+                here as the canonical URL for App Store compliance. */}
             <Text style={[styles.legalLink, { color: c.muted }]}
-                  onPress={() => Linking.openURL('https://vaultchat.app/terms')}>
+                  onPress={() => Linking.openURL('https://vaultchat.co/terms')}>
               Terms of Use
             </Text>
             <Text style={[styles.legalLink, { color: c.muted }]}>·</Text>
             <Text style={[styles.legalLink, { color: c.muted }]}
-                  onPress={() => Linking.openURL('https://vaultchat.app/privacy')}>
+                  onPress={() => Linking.openURL('https://vaultchat.co/android-privacy.html')}>
               Privacy Policy
             </Text>
           </View>
