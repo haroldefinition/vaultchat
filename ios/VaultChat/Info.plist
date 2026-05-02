@@ -21,7 +21,7 @@
     <key>CFBundlePackageType</key>
     <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
+    <string>1.0.3</string>
     <key>CFBundleSignature</key>
     <string>????</string>
     <key>CFBundleURLTypes</key>
@@ -41,7 +41,7 @@
       </dict>
     </array>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>4</string>
     <key>LSMinimumSystemVersion</key>
     <string>12.0</string>
     <key>LSRequiresIPhoneOS</key>
@@ -53,22 +53,20 @@
       <key>NSAllowsLocalNetworking</key>
       <true/>
     </dict>
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <true/>
     <key>NSCameraUsageDescription</key>
-    <string>VaultChat needs camera access to take photos.</string>
+    <string>VaultChat needs camera access to capture photos and videos for chats and to scan QR codes when adding contacts.</string>
     <key>NSContactsUsageDescription</key>
-    <string>Allow $(PRODUCT_NAME) to access your contacts</string>
+    <string>VaultChat needs contacts access to find people you already know who use VaultChat. Your contacts are matched on-device against our directory; we never upload your full address book.</string>
     <key>NSFaceIDUsageDescription</key>
-    <string>VaultChat uses Face ID to securely unlock the app.</string>
-    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-    <string>Allow $(PRODUCT_NAME) to access your location</string>
-    <key>NSLocationAlwaysUsageDescription</key>
-    <string>Allow $(PRODUCT_NAME) to access your location</string>
+    <string>VaultChat uses Face ID to unlock locked chats and the Vault.</string>
     <key>NSLocationWhenInUseUsageDescription</key>
-    <string>VaultChat needs location access to share your location.</string>
+    <string>VaultChat needs location access only when you tap the Share Location button in a chat. Location is never tracked in the background.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>VaultChat needs microphone access for voice and video calls.</string>
     <key>NSPhotoLibraryAddUsageDescription</key>
-    <string>VaultChat needs access to save photos.</string>
+    <string>VaultChat needs to save photos to your library when you choose to download them.</string>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>VaultChat needs access to your photos and videos to share them in chats.</string>
     <key>RCTNewArchEnabled</key>

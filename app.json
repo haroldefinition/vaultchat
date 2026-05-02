@@ -2,7 +2,7 @@
   "expo": {
     "name": "VaultChat",
     "slug": "vaultchat",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "orientation": "portrait",
     "scheme": "vaultchat",
     "icon": "./assets/icon.png",
@@ -14,23 +14,25 @@
     },
     "ios": {
       "bundleIdentifier": "com.chatvault.vaultchat",
-      "buildNumber": "3",
+      "buildNumber": "4",
       "infoPlist": {
         "UIBackgroundModes": [
           "audio",
           "voip"
         ],
         "NSPhotoLibraryUsageDescription": "VaultChat needs access to your photos and videos to share them in chats.",
-        "NSPhotoLibraryAddUsageDescription": "VaultChat needs access to save photos.",
-        "NSCameraUsageDescription": "VaultChat needs camera access to take photos and videos.",
+        "NSPhotoLibraryAddUsageDescription": "VaultChat needs to save photos to your library when you choose to download them.",
+        "NSCameraUsageDescription": "VaultChat needs camera access to capture photos and videos for chats and to scan QR codes when adding contacts.",
         "NSMicrophoneUsageDescription": "VaultChat needs microphone access for voice and video calls.",
-        "NSLocationWhenInUseUsageDescription": "VaultChat needs location access to share your location.",
-        "NSFaceIDUsageDescription": "VaultChat uses Face ID to securely unlock the app."
+        "NSContactsUsageDescription": "VaultChat needs contacts access to find people you already know who use VaultChat. Your contacts are matched on-device against our directory; we never upload your full address book.",
+        "NSLocationWhenInUseUsageDescription": "VaultChat needs location access only when you tap the Share Location button in a chat. Location is never tracked in the background.",
+        "NSFaceIDUsageDescription": "VaultChat uses Face ID to unlock locked chats and the Vault.",
+        "ITSAppUsesNonExemptEncryption": true
       }
     },
     "android": {
       "package": "com.chatvault.vaultchat",
-      "versionCode": 3,
+      "versionCode": 4,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0057a8"
@@ -83,7 +85,7 @@
       ]
     ],
     "extra": {
-      "serverUrl": "https://vaultchat-server-production.up.railway.app",
+      "serverUrl": "https://vaultchat-production-3a96.up.railway.app",
       "eas": {
         "projectId": "cdcdbb60-34c6-4acb-9728-7c321313ebc6"
       }
