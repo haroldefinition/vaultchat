@@ -168,13 +168,49 @@ export default function RegisterScreen({ route, onLoginCallback }) {
               : { email: sentTo.value, id: data.user.id }
           )
         );
+        // Fetch the existing profile row (if any) and rehydrate the
+        // device-local cache. Two bugs lived here pre-2026-05-03:
+        //   (1) we queried `handle` — a column that doesn't exist on
+        //       profiles (the actual column is `vault_handle`), so
+        //       `handleAlreadySet` was *always* false for every user;
+        //   (2) even if it had been correct, we never wrote the
+        //       existing handle / display_name back to AsyncStorage
+        //       on a returning-user sign-in. After uninstall (which
+        //       wipes AsyncStorage on Android), Edit Profile, the
+        //       Settings handle field, and chat headers all rendered
+        //       blank — *and* SettingsScreen's "no local handle, but
+        //       I do have a display_name" fallback would generate a
+        //       random new @handle and overwrite the user's original
+        //       vault_handle in Supabase, freeing it up to be claimed
+        //       by another user. Catastrophic identity-loss vector
+        //       triggered just by opening Settings post-reinstall.
+        // Hydrate aggressively here so every downstream screen sees
+        // the right values from first paint.
         const { data: profile } = await supabase
           .from('profiles')
-          .select('handle')
+          .select('vault_handle, vault_id, display_name, avatar_url, bio')
           .eq('id', data.user.id)
-          .single();
-        const handleAlreadySet = !!profile?.handle;
+          .maybeSingle();
+        const existingHandle = profile?.vault_handle || profile?.vault_id || null;
+        const handleAlreadySet = !!existingHandle;
         setHasExistingHandle(handleAlreadySet);
+
+        if (handleAlreadySet) {
+          // Mirror saveHandle()'s on-disk format: the handle key
+          // includes the leading '@'; vault_id mirrors the same
+          // value so SettingsScreen's identifier field doesn't drift.
+          try { await AsyncStorage.setItem('vaultchat_handle',  `@${existingHandle.replace(/^@+/, '')}`); } catch {}
+          try { await AsyncStorage.setItem('vaultchat_vault_id', `@${existingHandle.replace(/^@+/, '')}`); } catch {}
+        }
+        if (profile?.display_name) {
+          try { await AsyncStorage.setItem('vaultchat_display_name', profile.display_name); } catch {}
+        }
+        if (profile?.avatar_url) {
+          try { await AsyncStorage.setItem('vaultchat_profile_photo', profile.avatar_url); } catch {}
+        }
+        if (profile?.bio) {
+          try { await AsyncStorage.setItem('vaultchat_bio', profile.bio); } catch {}
+        }
 
         // If a Vault PIN is already set on this install, skip the
         // PIN step. (This covers returning users who already went

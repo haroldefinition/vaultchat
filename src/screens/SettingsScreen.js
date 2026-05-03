@@ -144,13 +144,21 @@ export default function SettingsScreen({ navigation }) {
     // makes "switch phones / reinstall" Just Work — without it, users
     // see an empty profile after re-signing in even though their data
     // is safe in Supabase.
-    if (!d.vaultchat_display_name || !d.vaultchat_bio) {
+    if (!d.vaultchat_display_name || !d.vaultchat_bio || !d.vaultchat_handle) {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user?.id) {
+          // Pull vault_handle + vault_id alongside display_name + bio so a
+          // returning user on a fresh install gets their @handle restored
+          // from Supabase even if RegisterScreen's hydration didn't fire
+          // (e.g. session was restored without going through verifyOtp).
+          // 2026-05-03: a v1.0.4 install on a Pixel emulator showed the
+          // display_name field correctly hydrated via this fallback but
+          // the vault_handle field rendered the placeholder, because this
+          // fallback didn't include vault_handle in its select clause.
           const { data: profile } = await supabase
             .from('profiles')
-            .select('display_name, bio')
+            .select('display_name, bio, vault_handle, vault_id')
             .eq('id', session.user.id)
             .maybeSingle();
           if (profile?.display_name && !d.vaultchat_display_name) {
@@ -160,6 +168,14 @@ export default function SettingsScreen({ navigation }) {
           if (profile?.bio && !d.vaultchat_bio) {
             setBio(profile.bio);
             try { await AsyncStorage.setItem('vaultchat_bio', profile.bio); } catch {}
+          }
+          const serverHandle = profile?.vault_handle || profile?.vault_id || null;
+          if (serverHandle && !d.vaultchat_handle) {
+            const formatted = `@${String(serverHandle).replace(/^@+/, '')}`;
+            setVaultHandle(formatted);
+            setVaultId(formatted);
+            try { await AsyncStorage.setItem('vaultchat_handle',  formatted); } catch {}
+            try { await AsyncStorage.setItem('vaultchat_vault_id', formatted); } catch {}
           }
         }
       } catch {}
@@ -191,11 +207,45 @@ export default function SettingsScreen({ navigation }) {
       if (d.vaultchat_vault_id !== handle) {
         try { await AsyncStorage.setItem('vaultchat_vault_id', handle); } catch {}
       }
-    } else if (d.vaultchat_display_name) {
-      const newHandle = await generateHandle(d.vaultchat_display_name);
-      setVaultHandle(newHandle);
-      setVaultId(newHandle);
-      await saveHandle(newHandle);
+    } else {
+      // Local cache is empty. BEFORE generating a random new handle
+      // (which would call saveHandle() and OVERWRITE any existing
+      // vault_handle in Supabase), check the server for one. This
+      // covers the post-reinstall case where AsyncStorage is wiped
+      // but the user already has a published @handle that other
+      // users discover them by. Pre-2026-05-03 we skipped this check
+      // and silently rerolled returning users' handles to random
+      // values like @<displayname><4digits>, which then propagated
+      // to peers and freed the original handle for someone else to
+      // claim. Catastrophic identity-loss bug.
+      let serverHandle = null;
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user?.id) {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('vault_handle, vault_id')
+            .eq('id', session.user.id)
+            .maybeSingle();
+          serverHandle = profile?.vault_handle || profile?.vault_id || null;
+        }
+      } catch {}
+      if (serverHandle) {
+        const formatted = `@${String(serverHandle).replace(/^@+/, '')}`;
+        setVaultHandle(formatted);
+        setVaultId(formatted);
+        try { await AsyncStorage.setItem('vaultchat_handle',  formatted); } catch {}
+        try { await AsyncStorage.setItem('vaultchat_vault_id', formatted); } catch {}
+      } else if (d.vaultchat_display_name) {
+        // Truly first-run with no server-side handle either — safe to
+        // generate one. We still don't auto-saveHandle() from here
+        // anymore; let the user confirm/edit it via the Save button
+        // in the Vault Handle field rather than racing to claim a
+        // random suffix on their behalf.
+        const newHandle = await generateHandle(d.vaultchat_display_name);
+        setVaultHandle(newHandle);
+        setVaultId(newHandle);
+      }
     }
     const bio = await AsyncStorage.getItem('vaultchat_biometric');
     setBiometricEnabled(bio === 'true');
