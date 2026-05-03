@@ -122,7 +122,7 @@ export default function PrivacyPolicyScreen({ navigation }) {
           You can delete your account at any time:{'\n\n'}
           {'  '}• In-app: open Settings → scroll to Delete Account. The deletion completes immediately and removes your profile, @handle, encryption keys, encrypted server backup, folders, chat preferences, block list, cached contacts, and your authentication record.{'\n'}
           {'  '}• Web (no install required): visit{' '}
-          <Text style={[s.link, { color: accent }]} onPress={() => Linking.openURL('https://vaultchat.co/delete-account')}>
+          <Text style={[s.link, { color: accent }]} onPress={() => Linking.openURL('https://vaultchat.co/delete-account.html')}>
             vaultchat.co/delete-account
           </Text>
           {' '}and submit the form. We confirm and complete the deletion within 30 days.{'\n\n'}
