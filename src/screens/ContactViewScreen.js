@@ -50,10 +50,11 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../services/theme';
 import ContactEditModal from '../components/ContactEditModal';
-import { placeCall } from '../services/placeCall';
-import { displayHandle } from '../services/vaultHandle';
+import { placeCall, hashPair } from '../services/placeCall';
+import { displayHandle, findByPhone } from '../services/vaultHandle';
 import { isUserPremiumByPhone, isUserPremium } from '../services/premiumStatus';
 import { blockUser, unblockUser, isBlockedSync, hydrateBlocks } from '../services/blocks';
+import { supabase } from '../services/supabase';
 import PremiumCrown from '../components/PremiumCrown';
 
 // Single-line action tile in the 4-up action grid.
@@ -145,9 +146,58 @@ export default function ContactViewScreen({ route, navigation }) {
     placeCall({ navigation, recipientName: name, recipientPhone: num, type: 'video' });
   }
 
-  function messageContact() {
-    const num    = contact.phone || contact.mobile;
-    const roomId = `dm_${[num, 'me'].sort().join('_')}`;
+  async function messageContact() {
+    const num = contact.phone || contact.mobile;
+    if (!num) {
+      Alert.alert('No phone number', 'This contact has no phone number to message.');
+      return;
+    }
+
+    // Feature 2 fix (2026-05-04): the previous version of this function
+    // generated a non-canonical roomId via:
+    //   `dm_${[num, 'me'].sort().join('_')}`
+    // The 'me' literal placeholder meant Adam (phone "111") opening Jesse's
+    // contact got `dm_222_me`, while Jesse opening Adam's contact got
+    // `dm_111_me` — two different rooms for the same conversation. Result:
+    // when both sides independently messaged from ContactView at the same
+    // time, neither saw the other's messages (room-id mismatch bug).
+    //
+    // Fix: compute the canonical hashPair(myUserId, peerUserId) the same
+    // way NewMessageScreen and placeCall do. Both sides converge on one
+    // room. Falls back to hashing phones if the peer hasn't joined VaultChat
+    // yet (matches placeCall.js's legacy fallback path).
+    let roomId = null;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const myUserId = session?.user?.id || null;
+      const myPhone  = (session?.user?.phone || '').replace(/\D/g, '');
+
+      let peerUserId = null;
+      try {
+        const peer = await findByPhone(num);
+        peerUserId = peer?.id || null;
+      } catch {}
+
+      if (myUserId && peerUserId) {
+        roomId = hashPair(myUserId, peerUserId);
+      } else if (myPhone && num) {
+        // Peer not on VaultChat yet (or lookup failed) — fall back to
+        // hashing phone numbers. Better than the 'me' placeholder hack
+        // because at least both sides would derive the same hash if both
+        // had each other's phones.
+        const peerPhone = String(num).replace(/\D/g, '');
+        roomId = hashPair(myPhone, peerPhone);
+      } else {
+        // Last-ditch fallback — same shape as old code but with peer's
+        // own phone in both slots (deterministic, just not collision-safe).
+        roomId = hashPair(num, num);
+      }
+    } catch (e) {
+      // Resolution failed; navigate without a roomId so ChatRoomScreen's
+      // null-guards keep the UI alive. Better than crashing.
+      if (__DEV__) console.log('messageContact roomId resolution failed:', e?.message);
+    }
+
     navigation.navigate('ChatRoom', {
       roomId, recipientPhone: num, recipientName: name, recipientPhoto: contact.photo,
     });

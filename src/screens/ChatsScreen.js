@@ -32,6 +32,7 @@ import {
   addToVault,
   removeFromVault,
 } from '../services/vault';
+import { subscribeMessageNew } from '../services/socket';
 
 const CHATS_KEY = 'vaultchat_chats';
 
@@ -192,6 +193,89 @@ export default function ChatsScreen({ navigation }) {
       if (state !== 'active') lockVault();
     });
     return () => sub.remove();
+  }, []);
+
+  // Feature 3 (cold-message UX): global subscription to message:new
+  // events fanned out by the server when ANY room you're a member of
+  // receives a new message. This is what lets Adam → Jesse "first
+  // contact" messages appear in Jesse's chat list immediately even
+  // though Jesse has never opened the chat (no per-room INSERT
+  // subscription is active for an unknown room). When a message:new
+  // arrives, we either bump the existing row (lastMessage + time +
+  // sort to top) or insert a brand new chat row using the sender
+  // metadata the server fanned out alongside the event.
+  //
+  // Stays subscribed for the lifetime of the ChatsScreen component
+  // (which is essentially app lifetime — it's a tab in the bottom
+  // navigator). Re-subscribes survive socket reconnects because
+  // socket.io preserves listeners across the reconnect cycle.
+  useEffect(() => {
+    const cleanup = subscribeMessageNew((evt) => {
+      try {
+        if (!evt || !evt.roomId || !evt.senderId) return;
+        // Use the functional setState so we don't race with other
+        // updaters (loadChats running in parallel, prefs sync, etc.)
+        setChats(prev => {
+          const list = Array.isArray(prev) ? prev.slice() : [];
+          const previewByType = (t) => {
+            if (t === 'image' || t === 'gif')   return '📷 Photo';
+            if (t === 'video')                  return '🎥 Video';
+            if (t === 'audio')                  return '🎤 Voice note';
+            if (t === 'file')                   return '📎 File';
+            if (t === 'vanish')                 return '👻 Vanish message';
+            return 'New message';
+          };
+          const lastPreview = previewByType(evt.type);
+          const prettyTime  = (() => {
+            try {
+              const d = evt.timestamp ? new Date(evt.timestamp) : new Date();
+              return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            } catch {
+              return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            }
+          })();
+
+          const idx = list.findIndex(c => c?.roomId === evt.roomId);
+          if (idx >= 0) {
+            // Existing chat — bump preview + time, leave name/photo
+            // intact so the row doesn't flicker if sender info changed.
+            const updated = {
+              ...list[idx],
+              lastMessage: lastPreview,
+              time:        prettyTime,
+              markedUnread: false,
+            };
+            list.splice(idx, 1);
+            list.unshift(updated);
+          } else {
+            // Brand-new chat — Adam → Jesse first contact. Build the
+            // row from the server-supplied sender metadata.
+            const peerHandle = evt.senderHandle ? `@${String(evt.senderHandle).replace(/^@+/, '')}` : '';
+            const peerName   = evt.senderName || peerHandle || 'VaultChat User';
+            list.unshift({
+              roomId:      evt.roomId,
+              userId:      evt.senderId,
+              phone:       evt.senderPhone || null,
+              name:        peerName,
+              handle:      peerHandle,
+              photo:       null,
+              lastMessage: lastPreview,
+              time:        prettyTime,
+              pinned:      false,
+              hideAlerts:  false,
+            });
+          }
+
+          // Persist updated list. Fire-and-forget; setState already
+          // committed for the UI render.
+          AsyncStorage.setItem(CHATS_KEY, JSON.stringify(list)).catch(() => {});
+          return list;
+        });
+      } catch (e) {
+        if (__DEV__) console.warn('message:new handler failed:', e?.message);
+      }
+    });
+    return cleanup;
   }, []);
 
   // Phase OO: cross-device sync for pin/archive/folder/hide-alerts.

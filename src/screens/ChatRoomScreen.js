@@ -26,6 +26,11 @@ import ReportMessageModal from '../components/ReportMessageModal';
 import PremiumCrown from '../components/PremiumCrown';
 import { supabase } from '../services/supabase';
 import { placeCall } from '../services/placeCall';
+// Feature 3 cold-message UX: server fan-out fires from message:send.
+// Regular sends INSERT into Supabase directly, so we ALSO emit on the
+// socket below to wake the server's fan-out + FCM paths. Old clients
+// that don't subscribe to message:new ignore the broadcast harmlessly.
+import { sendMessage as socketSendMessage } from '../services/socket';
 import { usePresence } from '../services/presence';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { subscribeToRoom, subscribeToTyping, broadcastTyping, freshChannel } from '../services/realtimeMessages';
@@ -1250,6 +1255,36 @@ export default function ChatRoomScreen({ route, navigation }) {
           AsyncStorage.setItem(`vaultchat_msgs_${roomId}`, JSON.stringify(updated.filter(m => !String(m.id).startsWith('temp_')))).catch(() => {});
           return updated;
         });
+
+        // Feature 3 cold-message UX: emit message:send on the socket so
+        // the server's fan-out path can deliver a `message:new` event to
+        // the recipient's user-id-room. Without this the cold-message
+        // event never fires because regular chat sends go directly via
+        // Supabase INSERT (line above) and bypass socket.io entirely.
+        // The server uses senderId from the authenticated socket session
+        // and looks up senderName + senderHandle from the profiles table,
+        // so we only need to pass the routing fields — content is already
+        // safely persisted in Supabase, the socket emit is purely for
+        // notifying the recipient that a new message exists.
+        try {
+          socketSendMessage({
+            roomId,
+            messageId: data.id,
+            senderName: myHandle || '',
+            // The content field is the encrypted ciphertext from the
+            // insertPayload — server stores it in its in-memory rooms
+            // map but never decrypts (no key, by design). Recipients
+            // don't read message bodies via socket; they pull from
+            // the messages table when they open the chat. We pass it
+            // mostly to keep the server's existing message:send schema
+            // happy.
+            content: insertPayload.content,
+            type: 'text',
+            timestamp: data.created_at || now,
+          });
+        } catch (e) {
+          if (__DEV__) console.warn('socket message:send emit failed:', e?.message);
+        }
       } else {
         // Persist temp as local message
         const raw = await AsyncStorage.getItem(`vaultchat_msgs_${roomId}`);

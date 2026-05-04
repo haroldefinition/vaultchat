@@ -42,10 +42,18 @@ export function connectSocket(userId) {
   // can't bubble up as an unhandled promise rejection.
   socket.on('connect', () => {
     try {
-      if (__DEV__) console.log('🟢 Connected to VaultChat server');
+      console.log('🟢 Connected to VaultChat server (socketId=' + socket?.id + ')');
       socket?.emit('user:online', { userId });
+      // Diagnostic onAny — logs every socket event received from server.
+      // Helps prove whether message:new is arriving at all when ChatsScreen
+      // shows no chat update. Strip after Feature 3 is verified.
+      try {
+        socket?.onAny?.((eventName, ...args) => {
+          try { console.log('[sock:rx] ' + eventName + ' ' + JSON.stringify(args?.[0] || {}).slice(0, 200)); } catch {}
+        });
+      } catch {}
     } catch (e) {
-      if (__DEV__) console.log('socket connect handler error:', e?.message);
+      console.log('socket connect handler error:', e?.message);
     }
   });
 
@@ -127,6 +135,82 @@ export function sendTypingStop(roomId, userId) {
 // ── READ receipts ──────────────────────────────────────────────
 export function sendReadReceipt(roomId, messageId, userId) {
   socket?.emit('message:read', { roomId, messageId, userId });
+}
+
+// ── Cold-message UX (Feature 3) ────────────────────────────────
+// Subscribe globally to `message:new` events fanned out by the
+// server when ANY room you're a member of receives a new message.
+// Distinct from the per-room INSERT subscription used inside
+// ChatRoomScreen — this fires regardless of whether the recipient
+// has the chat open, and includes enough metadata (senderName,
+// senderHandle, senderPhone) for the chat list to render a fresh
+// row when the room is brand new (Adam → Jesse first contact).
+//
+// Returns a cleanup function. Safe to call before connectSocket()
+// returns — the listener attaches when the socket finally exists.
+// Re-attaching survives reconnects because socket.io preserves
+// listeners across the reconnect lifecycle.
+export function subscribeMessageNew(handler) {
+  if (typeof handler !== 'function') return () => {};
+  // Wrap so we can log receipt + de-dupe re-attachments.
+  const wrapped = (evt) => {
+    try { console.log('[message:new] received', JSON.stringify({ roomId: evt?.roomId, senderId: evt?.senderId, type: evt?.type })); } catch {}
+    try { handler(evt); } catch (e) { try { console.log('[message:new] handler threw:', e?.message); } catch {} }
+  };
+  handler.__wrappedMessageNew = wrapped;
+
+  // Listeners attached to socket.io before the socket finishes its
+  // transport upgrade get orphaned — the engine.io upgrade swaps the
+  // active transport from polling → websocket, and listeners that
+  // existed only on the polling transport's queue don't always make
+  // it across. Symptom in 1.0.10 testing on Android: onAny INSIDE a
+  // 'connect' handler fired correctly, but socket.on('message:new')
+  // attached BEFORE 'connect' silently never fired. Fix: register
+  // the typed listener inside a 'connect' handler so it re-attaches
+  // on every transport upgrade AND every reconnect, then ALSO attach
+  // it now if the socket is already fully connected (covers callers
+  // that subscribe after first-connect has already fired).
+  function attachIfMissing(s) {
+    if (!s) return;
+    // socket.io listeners() returns the array of registered handlers
+    // for an event. Skip if our wrapper is already in the list to
+    // avoid stacking duplicates on every reconnect cycle.
+    try {
+      const existing = (typeof s.listeners === 'function') ? s.listeners('message:new') : [];
+      if (existing.includes(wrapped)) return;
+    } catch {}
+    try { s.on('message:new', wrapped); } catch {}
+    try { console.log('[message:new] (re)attached (socketId=' + (s?.id || 'pending') + ')'); } catch {}
+  }
+
+  // Re-attach on every 'connect' fire. Captured in a separate
+  // function so we can detach it cleanly during teardown.
+  const connectListener = function () { attachIfMissing(socket); };
+
+  function bind() {
+    if (!socket) return false;
+    // If socket has already fired 'connect' before we got here,
+    // attach immediately. socket.connected becomes true on first
+    // connect and stays true through transport upgrades.
+    if (socket.connected) attachIfMissing(socket);
+    socket.on('connect', connectListener);
+    return true;
+  }
+
+  if (!bind()) {
+    // socket not yet created; poll until it exists, then bind.
+    const pollId = setInterval(() => {
+      if (bind()) clearInterval(pollId);
+    }, 250);
+    handler.__pollId = pollId;
+  }
+  try { console.log('[message:new] subscribed (socketId=' + (socket?.id || 'pending') + ')'); } catch {}
+
+  return () => {
+    try { if (handler.__pollId) clearInterval(handler.__pollId); } catch {}
+    try { socket?.off?.('connect', connectListener); } catch {}
+    try { socket?.off?.('message:new', wrapped); } catch {}
+  };
 }
 
 // ════════════════════════════════════════════════════════════
