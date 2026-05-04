@@ -42,18 +42,10 @@ export function connectSocket(userId) {
   // can't bubble up as an unhandled promise rejection.
   socket.on('connect', () => {
     try {
-      console.log('🟢 Connected to VaultChat server (socketId=' + socket?.id + ')');
+      if (__DEV__) console.log('🟢 Connected to VaultChat server (socketId=' + socket?.id + ')');
       socket?.emit('user:online', { userId });
-      // Diagnostic onAny — logs every socket event received from server.
-      // Helps prove whether message:new is arriving at all when ChatsScreen
-      // shows no chat update. Strip after Feature 3 is verified.
-      try {
-        socket?.onAny?.((eventName, ...args) => {
-          try { console.log('[sock:rx] ' + eventName + ' ' + JSON.stringify(args?.[0] || {}).slice(0, 200)); } catch {}
-        });
-      } catch {}
     } catch (e) {
-      console.log('socket connect handler error:', e?.message);
+      if (__DEV__) console.log('socket connect handler error:', e?.message);
     }
   });
 
@@ -152,10 +144,15 @@ export function sendReadReceipt(roomId, messageId, userId) {
 // listeners across the reconnect lifecycle.
 export function subscribeMessageNew(handler) {
   if (typeof handler !== 'function') return () => {};
-  // Wrap so we can log receipt + de-dupe re-attachments.
+  // Wrap so we can swallow handler exceptions without taking down the
+  // socket's event loop. The receipt-logging that used to live here
+  // was diagnostic for the 1.0.12 transport-upgrade bug and was
+  // stripped in 1.0.14 once the listener-on-connect pattern below
+  // was verified working in production.
   const wrapped = (evt) => {
-    try { console.log('[message:new] received', JSON.stringify({ roomId: evt?.roomId, senderId: evt?.senderId, type: evt?.type })); } catch {}
-    try { handler(evt); } catch (e) { try { console.log('[message:new] handler threw:', e?.message); } catch {} }
+    try { handler(evt); } catch (e) {
+      if (__DEV__) try { console.log('[message:new] handler threw:', e?.message); } catch {}
+    }
   };
   handler.__wrappedMessageNew = wrapped;
 
@@ -180,7 +177,6 @@ export function subscribeMessageNew(handler) {
       if (existing.includes(wrapped)) return;
     } catch {}
     try { s.on('message:new', wrapped); } catch {}
-    try { console.log('[message:new] (re)attached (socketId=' + (s?.id || 'pending') + ')'); } catch {}
   }
 
   // Re-attach on every 'connect' fire. Captured in a separate
@@ -204,7 +200,6 @@ export function subscribeMessageNew(handler) {
     }, 250);
     handler.__pollId = pollId;
   }
-  try { console.log('[message:new] subscribed (socketId=' + (socket?.id || 'pending') + ')'); } catch {}
 
   return () => {
     try { if (handler.__pollId) clearInterval(handler.__pollId); } catch {}

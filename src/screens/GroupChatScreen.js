@@ -34,6 +34,17 @@ import { ResolvedPhotoStack, ResolvedVideoCarousel } from '../components/MediaBu
 import VoiceNoteBubble from '../components/VoiceNoteBubble';
 import ViewOncePhoto from '../components/ViewOncePhoto';
 import { summarizeMessages, summaryToText } from '../services/chatSummary';
+// 1.0.14 group badges: GroupChatScreen now mirrors the active-room
+// tracking + socket emit pattern that 1:1 ChatRoomScreen has used since
+// 1.0.13. setActiveRoom on focus tells GroupScreen's message:new handler
+// to skip incrementing this group's unread badge while the user is
+// reading messages in real-time. socketSendMessage after the
+// group_messages INSERT triggers the server's `message:send` handler,
+// which fans out `message:new` to other group members so their badges
+// increment + their chat list updates.
+import { setActiveRoom, clearActiveRoom } from '../services/activeRoom';
+import { useFocusEffect } from '@react-navigation/native';
+import { sendMessage as socketSendMessage } from '../services/socket';
 import {
   useAudioRecorder,
   RecordingPresets,
@@ -577,6 +588,18 @@ export default function GroupChatScreen({ route, navigation }) {
     return () => { cancelled = true; unsub && unsub(); };
   }, [groupId, navigation]);
 
+  // Active-room tracking — while focused, mark this groupId as the
+  // "active room" so GroupScreen's global message:new handler skips
+  // incrementing the unread badge for messages arriving here in real
+  // time. Cleared on blur and unmount. Mirrors the 1:1 pattern from
+  // ChatRoomScreen (1.0.13).
+  useFocusEffect(
+    useCallback(() => {
+      if (groupId) setActiveRoom(groupId);
+      return () => { clearActiveRoom(); };
+    }, [groupId])
+  );
+
   // Kick off a group voice/video call from the group chat header.
   //
   // Today group members are stored as bare name strings (see GroupScreen
@@ -886,6 +909,25 @@ export default function GroupChatScreen({ route, navigation }) {
           saveLocal(next);
           return next;
         });
+        // 1.0.14 group badges: emit message:send so the server fans
+        // out `message:new` to every group member's user-id-room.
+        // Their GroupScreen will increment per-group unread badges.
+        // Without this emit, group sends bypass the socket entirely
+        // and badges never fire (was the v1.0.13 blocker that pushed
+        // group badges to v1.0.14). Server uses senderId to skip
+        // self-fanout and looks up the rooms row by groupId.
+        try {
+          socketSendMessage({
+            roomId:     groupId,
+            messageId:  data.id,
+            senderName: currentHandle || '',
+            content:    text || '',  // ciphertext server-side; just a marker
+            type:       type || 'text',
+            timestamp:  data.created_at || new Date().toISOString(),
+          });
+        } catch (e) {
+          if (__DEV__) console.warn('group socket message:send emit failed:', e?.message);
+        }
       }
     } catch {
       // Queue for retry when connection returns

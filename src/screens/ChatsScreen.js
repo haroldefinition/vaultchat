@@ -245,6 +245,15 @@ export default function ChatsScreen({ navigation }) {
     const cleanup = subscribeMessageNew((evt) => {
       try {
         if (!evt || !evt.roomId || !evt.senderId) return;
+        // 1.0.14 group badges: server now stamps roomType in fan-out.
+        // Skip group events here — GroupScreen has a parallel handler
+        // that owns the group-list updates. Without this filter, group
+        // messages would create fake DM rows in the 1:1 list (since
+        // roomId wouldn't match any existing 1:1 chat). Old servers
+        // (pre-1.0.14) didn't include roomType, so undefined falls
+        // through and behaves as a 1:1 — that's fine because old
+        // servers also never fanned out for groups (no rooms row).
+        if (evt.roomType === 'group') return;
 
         // iMessage-style unread badge logic. We INCREMENT chat.unread
         // on every incoming message:new, EXCEPT when:
@@ -354,6 +363,82 @@ export default function ChatsScreen({ navigation }) {
         migrateLocalPrefsToServer(myId).catch(() => {});
         const fresh = await pullChatPrefs(myId);
         setChats(prev => applyPrefsMap(prev, fresh));
+        // Task #99 — rooms hydration. Closes the "got a push but my
+        // Chats list is empty" gap when an app is killed and FCM wakes
+        // it for a notification but the user opens the app from the
+        // launcher icon instead of tapping the notification. AsyncStorage
+        // has no chat row for that room (only the per-room INSERT
+        // subscription inside ChatRoomScreen seeds it on first open),
+        // so the list renders blank. Fix: query Supabase `rooms` for
+        // every direct room I'm a member of, then upsert into local
+        // list with peer info from `profiles`. message:new still drives
+        // realtime updates; this only covers the cold-start gap.
+        try {
+          const { data: rooms } = await supabase
+            .from('rooms')
+            .select('id, type, member_ids, created_at')
+            .eq('type', 'direct')
+            .contains('member_ids', [myId])
+            .order('created_at', { ascending: false })
+            .limit(200);  // sane cap; users won't have >200 1:1 rooms
+          if (!Array.isArray(rooms) || rooms.length === 0) return;
+          // Collect peer ids — for direct rooms each room has 2
+          // member_ids, the OTHER one is the peer. De-dupe in case
+          // the same peer appears in multiple rooms (shouldn't happen
+          // with deterministic hashPair roomIds but robustness).
+          const peerIdSet = new Set();
+          for (const r of rooms) {
+            const ids = Array.isArray(r.member_ids) ? r.member_ids : [];
+            for (const m of ids) if (m && m !== myId) peerIdSet.add(m);
+          }
+          const peerIds = Array.from(peerIdSet);
+          if (peerIds.length === 0) return;
+          const { data: profiles } = await supabase
+            .from('profiles')
+            .select('user_id, display_name, vault_handle, phone')
+            .in('user_id', peerIds);
+          const profileById = {};
+          for (const p of (profiles || [])) profileById[p.user_id] = p;
+          // Functional setState so we merge against the latest list
+          // (race-safe with concurrent message:new updaters).
+          setChats(prev => {
+            const list = Array.isArray(prev) ? prev.slice() : [];
+            const existingRoomIds = new Set(list.map(c => c?.roomId));
+            let dirty = false;
+            for (const r of rooms) {
+              if (existingRoomIds.has(r.id)) continue;
+              const memberIds = Array.isArray(r.member_ids) ? r.member_ids : [];
+              const peerId = memberIds.find(m => m && m !== myId);
+              if (!peerId) continue;
+              const p = profileById[peerId];
+              if (!p) continue;  // skip if peer profile missing — they
+                                  // probably deleted their account
+              const peerHandle = p.vault_handle ? `@${String(p.vault_handle).replace(/^@+/, '')}` : '';
+              const peerName   = p.display_name || peerHandle || 'VaultChat User';
+              list.push({
+                roomId:      r.id,
+                userId:      peerId,
+                phone:       p.phone || null,
+                name:        peerName,
+                handle:      peerHandle,
+                photo:       null,
+                lastMessage: 'Tap to chat',
+                time:        '',
+                pinned:      false,
+                hideAlerts:  false,
+                unread:      0,  // hydration is for COLD start; live
+                                  // unread accumulation comes via
+                                  // message:new from this point on.
+              });
+              dirty = true;
+            }
+            if (!dirty) return prev;
+            AsyncStorage.setItem(CHATS_KEY, JSON.stringify(list)).catch(() => {});
+            return list;
+          });
+        } catch (e) {
+          if (__DEV__) console.warn('rooms hydration failed:', e?.message);
+        }
       } catch {}
     })();
   }

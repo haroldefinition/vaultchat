@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, TextInput, Modal, StyleSheet, RefreshControl,
   Alert, StatusBar, KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator,
@@ -9,6 +9,15 @@ import ContactEditModal from '../components/ContactEditModal';
 import PremiumModal from '../components/PremiumModal';
 import { useTheme } from '../services/theme';
 import { taptic, longPressFeedback } from '../services/haptics';
+import { supabase } from '../services/supabase';
+import { subscribeMessageNew } from '../services/socket';
+// 1.0.14 group badges: see project_vaultchat_v1_0_14_groups_plan.md
+// in memory for the full architecture. Active-room tracker (set by
+// GroupChatScreen on focus) tells the message:new handler below to
+// skip incrementing unread for the group the user is currently
+// viewing — otherwise the badge would flicker on for an instant
+// before the in-room subscription cleared it.
+import { getActiveRoom } from '../services/activeRoom';
 
 const STORAGE_KEY = 'vaultchat_groups';
 
@@ -339,6 +348,28 @@ export default function GroupScreen({ navigation }) {
   // so an upgrade elsewhere lights up immediately on return.
   const [premium, setPremium] = useState(false);
 
+  // My user id, used by the message:new handler below to skip
+  // incrementing unread badges for messages I sent from another
+  // device. Stored as a ref so the handler reads the latest value
+  // without forcing the socket subscription to tear down.
+  const myIdRef = useRef(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!cancelled && session?.user?.id) myIdRef.current = session.user.id;
+      } catch {}
+    })();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      myIdRef.current = session?.user?.id || null;
+    });
+    return () => {
+      cancelled = true;
+      try { subscription?.unsubscribe?.(); } catch {}
+    };
+  }, []);
+
   useEffect(() => {
     loadGroups();
     const unsub = navigation.addListener('focus', () => {
@@ -348,6 +379,112 @@ export default function GroupScreen({ navigation }) {
     try { require('../services/iapService').isPremium().then(setPremium); } catch {}
     return unsub;
   }, [navigation]);
+
+  // 1.0.14 group badges: subscribe globally to message:new events.
+  // Server (vaultchat-server/server.js) stamps roomType: 'group' on
+  // every fan-out for group rooms, so we filter by that to avoid
+  // touching 1:1 events (which ChatsScreen owns). Increments
+  // matching group's `unread` count except when:
+  //   (a) sender === me on another device — own messages aren't unread
+  //   (b) user is currently viewing this group (getActiveRoom matches)
+  // Tap-to-open + GroupChatScreen focus both clear the count.
+  useEffect(() => {
+    const cleanup = subscribeMessageNew((evt) => {
+      try {
+        if (!evt || !evt.roomId || !evt.senderId) return;
+        if (evt.roomType !== 'group') return;  // 1:1 events handled by ChatsScreen
+
+        const myId = myIdRef.current;
+        const shouldIncrement =
+          evt.senderId !== myId && !(getActiveRoom() === evt.roomId);
+
+        const previewByType = (t) => {
+          if (t === 'image' || t === 'gif')   return '📷 Photo';
+          if (t === 'video')                  return '🎥 Video';
+          if (t === 'audio')                  return '🎤 Voice note';
+          if (t === 'file')                   return '📎 File';
+          if (t === 'vanish')                 return '👻 Vanish message';
+          return 'New message';
+        };
+        const lastPreview = previewByType(evt.type);
+        const prettyTime  = (() => {
+          try {
+            const d = evt.timestamp ? new Date(evt.timestamp) : new Date();
+            return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          } catch {
+            return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          }
+        })();
+
+        setGroups(prev => {
+          const list = Array.isArray(prev) ? prev.slice() : [];
+          const idx = list.findIndex(g => g?.id === evt.roomId);
+          // Group not in local list — could be a new group I was just
+          // added to but haven't seen yet. No-op for now; a future
+          // "fetch my groups from Supabase" hydration would cover this
+          // (group analog of Task #99 for 1:1 chats).
+          if (idx < 0) return prev;
+
+          const prevUnread = Number.isFinite(list[idx].unread) ? list[idx].unread : 0;
+          const updated = {
+            ...list[idx],
+            lastMessage: lastPreview,
+            time:        prettyTime,
+            unread:      shouldIncrement ? prevUnread + 1 : prevUnread,
+          };
+          list.splice(idx, 1);
+          // Pinned groups float to top regardless; otherwise insert
+          // right after the last pinned group (matching 1:1 chat list
+          // behavior on new messages).
+          if (updated.pinned) {
+            const firstNonPinned = list.findIndex(g => !g.pinned);
+            const insertAt = firstNonPinned < 0 ? list.length : firstNonPinned;
+            list.splice(insertAt, 0, updated);
+          } else {
+            let lastPinned = -1;
+            for (let i = list.length - 1; i >= 0; i--) {
+              if (list[i].pinned) { lastPinned = i; break; }
+            }
+            list.splice(lastPinned + 1, 0, updated);
+          }
+
+          AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(list)).catch(() => {});
+          return list;
+        });
+      } catch (e) {
+        if (__DEV__) console.warn('group message:new handler failed:', e?.message);
+      }
+    });
+    return cleanup;
+  }, []);
+
+  // Upserts the canonical Supabase `rooms` row for a group. Required
+  // for the server's message:send fan-out to find the group's
+  // member_ids (server fetches from rooms table on each send). Idempotent
+  // — safe to call from group create AND every member-list change.
+  // Filters legacy bare-string members (no user_id) since the server
+  // can't fan out to them anyway. Always includes the creator/current
+  // user as a member so single-creator groups work too.
+  async function _upsertGroupRoom(groupId, groupName, members) {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const myUserId = session?.user?.id;
+      if (!myUserId || !groupId) return;
+      const memberUserIds = new Set([myUserId]);
+      for (const m of (members || [])) {
+        if (m && typeof m === 'object' && m.user_id) memberUserIds.add(m.user_id);
+      }
+      await supabase.from('rooms').upsert({
+        id:         groupId,
+        type:       'group',
+        member_ids: Array.from(memberUserIds),
+        created_by: myUserId,
+        name:       groupName || null,
+      }, { onConflict: 'id' });
+    } catch (e) {
+      if (__DEV__) console.warn('group rooms upsert failed:', e?.message);
+    }
+  }
 
   // Filtered groups for search
   const filteredGroups = groupSearch.trim()
@@ -383,6 +520,12 @@ export default function GroupScreen({ navigation }) {
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const newGroup = { id, name, desc: groupDesc.trim(), memberCount: 1, members: [], lastMessage: 'Group created', time: now, pinned: false, hideAlerts: false, createdAt: Date.now() };
     await saveGroups([newGroup, ...groups]);
+    // 1.0.14 group badges: register the canonical rooms row so the
+    // server can find member_ids on the first message:send fan-out.
+    // Members[] is empty at create time — only the creator is a
+    // member until they add others via Manage Members. Fire-and-
+    // forget; UI doesn't block on this.
+    _upsertGroupRoom(id, name, []);
     setGroupName(''); setGroupDesc(''); setCreateModal(false);
     navigation.navigate('GroupChat', { groupId: id, groupName: name });
   };
@@ -420,6 +563,11 @@ export default function GroupScreen({ navigation }) {
       ? { ...g, members, memberCount: members.length || 1 } : g);
     await saveGroups(updated);
     setSelectedGroup(prev => ({ ...prev, members, memberCount: members.length || 1 }));
+    // 1.0.14 group badges: keep the rooms row's member_ids in sync
+    // with the local members list. Without this, newly-added members
+    // wouldn't receive the message:new fan-out (server reads
+    // member_ids from the rooms row on each send).
+    _upsertGroupRoom(selectedGroup.id, selectedGroup.name, members);
   };
 
   const handleDelete = () => {
@@ -440,11 +588,23 @@ export default function GroupScreen({ navigation }) {
       ? [s.cardRow, { backgroundColor: card, borderColor: border }]
       : [s.row,     { backgroundColor: card, borderBottomColor: border }];
 
+    const unread = Number.isFinite(item.unread) ? item.unread : 0;
+
     return (
       <TouchableOpacity
         style={rowStyle}
         activeOpacity={0.85}
-        onPress={() => navigation.navigate('GroupChat', { groupId: item.id, groupName: item.name })}
+        onPress={() => {
+          // 1.0.14 group badges: opening a group clears its unread
+          // count (mirrors 1:1 chat-list behavior). Persist atomically
+          // before the navigate so coming back doesn't briefly flash
+          // the stale count before the focus listener reloads.
+          if (unread > 0) {
+            const cleared = groups.map(g => g.id === item.id ? { ...g, unread: 0 } : g);
+            saveGroups(cleared);
+          }
+          navigation.navigate('GroupChat', { groupId: item.id, groupName: item.name });
+        }}
         onLongPress={() => openActionMenu(item)}
         delayLongPress={400}>
         <TouchableOpacity style={[s.avatar, { backgroundColor: accent + '22' }]}
@@ -462,7 +622,13 @@ export default function GroupScreen({ navigation }) {
             <Text style={[s.members, { color: sub }]}>{item.memberCount || 1} member{(item.memberCount || 1) !== 1 ? 's' : ''}</Text>
           </View>
         </View>
-        <Text style={[s.chevron, { color: sub }]}>›</Text>
+        {unread > 0 ? (
+          <View style={[s.unreadDot, { backgroundColor: accent }]}>
+            <Text style={s.unreadTx}>{unread > 99 ? '99+' : unread}</Text>
+          </View>
+        ) : (
+          <Text style={[s.chevron, { color: sub }]}>›</Text>
+        )}
       </TouchableOpacity>
     );
   };
@@ -662,6 +828,11 @@ const s = StyleSheet.create({
   preview:       { fontSize: 13, flex: 1, marginRight: 8 },
   members:       { fontSize: 11 },
   chevron:       { fontSize: 18 },
+  // 1.0.14 group badges — mirrors the 1:1 chat-list badge style in
+  // ChatsScreen so both lists feel cohesive. Replaces the chevron
+  // when count > 0 so the row's right edge isn't fighting itself.
+  unreadDot:     { minWidth: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5, marginLeft: 4 },
+  unreadTx:      { color: '#000', fontSize: 11, fontWeight: '900' },
   empty:         { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40 },
   emptyEmoji:    { fontSize: 64, marginBottom: 16 },
   emptyTitle:    { fontSize: 22, fontWeight: '700', marginBottom: 8 },

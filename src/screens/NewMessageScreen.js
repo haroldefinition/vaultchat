@@ -47,20 +47,6 @@ const EMOJIS = [
 ];
 
 
-function generateRoomId(phone1, phone2) {
-  const sorted = [phone1.replace(/\D/g,''), phone2.replace(/\D/g,'')].sort();
-  const combined = sorted[0] + sorted[1];
-  let h1 = 0, h2 = 0;
-  for (let i = 0; i < combined.length; i++) {
-    h1 = Math.imul(31, h1) + combined.charCodeAt(i) | 0;
-    h2 = Math.imul(37, h2) + combined.charCodeAt(i) | 0;
-  }
-  const a = Math.abs(h1).toString(16).padStart(8, '0');
-  const b = Math.abs(h2).toString(16).padStart(8, '0');
-  const c = Math.abs(h1 ^ h2).toString(16).padStart(8, '0');
-  return `${a.slice(0,8)}-${b.slice(0,4)}-4${b.slice(1,4)}-a${c.slice(0,3)}-${a}${b.slice(0,4)}`;
-}
-
 // ── Emoji picker panel ────────────────────────────────────────
 
 export default function NewMessageScreen({ navigation, route }) {
