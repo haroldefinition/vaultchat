@@ -58,6 +58,12 @@ export default function SettingsScreen({ navigation }) {
   const [blockedContacts, setBlockedContacts] = useState([]);
   const [blockInput, setBlockInput] = useState('');
   const [vaultHandle, setVaultHandle] = useState('');
+  // Inline error for the Vault Handle field — Feature 4 (handle
+  // uniqueness UX). Set when saveHandle() returns { ok: false } from
+  // either the inline field Save button or the top-bar Save Profile
+  // path. Cleared as soon as the user retypes. Replaces the previous
+  // Alert.alert popups so the user stays on the form with context.
+  const [vaultHandleErr, setVaultHandleErr] = useState('');
   const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [realPin, setRealPin] = useState('');
   const [decoyPin, setDecoyPin] = useState('');
@@ -313,14 +319,23 @@ export default function SettingsScreen({ navigation }) {
           // and updated AsyncStorage. Bump the local React state so the
           // VAULT ID display refreshes too.
           setVaultId(vaultHandle);
+          // Clear any prior inline error since the handle now persisted.
+          setVaultHandleErr('');
         } else {
-          const msg = result?.reason === 'taken'   ? `${vaultHandle} is already taken. Pick another handle.`
-                    : result?.reason === 'invalid' ? 'Handle must be 3–32 characters, letters/numbers/underscore only.'
-                    : result?.reason === 'rls'     ? 'Server rejected the update. Add an UPDATE policy to the profiles table in Supabase (USING auth.uid() = id).'
-                    :                                'Couldn\'t save handle. Check your connection and try again.';
-          Alert.alert('Handle not saved', msg);
-          // Don't bail — the rest of the profile fields are already
-          // persisted; only the handle change failed.
+          // Surface failure inline next to the handle field rather
+          // than a modal Alert — Harold's v1.1 spec for Feature 4.
+          // Don't bail saveProfile; the rest of the profile fields
+          // already persisted via the multi-set above. Only the handle
+          // change failed; user can retype and tap the inline Save.
+          if (result?.reason === 'taken') {
+            setVaultHandleErr('Username is already taken. Please choose another username.');
+          } else if (result?.reason === 'invalid') {
+            setVaultHandleErr('Use 3–32 letters, numbers, or underscores.');
+          } else if (result?.reason === 'rls') {
+            setVaultHandleErr('Server rejected the update. (RLS policy missing on profiles table.)');
+          } else {
+            setVaultHandleErr('Couldn’t save handle. Check your connection and try again.');
+          }
         }
       }
     } catch {}
@@ -838,19 +853,32 @@ export default function SettingsScreen({ navigation }) {
                 placeholder="yourhandle"
                 placeholderTextColor={sub}
                 value={vaultHandle.replace('@', '')}
-                onChangeText={v => setVaultHandle('@' + v.replace('@', '').replace(/[^a-zA-Z0-9_]/g, '').toLowerCase())}
+                onChangeText={v => {
+                  // Clear inline collision error the moment the user
+                  // starts retyping — they're attempting a different
+                  // handle, so the stale error becomes irrelevant.
+                  if (vaultHandleErr) setVaultHandleErr('');
+                  setVaultHandle('@' + v.replace('@', '').replace(/[^a-zA-Z0-9_]/g, '').toLowerCase());
+                }}
                 autoCapitalize="none"
                 autoCorrect={false}
                 maxLength={20}
               />
               <TouchableOpacity style={[st.copyBtn, { backgroundColor: '#5856d6', margin: 8 }]} onPress={async () => {
-                if (!vaultHandle || vaultHandle.length < 2) { Alert.alert('Error', 'Enter a valid handle'); return; }
+                if (!vaultHandle || vaultHandle.replace('@','').length < 3) {
+                  setVaultHandleErr('Use 3–32 letters, numbers, or underscores.');
+                  return;
+                }
+                setVaultHandleErr('');
                 const result = await saveHandle(vaultHandle);
                 if (!result?.ok) {
-                  const msg = result?.reason === 'taken'   ? `${vaultHandle} is already taken. Pick another handle.`
-                            : result?.reason === 'invalid' ? 'Handle must be 3–32 characters, letters/numbers/underscore only.'
-                            :                                'Couldn\'t save handle. Check your connection and try again.';
-                  Alert.alert('Handle not saved', msg);
+                  if (result?.reason === 'taken') {
+                    setVaultHandleErr('Username is already taken. Please choose another username.');
+                  } else if (result?.reason === 'invalid') {
+                    setVaultHandleErr('Use 3–32 letters, numbers, or underscores.');
+                  } else {
+                    setVaultHandleErr('Couldn’t save handle. Check your connection and try again.');
+                  }
                   return;
                 }
                 await AsyncStorage.setItem('vaultchat_vault_id', vaultHandle);
@@ -863,6 +891,14 @@ export default function SettingsScreen({ navigation }) {
                 <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>Save</Text>
               </TouchableOpacity>
             </View>
+            {/* Inline collision / validation error — set by the inline
+                Save button or by the top-bar Save Profile flow when
+                saveHandle() returns { ok: false }. Replaces the old
+                Alert.alert popups so the user stays on the form with
+                full context (Feature 4, 2026-05-03). */}
+            {!!vaultHandleErr && (
+              <Text style={[st.hint, { color: '#DC2626', marginTop: 6 }]}>{vaultHandleErr}</Text>
+            )}
             <Text style={[st.hint, { color: sub }]}>Your phone number stays private. Others find you with {vaultHandle || '@yourhandle'}.</Text>
           </View>
 

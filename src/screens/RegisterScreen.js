@@ -53,6 +53,13 @@ export default function RegisterScreen({ route, onLoginCallback }) {
   const [pin,         setPin]         = useState('');
   const [pinConfirm,  setPinConfirm]  = useState('');
   const [pinErr,      setPinErr]      = useState('');
+  // Inline error for the handle step. Mirrors pinErr's pattern — set
+  // when saveHandleAndLogin's saveHandle() returns { ok: false }, cleared
+  // whenever the user types into the handle field. Feature 4 (handle
+  // uniqueness UX) — Harold wanted explicit collision messaging instead
+  // of silent failure or modal alerts, so the user can stay on the step
+  // and pick a different handle without losing context.
+  const [handleErr,   setHandleErr]   = useState('');
   // Carry the existing-handle flag forward from the OTP step so
   // saveVaultPinAndContinue knows whether to advance to handle
   // creation or jump straight into the app.
@@ -280,20 +287,42 @@ export default function RegisterScreen({ route, onLoginCallback }) {
   async function saveHandleAndLogin() {
     const clean = handle.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
     if (clean.length < 3) {
-      Alert.alert('Too short', 'At least 3 characters required.');
+      setHandleErr('Use 3–32 letters, numbers, or underscores.');
       return;
     }
+    setHandleErr('');
     setLoading(true);
     try {
       const body = sentTo.method === 'phone'
         ? { user_id: userId, handle: `@${clean}`, phone: sentTo.value }
         : { user_id: userId, handle: `@${clean}`, email: sentTo.value };
+      // Best-effort backend register POST. We swallow non-2xx because
+      // saveHandle() below is the authoritative claim against the
+      // unique constraint on profiles.vault_handle — the backend just
+      // mirrors that value into a couple of denormalized rows.
       await fetch(`${BACKEND}/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      await saveHandle(`@${clean}`);
+      // Authoritative claim. saveHandle returns { ok, reason } where
+      // reason ∈ {'taken','invalid','rls','network', null}. If the
+      // user typed a handle someone else already owns, we MUST stay on
+      // the handle step and surface the collision — otherwise the user
+      // would land in the app thinking they're @clean while peers can't
+      // actually find them by that handle. Harold's v1.1 spec.
+      const result = await saveHandle(`@${clean}`);
+      if (!result?.ok) {
+        setLoading(false);
+        if (result?.reason === 'taken') {
+          setHandleErr('Username is already taken. Please choose another username.');
+        } else if (result?.reason === 'invalid') {
+          setHandleErr('Use 3–32 letters, numbers, or underscores.');
+        } else {
+          setHandleErr('Couldn’t save handle. Check your connection and try again.');
+        }
+        return;
+      }
       await AsyncStorage.setItem('vaultchat_display_name', clean);
       // Publish this device's NaCl public key so peers can encrypt to us.
       // Best-effort — never blocks login.
@@ -310,21 +339,22 @@ export default function RegisterScreen({ route, onLoginCallback }) {
       // discoverable the moment sign-in completes.
       const myPhone = sentTo.method === 'phone' ? sentTo.value : null;
       publishMyDeviceKey(userId, myPhone).catch(() => {});
-    } catch {}
+    } catch {
+      setLoading(false);
+      setHandleErr('Couldn’t save handle. Check your connection and try again.');
+      return;
+    }
     setLoading(false);
     onLogin?.();
   }
 
-  async function skipHandle() {
-    // Derive a default handle from whichever identifier the user used
-    const tail = sentTo.method === 'phone'
-      ? phone.slice(-4)
-      : (email.split('@')[0] || 'user').replace(/[^a-z0-9]/gi, '').slice(-6) || 'user';
-    const auto = `@user${tail}`;
-    await saveHandle(auto);
-    await AsyncStorage.setItem('vaultchat_display_name', `user${tail}`);
-    onLogin?.();
-  }
+  // skipHandle() was deleted 2026-05-03 alongside the Skip button on
+  // the handle step. Per Harold's v1.1 spec: every user MUST pick their
+  // own @handle at signup so contact discovery (other users find you by
+  // typing @handle) works on day one and Vault ID = @handle stays the
+  // single canonical identifier across iPhone + Android. Auto-suffixed
+  // @user1234 handles felt sloppy and produced collision-resolution
+  // duplicates that confused users.
 
   // ── Shared logo block ─────────────────────────────────────────
   const LogoBlock = (
@@ -609,7 +639,15 @@ export default function RegisterScreen({ route, onLoginCallback }) {
                 placeholder="yourhandle"
                 placeholderTextColor={C.placeholder}
                 value={handle}
-                onChangeText={t => setHandle(t.replace(/[^a-zA-Z0-9_]/g, ''))}
+                onChangeText={t => {
+                  // Clear any inline collision/validation error the moment
+                  // the user starts editing — they're about to try a
+                  // different handle, so the stale error is no longer
+                  // relevant. Same pattern as pinErr clearing when the
+                  // user retypes the PIN.
+                  if (handleErr) setHandleErr('');
+                  setHandle(t.replace(/[^a-zA-Z0-9_]/g, ''));
+                }}
                 maxLength={20}
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -617,8 +655,18 @@ export default function RegisterScreen({ route, onLoginCallback }) {
               />
             </View>
 
-            {handle.length > 0 && (
+            {handle.length > 0 && !handleErr && (
               <Text style={s.handlePreview}>@{handle.toLowerCase()}</Text>
+            )}
+
+            {/* Inline collision / validation error — shown in red below
+                the input field instead of an Alert popup so the user
+                stays in the handle step with full context. Set by
+                saveHandleAndLogin when saveHandle() returns
+                { ok: false, reason }. Matches pinErr's red-on-hint
+                styling so error treatment is consistent across steps. */}
+            {!!handleErr && (
+              <Text style={[s.hint, { color: '#DC2626', marginTop: 6 }]}>{handleErr}</Text>
             )}
 
             <Text style={s.hint}>
