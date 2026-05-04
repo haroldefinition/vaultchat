@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity,
@@ -31,6 +31,11 @@ import { placeCall } from '../services/placeCall';
 // socket below to wake the server's fan-out + FCM paths. Old clients
 // that don't subscribe to message:new ignore the broadcast harmlessly.
 import { sendMessage as socketSendMessage } from '../services/socket';
+// Active-room tracker: lets ChatsScreen's global message:new handler
+// know when not to increment the per-chat unread badge (e.g. when a
+// new message arrives in a room the user is currently viewing).
+import { setActiveRoom, clearActiveRoom } from '../services/activeRoom';
+import { useFocusEffect } from '@react-navigation/native';
 import { usePresence } from '../services/presence';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { subscribeToRoom, subscribeToTyping, broadcastTyping, freshChannel } from '../services/realtimeMessages';
@@ -938,12 +943,55 @@ export default function ChatRoomScreen({ route, navigation }) {
     };
   }, [roomId, myId]);
 
-  // Auto-send media/message passed from NewMessageScreen
+  // Auto-send media/message passed from NewMessageScreen.
+  //
+  // The naive "fire once myId resolves" pattern raced against the
+  // recipient-key load that postMsg's hard E2E gate depends on
+  // (line ~1162 — bails when recipientDevices=[] AND recipientPubKey=null).
+  // On cold chats with no warm key cache, the auto-send fired BEFORE
+  // keys resolved and postMsg silently dropped the message. User landed
+  // in ChatRoomScreen with an empty list and had to retype to actually
+  // send. Confirmed during 1.0.12 paired-device testing on 2026-05-04.
+  //
+  // Fix: gate the send on `keysReady` (recipient devices OR legacy
+  // pubkey resolved). One-shot ref guard prevents double-fire when deps
+  // re-trigger. 7s fallback timer makes a genuinely-no-key recipient
+  // produce the visible "Encrypted only" alert instead of silent failure.
+  const pendingSentRef = useRef(false);
   useEffect(() => {
-    if (pendingMessage && myId) {
+    if (pendingSentRef.current) return;
+    if (!pendingMessage || !myId) return;
+
+    const keysReady = (recipientDevices && recipientDevices.length > 0) || !!recipientPubKey;
+    if (keysReady) {
+      pendingSentRef.current = true;
       postMsg(pendingMessage);
+      return;
     }
-  }, [myId]);  // fires once myId is set (after loadUser)
+
+    // Keys not resolved yet — wait up to 7s. If they arrive within
+    // that window the effect re-runs above, fires immediately, and
+    // this cleanup cancels the timer. Otherwise fire anyway so the
+    // E2E gate's "Encrypted only" alert is visible.
+    const t = setTimeout(() => {
+      if (pendingSentRef.current) return;
+      pendingSentRef.current = true;
+      postMsg(pendingMessage);
+    }, 7000);
+    return () => clearTimeout(t);
+  }, [myId, recipientDevices, recipientPubKey, pendingMessage]);
+
+  // Active-room tracking. While this ChatRoomScreen is focused, mark
+  // its roomId as the "active" room so ChatsScreen's global
+  // message:new handler skips incrementing unread badges for messages
+  // that arrive in this room (the user is reading them in real time).
+  // Cleared on blur (back to ChatsScreen) and unmount.
+  useFocusEffect(
+    useCallback(() => {
+      if (roomId) setActiveRoom(roomId);
+      return () => { clearActiveRoom(); };
+    }, [roomId])
+  );
 
   // Release overdue scheduled messages on chat open + every minute
   // while open. Recipient sees them as fresh messages on their next poll.

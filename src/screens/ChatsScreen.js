@@ -33,6 +33,12 @@ import {
   removeFromVault,
 } from '../services/vault';
 import { subscribeMessageNew } from '../services/socket';
+// Active-room tracker (set by ChatRoomScreen on focus). Used inside
+// the message:new handler to skip incrementing unread badges for the
+// room the user is currently viewing — otherwise the badge would
+// flicker on for an instant before ChatRoomScreen's own handler
+// clears it.
+import { getActiveRoom } from '../services/activeRoom';
 
 const CHATS_KEY = 'vaultchat_chats';
 
@@ -147,6 +153,32 @@ export default function ChatsScreen({ navigation }) {
   // stuck in their "open" state and the UI feels broken.
   const openSwipeRef = useRef(null);
 
+  // My user id, used by the message:new handler to skip incrementing
+  // unread badges for messages I sent from another device. Stored as
+  // a ref so the handler can read the latest value without forcing
+  // the socket subscription to tear down + re-attach when the user
+  // signs in mid-session.
+  const myIdRef = useRef(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!cancelled && session?.user?.id) {
+          myIdRef.current = session.user.id;
+        }
+      } catch {}
+    })();
+    // Refresh on auth state changes (sign-in, token refresh, sign-out).
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      myIdRef.current = session?.user?.id || null;
+    });
+    return () => {
+      cancelled = true;
+      try { subscription?.unsubscribe?.(); } catch {}
+    };
+  }, []);
+
   // Refresh folder list + premium flag whenever we focus or the
   // folders service signals a write (so creating a folder elsewhere
   // updates the pill row immediately).
@@ -213,6 +245,22 @@ export default function ChatsScreen({ navigation }) {
     const cleanup = subscribeMessageNew((evt) => {
       try {
         if (!evt || !evt.roomId || !evt.senderId) return;
+
+        // iMessage-style unread badge logic. We INCREMENT chat.unread
+        // on every incoming message:new, EXCEPT when:
+        //   (a) the message was sent by ME from another device
+        //       (senderId === myId) — own messages are never unread.
+        //   (b) the user is currently viewing that very chat
+        //       (getActiveRoom() === roomId) — they're reading it
+        //       in real time, so the badge would just flicker on
+        //       and immediately get cleared.
+        // Tap-to-open and ChatRoomScreen focus both reset the count
+        // to zero (see row-tap onPress further below + the
+        // useFocusEffect inside ChatRoomScreen).
+        const myId = myIdRef.current;
+        const shouldIncrementUnread =
+          evt.senderId !== myId && !(getActiveRoom() === evt.roomId);
+
         // Use the functional setState so we don't race with other
         // updaters (loadChats running in parallel, prefs sync, etc.)
         setChats(prev => {
@@ -239,11 +287,13 @@ export default function ChatsScreen({ navigation }) {
           if (idx >= 0) {
             // Existing chat — bump preview + time, leave name/photo
             // intact so the row doesn't flicker if sender info changed.
+            const prevUnread = Number.isFinite(list[idx].unread) ? list[idx].unread : 0;
             const updated = {
               ...list[idx],
               lastMessage: lastPreview,
               time:        prettyTime,
               markedUnread: false,
+              unread:      shouldIncrementUnread ? prevUnread + 1 : prevUnread,
             };
             list.splice(idx, 1);
             list.unshift(updated);
@@ -263,6 +313,7 @@ export default function ChatsScreen({ navigation }) {
               time:        prettyTime,
               pinned:      false,
               hideAlerts:  false,
+              unread:      shouldIncrementUnread ? 1 : 0,
             });
           }
 
@@ -919,10 +970,15 @@ export default function ChatsScreen({ navigation }) {
                 style={[s.row, { borderBottomColor: border, backgroundColor: bg }, item.pinned && { backgroundColor: card }]}
                 onPress={async () => {
                   taptic();
-                  // Opening a chat auto-clears the manually-marked-unread flag.
-                  if (item.markedUnread) {
+                  // Opening a chat clears BOTH the manually-marked-unread
+                  // flag AND the auto-incremented unread count (the
+                  // server-driven badge from message:new). We collapse
+                  // both clears into a single saveChats call to keep the
+                  // tap snappy and persist atomically.
+                  const needsClear = item.markedUnread || (item.unread || 0) > 0;
+                  if (needsClear) {
                     const updated = chats.map(c =>
-                      sameChat(c, item) ? { ...c, markedUnread: false } : c,
+                      sameChat(c, item) ? { ...c, markedUnread: false, unread: 0 } : c,
                     );
                     saveChats(updated);
                   }
