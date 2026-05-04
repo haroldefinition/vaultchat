@@ -31,28 +31,53 @@ export function connectSocket(userId) {
   });
 
   // ── Connection events ──────────────────────────────────────
+  // All handlers below capture the socket via the module-level `socket`
+  // variable, which can be nulled out by disconnectSocket() between the
+  // event firing and the handler running. Sentry caught a real
+  // 'TypeError: Cannot read property emit of null' on iOS 26.4 in 1.0.3
+  // (debug build, REACT-NATIVE-6, event 7fc90e60) when a disconnect →
+  // reconnect cycle happened mid-AppState transition. Each handler now
+  // null-guards the emit call AND wraps the body in try/catch so any
+  // unhandled error inside socket.io's internal Manager#onopen chain
+  // can't bubble up as an unhandled promise rejection.
   socket.on('connect', () => {
-    if (__DEV__) console.log('🟢 Connected to VaultChat server');
-    socket.emit('user:online', { userId });
+    try {
+      if (__DEV__) console.log('🟢 Connected to VaultChat server');
+      socket?.emit('user:online', { userId });
+    } catch (e) {
+      if (__DEV__) console.log('socket connect handler error:', e?.message);
+    }
   });
 
   socket.on('disconnect', (reason) => {
-    if (__DEV__) console.log('🔴 Disconnected:', reason);
-    // socket.io auto-reconnects — no action needed
+    try {
+      if (__DEV__) console.log('🔴 Disconnected:', reason);
+      // socket.io auto-reconnects — no action needed
+    } catch (e) {
+      if (__DEV__) console.log('socket disconnect handler error:', e?.message);
+    }
   });
 
   socket.on('reconnect', (attempt) => {
-    if (__DEV__) console.log(`🔄 Reconnected after ${attempt} attempts`);
-    socket.emit('user:online', { userId });
+    try {
+      if (__DEV__) console.log(`🔄 Reconnected after ${attempt} attempts`);
+      socket?.emit('user:online', { userId });
+    } catch (e) {
+      if (__DEV__) console.log('socket reconnect handler error:', e?.message);
+    }
   });
 
   socket.on('reconnect_attempt', (attempt) => {
-    if (__DEV__) console.log(`🔁 Reconnection attempt ${attempt}...`);
+    try {
+      if (__DEV__) console.log(`🔁 Reconnection attempt ${attempt}...`);
+    } catch {}
   });
 
   socket.on('connect_error', (error) => {
-    if (__DEV__) console.log('⚠️ Connection error:', error.message);
-    // Will auto-retry — user sees "Reconnecting..." in UI
+    try {
+      if (__DEV__) console.log('⚠️ Connection error:', error?.message);
+      // Will auto-retry — user sees "Reconnecting..." in UI
+    } catch {}
   });
 
   return socket;

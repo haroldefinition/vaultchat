@@ -30,6 +30,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
 import { useAudioPlayer } from 'expo-audio';
 import { Play, Pause } from 'lucide-react-native';
+import { setSpeakerMode } from '../services/audioSession';
 
 const BAR_COUNT = 24;
 
@@ -94,6 +95,16 @@ export default function VoiceNoteBubble({ url, durationSec, accent, isMe, bgColo
         player.pause();
         setIsPlaying(false);
       } else {
+        // Force speaker routing on Android before playback. Without this,
+        // voice notes inherit the global audio mode — and if a voice/video
+        // call recently ended, the session is still in earpiece mode
+        // (set by callPeer/roomCall). Result on Android: voice note plays
+        // through the earpiece and sounds silent unless held to the ear.
+        // setSpeakerMode flips playThroughEarpieceAndroid: false. iOS uses
+        // its own AVAudioSession routing and is unaffected. Fire-and-forget;
+        // failure is non-fatal — the play call below still works, just may
+        // route through whatever the last mode was.
+        setSpeakerMode().catch(() => {});
         // If we finished playing, snap back to the start before resuming
         try { if (player.currentTime >= (player.duration || 0) - 0.05) player.seekTo(0); } catch {}
         player.play();
