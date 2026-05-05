@@ -374,6 +374,13 @@ export default function GroupChatScreen({ route, navigation }) {
   const [groupDesc,    setGroupDesc]    = useState('');
   const [groupMembers, setGroupMembers] = useState([]); // array of member descriptors
   const [encBannerHidden, setEncBannerHidden] = useState(false); // dismissible amber/green banner state
+  // 1.0.15 group invite — one-time "you joined this group" banner.
+  // Set when the group's local row has `joinedAt` populated (means
+  // GroupScreen hydration discovered the group from Supabase rather
+  // than being created locally). Hidden when bannerDismissedAt is
+  // set on the group row, so dismissal persists across re-opens.
+  const [joinedAt, setJoinedAt] = useState(null);
+  const [joinBannerDismissed, setJoinBannerDismissed] = useState(false);
   const [migrationOpen,   setMigrationOpen]   = useState(false);  // group member migration modal
   // Phase NN pagination state — same shape as ChatRoomScreen.
   const [oldestCursor, setOldestCursor] = useState(null);
@@ -574,6 +581,12 @@ export default function GroupChatScreen({ route, navigation }) {
         setGroupPhoto(g.photo || null);
         setGroupDesc(g.desc || '');
         setGroupMembers(Array.isArray(g.members) ? g.members : []);
+        // 1.0.15 group invite banner state — only fires for groups
+        // populated by GroupScreen hydration (joinedAt set). Locally-
+        // created groups don't get a joinedAt so the banner never
+        // shows for the creator.
+        setJoinedAt(g.joinedAt || null);
+        setJoinBannerDismissed(!!g.bannerDismissedAt);
         // Kick off member resolution so per-recipient encryption
         // has user_ids + pubkeys ready by the time the user sends.
         // Updates state with the enriched objects so the encryption
@@ -587,6 +600,24 @@ export default function GroupChatScreen({ route, navigation }) {
     const unsub = navigation.addListener('focus', loadGroup);
     return () => { cancelled = true; unsub && unsub(); };
   }, [groupId, navigation]);
+
+  // 1.0.15 group invite: dismiss the "you joined this group" banner
+  // permanently. Writes bannerDismissedAt onto the group's row in
+  // AsyncStorage so subsequent re-opens of GroupChatScreen don't
+  // re-render it. State update is parallel for instant disappearance
+  // (no need to wait on the disk write).
+  async function dismissJoinBanner() {
+    setJoinBannerDismissed(true);
+    try {
+      const raw = await AsyncStorage.getItem('vaultchat_groups');
+      if (!raw) return;
+      const gs = JSON.parse(raw);
+      const next = gs.map(g => g.id === groupId
+        ? { ...g, bannerDismissedAt: new Date().toISOString() }
+        : g);
+      await AsyncStorage.setItem('vaultchat_groups', JSON.stringify(next));
+    } catch {}
+  }
 
   // Active-room tracking — while focused, mark this groupId as the
   // "active room" so GroupScreen's global message:new handler skips
@@ -1373,6 +1404,43 @@ export default function GroupChatScreen({ route, navigation }) {
             VaultChat profiles. Includes an ✕ so the user can dismiss it
             for the session — once dismissed it stays hidden until they
             navigate away and come back. */}
+      {/* 1.0.15 group invite — one-time "you joined this group"
+          banner. Renders only for groups that GroupScreen hydration
+          discovered (joinedAt populated). Explains why pre-join
+          messages aren't visible: per-recipient encryption envelopes
+          targeted only the group's members at send time, so this
+          device literally cannot decrypt earlier ciphertexts. Same
+          model as WhatsApp/Signal/iMessage. ✕ persists dismissal
+          via bannerDismissedAt on the group row in AsyncStorage. */}
+      {joinedAt && !joinBannerDismissed && (() => {
+        const joinedDate = (() => {
+          try {
+            return new Date(joinedAt).toLocaleDateString(undefined, {
+              year: 'numeric', month: 'long', day: 'numeric',
+            });
+          } catch { return ''; }
+        })();
+        return (
+          <View style={{
+            backgroundColor: accent + '14',
+            borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: border,
+            paddingHorizontal: 14, paddingVertical: 10,
+            flexDirection: 'row', alignItems: 'center', gap: 10,
+          }}>
+            <Text style={{ fontSize: 16 }}>👋</Text>
+            <Text style={{ flex: 1, color: tx, fontSize: 12, lineHeight: 16 }}>
+              You joined this group{joinedDate ? ` on ${joinedDate}` : ''}.{' '}
+              <Text style={{ color: sub }}>
+                Earlier messages are encrypted and only visible to original members.
+              </Text>
+            </Text>
+            <TouchableOpacity onPress={dismissJoinBanner} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={{ color: sub, fontSize: 16, paddingHorizontal: 4 }}>✕</Text>
+            </TouchableOpacity>
+          </View>
+        );
+      })()}
+
       {!encBannerHidden && (() => {
         const ready = groupMembers.some(m => m && m.public_key);
         if (ready) {

@@ -373,7 +373,27 @@ export default Sentry.wrap(function App() {
         }
       });
 
-      const cleanup = addNotificationResponseListener(() => {});
+      // 1.0.15 group invite — when a user taps the "You've been
+      // added to <Group>" FCM notification, route them to that
+      // group's GroupChatScreen. The data payload server-side is
+      // { type: 'group_invite', roomId, groupName }. Falls back to
+      // the same retry-until-nav-ready pattern the deep-link path
+      // below uses, since cold launches via tap can race against
+      // the navigator mount.
+      const cleanup = addNotificationResponseListener((data) => {
+        if (!data || data.type !== 'group_invite' || !data.roomId) return;
+        const tryNav = () => {
+          if (!navigationRef?.isReady?.()) {
+            setTimeout(tryNav, 200);
+            return;
+          }
+          navigationRef.navigate('GroupChat', {
+            groupId:   data.roomId,
+            groupName: data.groupName || 'Group',
+          });
+        };
+        tryNav();
+      });
 
       // Deep-link routing for vaultchat://user/<handle> URLs (task #67).
       // When someone taps a shared invite, we resolve the handle to a real

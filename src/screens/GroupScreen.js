@@ -10,7 +10,7 @@ import PremiumModal from '../components/PremiumModal';
 import { useTheme } from '../services/theme';
 import { taptic, longPressFeedback } from '../services/haptics';
 import { supabase } from '../services/supabase';
-import { subscribeMessageNew } from '../services/socket';
+import { subscribeMessageNew, getSocket } from '../services/socket';
 // 1.0.14 group badges: see project_vaultchat_v1_0_14_groups_plan.md
 // in memory for the full architecture. Active-room tracker (set by
 // GroupChatScreen on focus) tells the message:new handler below to
@@ -505,6 +505,69 @@ export default function GroupScreen({ navigation }) {
       const raw = await AsyncStorage.getItem(STORAGE_KEY);
       if (raw) setGroups(JSON.parse(raw));
     } catch {}
+    // 1.0.15 group invite hydration. Analog of Task #99 for groups:
+    // pull every Supabase `rooms` row where type='group' AND I'm in
+    // member_ids, then merge any that aren't already in the local
+    // `vaultchat_groups` AsyncStorage list. This is what lets a user
+    // see groups they were ADDED to (by someone else) without having
+    // to manually create them. New rows get a `joinedAt` timestamp
+    // so GroupChatScreen can show the one-time "you joined this
+    // group" banner explaining why pre-join history isn't visible.
+    //
+    // Background, fire-and-forget. Local cache is already painted by
+    // this point; this just merges any unseen groups into the list.
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const myId = session?.user?.id;
+        if (!myId) return;
+        const { data: rooms } = await supabase
+          .from('rooms')
+          .select('id, name, member_ids, created_at, created_by')
+          .eq('type', 'group')
+          .contains('member_ids', [myId])
+          .order('created_at', { ascending: false })
+          .limit(200);
+        if (!Array.isArray(rooms) || rooms.length === 0) return;
+        setGroups(prev => {
+          const list = Array.isArray(prev) ? prev.slice() : [];
+          const existingIds = new Set(list.map(g => g?.id));
+          const nowIso = new Date().toISOString();
+          let dirty = false;
+          for (const r of rooms) {
+            if (existingIds.has(r.id)) continue;
+            // Brand-new group I was added to but haven't seen yet.
+            // members[] left empty here — we don't need handle/phone
+            // metadata for member rows on the group-list view; the
+            // creator's local state has the resolved members[] and
+            // hydration via GroupChatScreen.loadGroup will pick up
+            // member details on first open. memberCount comes from
+            // the rooms.member_ids array length so the row reads
+            // correctly ("3 members") immediately.
+            list.push({
+              id:           r.id,
+              name:         r.name || 'Group',
+              desc:         '',
+              memberCount:  Array.isArray(r.member_ids) ? r.member_ids.length : 1,
+              members:      [],
+              lastMessage:  'You were added to this group',
+              time:         '',
+              pinned:       false,
+              hideAlerts:   false,
+              createdAt:    r.created_at ? new Date(r.created_at).getTime() : Date.now(),
+              joinedAt:     nowIso,        // banner trigger in GroupChatScreen
+              unread:       0,
+            });
+            dirty = true;
+          }
+          if (!dirty) return prev;
+          AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(list)).catch(() => {});
+          return list;
+        });
+      } catch (e) {
+        if (__DEV__) console.warn('groups hydration failed:', e?.message);
+      }
+    })();
   }, []);
 
   const saveGroups = async (updated) => {
@@ -559,6 +622,9 @@ export default function GroupScreen({ navigation }) {
   };
 
   const handleSaveMembers = async (members) => {
+    // Capture old members BEFORE state mutation so we can diff for
+    // the 1.0.15 group:invite push (newly-added members get an FCM).
+    const prevMembers = Array.isArray(selectedGroup?.members) ? selectedGroup.members : [];
     const updated = groups.map(g => g.id === selectedGroup.id
       ? { ...g, members, memberCount: members.length || 1 } : g);
     await saveGroups(updated);
@@ -568,6 +634,34 @@ export default function GroupScreen({ navigation }) {
     // wouldn't receive the message:new fan-out (server reads
     // member_ids from the rooms row on each send).
     _upsertGroupRoom(selectedGroup.id, selectedGroup.name, members);
+    // 1.0.15 group invite: diff old vs new resolved member user_ids
+    // and emit a socket event so the server can fire FCM pushes to
+    // each freshly-added user. Filter out legacy bare-string entries
+    // (no user_id) since we can't push to them anyway. Skip if no
+    // new members (could be a remove-only edit).
+    try {
+      const oldUserIds = new Set(
+        (prevMembers || [])
+          .filter(m => m && typeof m === 'object' && m.user_id)
+          .map(m => m.user_id)
+      );
+      const newUserIds = (members || [])
+        .filter(m => m && typeof m === 'object' && m.user_id)
+        .map(m => m.user_id);
+      const addedUserIds = newUserIds.filter(uid => !oldUserIds.has(uid));
+      if (addedUserIds.length > 0) {
+        const sock = getSocket && getSocket();
+        if (sock?.connected) {
+          sock.emit('group:invite', {
+            groupId:   selectedGroup.id,
+            groupName: selectedGroup.name,
+            addedUserIds,
+          });
+        }
+      }
+    } catch (e) {
+      if (__DEV__) console.warn('group:invite emit failed:', e?.message);
+    }
   };
 
   const handleDelete = () => {
