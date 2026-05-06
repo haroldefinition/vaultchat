@@ -531,40 +531,62 @@ export default function GroupScreen({ navigation }) {
         if (!Array.isArray(rooms) || rooms.length === 0) return;
         setGroups(prev => {
           const list = Array.isArray(prev) ? prev.slice() : [];
-          const existingIds = new Set(list.map(g => g?.id));
+          const indexById = new Map(list.map((g, i) => [g?.id, i]));
           const nowIso = new Date().toISOString();
           let dirty = false;
           for (const r of rooms) {
-            if (existingIds.has(r.id)) continue;
-            // Brand-new group I was added to but haven't seen yet.
-            // 1.0.17 fix: populate members[] with user_id stubs from
-            // rooms.member_ids. Pre-1.0.17 we left this empty assuming
-            // GroupChatScreen would re-resolve, but the resolver only
-            // ran against this same empty cache, so resolveAndCache-
-            // GroupMembers returned [] and the encryption send path's
-            // sendable-filter dropped to length 0, silently falling
-            // back to plaintext (E2E bypass on the invitee side).
-            // Stubs give resolveAndCacheGroupMembers a starting point;
-            // its enhanced user_id-first lookup branch fills in
-            // vault_handle + public_key + device_keys on first open.
             const memberStubs = Array.isArray(r.member_ids)
               ? r.member_ids.map(uid => ({ user_id: uid }))
               : [];
-            list.push({
-              id:           r.id,
-              name:         r.name || 'Group',
-              desc:         '',
-              memberCount:  Array.isArray(r.member_ids) ? r.member_ids.length : 1,
-              members:      memberStubs,
-              lastMessage:  'You were added to this group',
-              time:         '',
-              pinned:       false,
-              hideAlerts:   false,
-              createdAt:    r.created_at ? new Date(r.created_at).getTime() : Date.now(),
-              joinedAt:     nowIso,        // banner trigger in GroupChatScreen
-              unread:       0,
-            });
-            dirty = true;
+            const existingIdx = indexById.get(r.id);
+            if (existingIdx == null) {
+              // Brand-new group I was added to but haven't seen yet.
+              // 1.0.17 fix: populate members[] with user_id stubs from
+              // rooms.member_ids. Pre-1.0.17 we left this empty assuming
+              // GroupChatScreen would re-resolve, but the resolver only
+              // ran against this same empty cache, so resolveAndCache-
+              // GroupMembers returned [] and the encryption send path's
+              // sendable-filter dropped to length 0, silently falling
+              // back to plaintext (E2E bypass on the invitee side).
+              // Stubs give resolveAndCacheGroupMembers a starting point;
+              // its enhanced user_id-first lookup branch fills in
+              // vault_handle + public_key + device_keys on first open.
+              list.push({
+                id:           r.id,
+                name:         r.name || 'Group',
+                desc:         '',
+                memberCount:  Array.isArray(r.member_ids) ? r.member_ids.length : 1,
+                members:      memberStubs,
+                lastMessage:  'You were added to this group',
+                time:         '',
+                pinned:       false,
+                hideAlerts:   false,
+                createdAt:    r.created_at ? new Date(r.created_at).getTime() : Date.now(),
+                joinedAt:     nowIso,        // banner trigger in GroupChatScreen
+                unread:       0,
+              });
+              dirty = true;
+            } else {
+              // 1.0.17 migration for users coming from 1.0.15/1.0.16:
+              // their existing local group rows were hydrated with
+              // members: [] (the bug). Without this branch the
+              // encryption banner would stay orange and sends would
+              // continue going plaintext on those legacy entries.
+              // Repair only when local members[] is empty AND we have
+              // member_ids from the canonical rooms row — never
+              // overwrite a non-empty local list (creator paths and
+              // already-resolved groups stay intact).
+              const existing = list[existingIdx];
+              const localMembers = Array.isArray(existing?.members) ? existing.members : [];
+              if (localMembers.length === 0 && memberStubs.length > 0) {
+                list[existingIdx] = {
+                  ...existing,
+                  members:     memberStubs,
+                  memberCount: memberStubs.length,
+                };
+                dirty = true;
+              }
+            }
           }
           if (!dirty) return prev;
           AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(list)).catch(() => {});

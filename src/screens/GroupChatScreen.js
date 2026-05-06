@@ -720,8 +720,17 @@ export default function GroupChatScreen({ route, navigation }) {
       const { data } = await supabase.auth.getUser();
       if (data?.user) {
         setCurrentUserId(data.user.id);
-        const { data: p } = await supabase.from('profiles').select('handle').eq('id', data.user.id).single();
-        if (p?.handle) setCurrentHandle(p.handle);
+        // 1.0.17 fix: column is `vault_handle`, not `handle`. Pre-fix
+        // this query silently returned `{ handle: undefined }`, so
+        // currentHandle stayed '' and every group send persisted with
+        // sender_handle='', making the receiver render fall back to
+        // the generic 'member' label.
+        const { data: p } = await supabase
+          .from('profiles')
+          .select('vault_handle')
+          .eq('id', data.user.id)
+          .single();
+        if (p?.vault_handle) setCurrentHandle(p.vault_handle);
         return;
       }
     } catch {}
@@ -935,8 +944,26 @@ export default function GroupChatScreen({ route, navigation }) {
     try {
       const { data, error } = await supabase.from('group_messages').insert(payload).select().single();
       if (!error && data) {
+        // 1.0.17 fix: preserve the optimistic plaintext `text` when
+        // replacing the temp message with the server row. The server
+        // row's `text` is the 'GRPENC:v1' sentinel for encrypted
+        // sends — adopting it raw would make the SENDER see their own
+        // message rendered as 'GRPENC:v1' (only receivers run their
+        // copies through resolveIncoming/decryptGroupRowCached). Take
+        // every server-side field (id, created_at, metadata, etc.)
+        // EXCEPT text, which we keep from the optimistic plaintext.
+        // Plaintext (unencrypted) sends are unaffected — text is the
+        // same on both sides.
         setMessages(prev => {
-          const next = prev.map(m => m.id === tempId ? data : m);
+          const next = prev.map(m => {
+            if (m.id !== tempId) return m;
+            const optimisticText = m.text;
+            const serverIsEnvelope = isGroupEnvelope(data);
+            return {
+              ...data,
+              text: serverIsEnvelope ? optimisticText : data.text,
+            };
+          });
           saveLocal(next);
           return next;
         });

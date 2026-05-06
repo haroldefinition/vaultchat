@@ -67,10 +67,22 @@ function _uuid() {
 /**
  * True if a stored group message is one of our group envelopes.
  * Cheap O(1) check that avoids parsing JSON for plaintext rows.
+ *
+ * Recognises every protocol version we've ever shipped:
+ *   - 'group:1' / 'group_v1' — original Phase 1 (per-user envelopes only)
+ *   - 'group:2'              — Phase MM (per-device fan-out via ct_for_devices)
+ *   - 'group:3'              — Phase UU (HMAC-blinded routing keys)
+ *
+ * Pre-1.0.17 fix: this used to only accept v1, so receivers of v2/v3
+ * messages would treat them as plaintext and render the raw 'GRPENC:v1'
+ * sentinel string instead of triggering decryptGroupMessageForMe.
  */
 export function isGroupEnvelope(row) {
   return !!(row && row.metadata && row.metadata.encrypted &&
-            (row.metadata.v === 'group:1' || row.metadata.v === 'group_v1'));
+            (row.metadata.v === 'group:1'
+             || row.metadata.v === 'group_v1'
+             || row.metadata.v === 'group:2'
+             || row.metadata.v === 'group:3'));
 }
 
 /**
@@ -100,7 +112,6 @@ export async function resolveAndCacheGroupMembers(groupId) {
   // since they can change after a device reset.
   const enriched = await Promise.all(members.map(async m => {
     const seed = typeof m === 'string' ? { name: m } : { ...m };
-    if (seed.user_id && seed.public_key) return seed;
 
     // 1.0.17 fix: user_id-first lookup branch. New-member group
     // hydration (GroupScreen.loadGroups) writes member stubs as
@@ -108,9 +119,17 @@ export async function resolveAndCacheGroupMembers(groupId) {
     // feed findByHandleOrPhone, so the legacy lookup path below
     // would drop them at the !lookup guard, leaving members[]
     // empty and silently flipping the send path to plaintext.
-    // When we have a user_id, query profiles directly by id and
-    // fetch device keys in parallel.
-    if (seed.user_id && !seed.public_key) {
+    //
+    // Late-1.0.17 fix: previously we early-returned here when
+    // seed had user_id + public_key. That cached an old
+    // device_keys list across the lifetime of the group — when
+    // a peer reinstalled and rotated keys, our send would still
+    // encrypt to their stale pubkeys, the receiver couldn't
+    // decrypt, and the FlatList filter would hide their copy
+    // of the message entirely. Always re-fetch device_keys for
+    // any user we already know the user_id for; getPublicKey
+    // has its own short-lived cache so the cost is bounded.
+    if (seed.user_id) {
       try {
         const { getDeviceKeysForUser } = require('./deviceKeys');
         const [{ data: profile }, devices] = await Promise.all([
