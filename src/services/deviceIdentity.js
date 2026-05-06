@@ -78,3 +78,36 @@ export async function _resetDeviceIdForTests() {
   _cached = null;
   try { await SecureStore.deleteItemAsync(KEY, STORE_OPTIONS); } catch {}
 }
+
+/**
+ * Production rotation hook. Wipes the cached + persisted device_id
+ * so the next getDeviceId() call generates a fresh UUID. Used by
+ * publishMyDeviceKey to recover from the orphaned-key state on
+ * iOS reinstall:
+ *
+ *   - iOS Keychain (where we store device_id) survives the
+ *     reinstall, so getDeviceId() returns the OLD id even after
+ *     the user re-installs.
+ *   - AsyncStorage (where the identity keypair lives) does NOT
+ *     survive, so loadIdentityKeys() returns null and a NEW
+ *     keypair gets generated.
+ *   - publishMyDeviceKey upserts (user_id, OLD device_id,
+ *     NEW public_key). If the upsert UPDATE doesn't actually
+ *     replace public_key (silent RLS rejection, replication
+ *     lag, or any other reason), peers continue encrypting to
+ *     the stale published key — the user never receives any
+ *     decryptable message.
+ *
+ * Rotation breaks the cycle: we drop the keychain device_id,
+ * generate a fresh one, and INSERT a new user_device_keys row
+ * with our NEW public_key. The orphan row stays in the table
+ * (peers will see it but can't reach this install through it
+ * — they'll prefer the newer row by last_seen_at).
+ *
+ * Returns the new device_id.
+ */
+export async function rotateDeviceId() {
+  _cached = null;
+  try { await SecureStore.deleteItemAsync(KEY, STORE_OPTIONS); } catch {}
+  return getDeviceId();
+}

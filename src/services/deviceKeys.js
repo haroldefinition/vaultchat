@@ -22,7 +22,7 @@
 // ============================================================
 
 import { ensureIdentityKeys } from '../crypto/encryption';
-import { getDeviceId, getDeviceLabel } from './deviceIdentity';
+import { getDeviceId, getDeviceLabel, rotateDeviceId } from './deviceIdentity';
 
 let supabase = null;
 try { supabase = require('./supabase').supabase; } catch {}
@@ -68,26 +68,190 @@ function _cached(userId) {
 export async function publishMyDeviceKey(myUserId, myPhone) {
   if (!myUserId || !supabase) return null;
   try {
-    const { publicKey } = await ensureIdentityKeys();
-    const deviceId = await getDeviceId();
-    const label    = await getDeviceLabel();
+    let { publicKey } = await ensureIdentityKeys();
+    let deviceId      = await getDeviceId();
+    const label       = await getDeviceLabel();
 
-    // Path 1: direct upsert (auth session present).
-    const { data, error } = await supabase
+    // 1.0.18 fix: verify-and-rotate publish.
+    //
+    // The previous (1.0.17 and earlier) publish was a single upsert
+    // that we trusted blindly. On iOS reinstall, expo-secure-store
+    // (Keychain) preserves device_id but AsyncStorage wipes the
+    // identity keypair. Result on next sign-in: a fresh local
+    // keypair gets paired with an OLD device_id. The upsert SHOULD
+    // have UPDATEd the row's public_key to the new value — but in
+    // practice we observed the bug "Sam can't decrypt anything from
+    // peers after reinstall" (2026-05-06 paired-device session).
+    // Whether the upsert silently failed the UPDATE (RLS quirk,
+    // replication lag) or the public_key column simply wasn't
+    // updated, the symptom is identical: peers encrypt to a
+    // published pubkey that doesn't correspond to any local
+    // private key.
+    //
+    // Strategy: write, then read back. If the published row's
+    // public_key doesn't match our local one, rotate the device_id
+    // and INSERT a fresh row. This sidesteps any UPDATE-blocking
+    // RLS quirk because we never UPDATE — we always INSERT a row
+    // whose primary key is brand new.
+    //
+    // The orphan rows from past installs stay in user_device_keys
+    // forever (we don't have permission to delete other users'
+    // rows, and our own old device row is technically still ours).
+    // Peers see all rows and encrypt to all of them; they can't
+    // reach this install through the stale rows but they CAN reach
+    // it through the new row (the only one whose public_key
+    // matches a local private key). At worst we waste a few
+    // bytes per send per stale row. A future cleanup task can
+    // garbage-collect stale rows by last_seen_at age.
+
+    const writePayload = (id) => ({
+      user_id:       myUserId,
+      device_id:     id,
+      device_label:  label,
+      public_key:    publicKey,
+      last_seen_at:  new Date().toISOString(),
+    });
+
+    // 1.0.18 diagnostic: log local key fingerprint + device_id so
+    // we can see exactly what's happening when publish runs.
+    const localPkPrefix = (publicKey || '').slice(0, 16);
+    const deviceIdPrefix = (deviceId || '').slice(0, 8);
+    if (__DEV__) {
+      console.warn(
+        `[publishMyDeviceKey] start — user=${myUserId.slice(0,8)} device=${deviceIdPrefix} localPk=${localPkPrefix}`
+      );
+    }
+
+    // 1.0.18 collision-rotation: detect cross-user device_id reuse.
+    // iOS Simulator (and some real-device edge cases — Family Sharing
+    // restored devices, dev-environment Keychain sharing) can give
+    // the SAME device_id to two different accounts on the same
+    // physical install. ct_for_devices in encryptForGroup is keyed
+    // by raw device_id, so when one user encrypts to a member whose
+    // device_id collides with their own self-encrypt, the self loop
+    // overwrites the member's envelope. The recipient looks up their
+    // slot, gets the sender's self-encryption (encrypted to a pubkey
+    // they don't hold), fails decryption, and the FlatList placeholder
+    // filter hides the message. Symptom: "I send to peer, peer sees
+    // it; peer sends to me, I see nothing."
+    //
+    // Fix: before publishing, query if our device_id is already in
+    // use by a DIFFERENT user_id. If yes, rotate to a fresh id so
+    // every (user_id, device_id) pair is globally unique.
+    try {
+      const { data: collisions } = await supabase
+        .from('user_device_keys')
+        .select('user_id')
+        .eq('device_id', deviceId)
+        .neq('user_id', myUserId)
+        .limit(1);
+      if (Array.isArray(collisions) && collisions.length > 0) {
+        if (__DEV__) {
+          console.warn(
+            `[publishMyDeviceKey] device_id ${deviceIdPrefix} is already in use by user ${collisions[0].user_id?.slice(0,8)}. Rotating to avoid envelope overwrite.`
+          );
+        }
+        deviceId = await rotateDeviceId();
+      }
+    } catch {}
+
+    // Step 1 — try the upsert path (Path 1). Select `public_key`
+    // in the response so we can verify the round-trip without a
+    // second query in the happy path.
+    const { data: upsertActual, error: upsertErr } = await supabase
       .from('user_device_keys')
-      .upsert(
-        { user_id: myUserId, device_id: deviceId, device_label: label, public_key: publicKey, last_seen_at: new Date().toISOString() },
-        { onConflict: 'user_id,device_id' },
-      )
-      .select('id')
+      .upsert(writePayload(deviceId), { onConflict: 'user_id,device_id' })
+      .select('id, public_key')
       .maybeSingle();
 
-    if (!error && data) {
-      _devicesCache.delete(myUserId); // invalidate so next read sees the new row
+    const upsertPkPrefix = (upsertActual?.public_key || '').slice(0, 16);
+    if (__DEV__) {
+      console.warn(
+        `[publishMyDeviceKey] upsert returned — err=${upsertErr?.message || 'none'} publishedPk=${upsertPkPrefix} matches=${upsertActual?.public_key === publicKey}`
+      );
+    }
+
+    if (!upsertErr && upsertActual?.public_key === publicKey) {
+      // Happy path — Supabase round-tripped our intended pubkey.
+      _devicesCache.delete(myUserId);
       return { deviceId, publicKey };
     }
 
-    // Path 2: RPC fallback (no auth session / RLS blocked).
+    // Step 2 — independent read-back. On some Supabase responses
+    // the `.select(...)` after an upsert may return the row that
+    // was already there (RLS UPDATE silently rejected, replication
+    // lag) without setting `error`. Re-query the canonical row so
+    // we know whether our pubkey is actually live.
+    let { data: actual } = await supabase
+      .from('user_device_keys')
+      .select('public_key')
+      .eq('user_id', myUserId)
+      .eq('device_id', deviceId)
+      .maybeSingle();
+
+    if (!upsertErr && actual?.public_key === publicKey) {
+      _devicesCache.delete(myUserId);
+      return { deviceId, publicKey };
+    }
+
+    // Step 3 — Path 2 (RPC fallback). Only if Path 1 errored AND we
+    // have the user's phone for the SECURITY DEFINER RPC's phone
+    // validation. (When called without phone, we skip Path 2 and
+    // go straight to rotation.)
+    if (upsertErr && myPhone) {
+      const { data: rpc, error: rpcErr } = await supabase.rpc('publish_device_key', {
+        p_user_id:      myUserId,
+        p_phone:        myPhone,
+        p_device_id:    deviceId,
+        p_device_label: label,
+        p_public_key:   publicKey,
+      });
+      if (!rpcErr && rpc?.ok) {
+        // Re-verify after RPC.
+        ({ data: actual } = await supabase
+          .from('user_device_keys')
+          .select('public_key')
+          .eq('user_id', myUserId)
+          .eq('device_id', deviceId)
+          .maybeSingle());
+        if (actual?.public_key === publicKey) {
+          _devicesCache.delete(myUserId);
+          return { deviceId, publicKey };
+        }
+      }
+      if (__DEV__ && rpcErr) console.warn('publish_device_key rpc:', rpcErr.message);
+    }
+
+    // Step 4 — Rotation fallback. Either:
+    //   - The upsert succeeded but didn't actually replace the
+    //     public_key column (the original orphaned-key bug).
+    //   - The upsert errored AND the RPC fallback wasn't available
+    //     or also didn't write our value.
+    // Either way, give up on this device_id. Generate a fresh one,
+    // INSERT a brand-new row with our local pubkey. Insert (not
+    // upsert) so a stale row at the new id can't shadow us.
+    if (__DEV__) {
+      console.warn(
+        'publishMyDeviceKey: published pubkey did not match local. ' +
+        'Rotating device_id to recover from orphaned-key state.'
+      );
+    }
+    deviceId = await rotateDeviceId();
+
+    // Insert new row.
+    const { data: inserted, error: insertErr } = await supabase
+      .from('user_device_keys')
+      .insert(writePayload(deviceId))
+      .select('id, public_key')
+      .maybeSingle();
+
+    if (!insertErr && inserted?.public_key === publicKey) {
+      _devicesCache.delete(myUserId);
+      return { deviceId, publicKey, rotated: true };
+    }
+
+    // Last-resort: try the RPC with the new device_id (handles RLS
+    // INSERT denial the same way the original Path 2 did).
     if (myPhone) {
       const { data: rpc, error: rpcErr } = await supabase.rpc('publish_device_key', {
         p_user_id:      myUserId,
@@ -98,9 +262,12 @@ export async function publishMyDeviceKey(myUserId, myPhone) {
       });
       if (!rpcErr && rpc?.ok) {
         _devicesCache.delete(myUserId);
-        return { deviceId, publicKey };
+        return { deviceId, publicKey, rotated: true };
       }
-      if (__DEV__ && rpcErr) console.warn('publish_device_key rpc:', rpcErr.message);
+    }
+
+    if (__DEV__) {
+      console.warn('publishMyDeviceKey: rotation insert also failed; giving up.');
     }
     return null;
   } catch (e) {
