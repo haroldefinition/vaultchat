@@ -15,7 +15,13 @@
   <uses-permission android:name="android.permission.RECORD_AUDIO"/>
   <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
   <uses-permission android:name="android.permission.VIBRATE"/>
-  <uses-permission android:name="android.permission.WRITE_CONTACTS"/>
+  <!-- WRITE_CONTACTS removed in 1.0.16. Audit confirmed VaultChat only
+       READS the contact list via expo-contacts (Contacts.getContactsAsync,
+       requestPermissionsAsync, getPermissionsAsync) for the contact-import
+       handle-discovery flow. No code path writes back to the OS contact
+       store. Removing the permission tightens Play Store quality signals
+       and avoids reviewer questions about why a messaging app needs to
+       modify the user's address book. -->
   <!-- Legacy storage perm — needed only on Android 9 and below
        (scoped storage on Android 10+ removed the need for this). -->
   <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>
@@ -46,7 +52,7 @@
       <data android:scheme="https"/>
     </intent>
   </queries>
-  <application android:name=".MainApplication" android:label="@string/app_name" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:allowBackup="true" android:theme="@style/AppTheme" android:supportsRtl="true" android:enableOnBackInvokedCallback="false">
+  <application android:name=".MainApplication" android:label="@string/app_name" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:allowBackup="false" android:fullBackupContent="@xml/backup_rules" android:dataExtractionRules="@xml/data_extraction_rules" android:theme="@style/AppTheme" android:supportsRtl="true" android:enableOnBackInvokedCallback="false">
     <!-- Phase AAA: tools:replace forces our values to win the manifest merge.
          react-native-firebase_messaging declares default_notification_color
          with a different default (@color/white), and the merger refuses to

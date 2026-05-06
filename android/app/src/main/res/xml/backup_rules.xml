@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  VaultChat Auto Backup rules (Android 6 - 11).
+  android:allowBackup="false" already prevents Android Auto Backup from
+  including this app in the user's Google Drive backups, but we declare
+  these defense-in-depth excludes anyway in case a future maintainer
+  flips allowBackup back to true without thinking through the E2E
+  implications.
+
+  What we exclude:
+    - All SharedPreferences (some native modules — react-native-async-
+      storage on certain backends, expo-secure-store iOS shim, etc. —
+      can land here; never let any of it leave the device)
+    - The com.kevinresol.react_native_default_preference store
+    - The entire 'database' bucket (anything SQLite, including
+      AsyncStorage's sqlite backend on some builds)
+    - All file storage (Vault PIN-derived ratchet state, device
+      keys, draft messages, media cache)
+    - External storage paths
+
+  Net effect: Android Auto Backup, even if accidentally enabled,
+  exfiltrates nothing.
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="."/>
+    <exclude domain="database" path="."/>
+    <exclude domain="file" path="."/>
+    <exclude domain="external" path="."/>
+    <exclude domain="root" path="."/>
+</full-backup-content>
