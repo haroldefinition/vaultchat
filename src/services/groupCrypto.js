@@ -40,6 +40,7 @@ import { encryptMessage } from '../crypto/encryption';
 import { getPublicKey } from './keyExchange';
 import { findByHandleOrPhone } from './vaultHandle';
 import { ensureIdentityKeys } from '../crypto/encryption';
+import { supabase } from './supabase';
 import {
   ensureRoomSecret,
   getMyRoomSecret,
@@ -100,6 +101,38 @@ export async function resolveAndCacheGroupMembers(groupId) {
   const enriched = await Promise.all(members.map(async m => {
     const seed = typeof m === 'string' ? { name: m } : { ...m };
     if (seed.user_id && seed.public_key) return seed;
+
+    // 1.0.17 fix: user_id-first lookup branch. New-member group
+    // hydration (GroupScreen.loadGroups) writes member stubs as
+    // { user_id } only — they have no vault_handle/phone/name to
+    // feed findByHandleOrPhone, so the legacy lookup path below
+    // would drop them at the !lookup guard, leaving members[]
+    // empty and silently flipping the send path to plaintext.
+    // When we have a user_id, query profiles directly by id and
+    // fetch device keys in parallel.
+    if (seed.user_id && !seed.public_key) {
+      try {
+        const { getDeviceKeysForUser } = require('./deviceKeys');
+        const [{ data: profile }, devices] = await Promise.all([
+          supabase
+            .from('profiles')
+            .select('id, vault_handle, phone, public_key')
+            .eq('id', seed.user_id)
+            .maybeSingle(),
+          getDeviceKeysForUser(seed.user_id),
+        ]);
+        if (profile?.id) {
+          return {
+            ...seed,
+            user_id:      profile.id,
+            vault_handle: profile.vault_handle || seed.vault_handle || null,
+            phone:        profile.phone || seed.phone || null,
+            public_key:   profile.public_key || seed.public_key || null,
+            device_keys:  Array.isArray(devices) ? devices : [],
+          };
+        }
+      } catch { /* fall through to legacy lookup */ }
+    }
 
     // Try to resolve via @handle or phone using whatever we have.
     // Phase MM: also fetch the member's per-device key list so the

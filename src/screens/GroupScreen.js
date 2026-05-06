@@ -537,19 +537,25 @@ export default function GroupScreen({ navigation }) {
           for (const r of rooms) {
             if (existingIds.has(r.id)) continue;
             // Brand-new group I was added to but haven't seen yet.
-            // members[] left empty here — we don't need handle/phone
-            // metadata for member rows on the group-list view; the
-            // creator's local state has the resolved members[] and
-            // hydration via GroupChatScreen.loadGroup will pick up
-            // member details on first open. memberCount comes from
-            // the rooms.member_ids array length so the row reads
-            // correctly ("3 members") immediately.
+            // 1.0.17 fix: populate members[] with user_id stubs from
+            // rooms.member_ids. Pre-1.0.17 we left this empty assuming
+            // GroupChatScreen would re-resolve, but the resolver only
+            // ran against this same empty cache, so resolveAndCache-
+            // GroupMembers returned [] and the encryption send path's
+            // sendable-filter dropped to length 0, silently falling
+            // back to plaintext (E2E bypass on the invitee side).
+            // Stubs give resolveAndCacheGroupMembers a starting point;
+            // its enhanced user_id-first lookup branch fills in
+            // vault_handle + public_key + device_keys on first open.
+            const memberStubs = Array.isArray(r.member_ids)
+              ? r.member_ids.map(uid => ({ user_id: uid }))
+              : [];
             list.push({
               id:           r.id,
               name:         r.name || 'Group',
               desc:         '',
               memberCount:  Array.isArray(r.member_ids) ? r.member_ids.length : 1,
-              members:      [],
+              members:      memberStubs,
               lastMessage:  'You were added to this group',
               time:         '',
               pinned:       false,

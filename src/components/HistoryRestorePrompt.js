@@ -151,10 +151,10 @@ export default function HistoryRestorePrompt() {
       <View style={s.backdrop}>
         <View style={s.card}>
           <Text style={s.icon}>☁️</Text>
-          <Text style={s.title}>We found your chat backup</Text>
+          <Text style={s.title}>Restore your chat history?</Text>
           <Text style={s.body}>
-            Your VaultChat account has an encrypted backup of your last 90 days of chats
-            {when ? ` (last updated ${when})` : ''}. Enter your Vault PIN to restore your history on this device.
+            We found an encrypted backup of your previous chats
+            {when ? ` (last updated ${when})` : ''}. Enter your Vault PIN to restore them on this device.
           </Text>
 
           <TextInput
@@ -170,6 +170,7 @@ export default function HistoryRestorePrompt() {
             style={s.input}
           />
 
+          {/* Primary CTA — Restore. Full-width purple. */}
           <TouchableOpacity
             style={[s.primary, { opacity: pin && !busy ? 1 : 0.55 }]}
             disabled={!pin || busy}
@@ -185,7 +186,7 @@ export default function HistoryRestorePrompt() {
                     </Text>
                   </View>
                 )
-              : <Text style={s.primaryTx}>Restore my chats</Text>}
+              : <Text style={s.primaryTx}>Restore</Text>}
           </TouchableOpacity>
 
           {/* Progress bar — only while busy. Determinate fill from
@@ -199,22 +200,36 @@ export default function HistoryRestorePrompt() {
             </View>
           )}
 
-          {/* Secondary action: "Not now" when idle, "Stop" while
-              busy. Stop flips the cancellation flag — next yieldy
-              chunk throws CANCELLED and the modal stays open so
-              the user can retry without losing the typed PIN. */}
-          <TouchableOpacity
-            onPress={() => {
-              if (busy) {
-                cancelRef.current.cancelled = true;
-              } else {
-                dismiss(true);
-              }
-            }}
-            style={s.secondary}
-          >
-            <Text style={s.secondaryTx}>{busy ? 'Stop' : 'Not now'}</Text>
-          </TouchableOpacity>
+          {/* While busy: the secondary becomes a Stop affordance that
+              cancels PBKDF2 in flight (modal stays open so user can
+              retry without retyping PIN). When idle: a prominent
+              "Skip — start fresh" gray button (1.0.17 polish — was
+              previously a small "Not now" link, easy to miss, leading
+              to the prompt re-presenting on subsequent sessions). */}
+          {busy ? (
+            <TouchableOpacity
+              onPress={() => { cancelRef.current.cancelled = true; }}
+              style={s.tertiary}
+            >
+              <Text style={s.tertiaryTx}>Stop</Text>
+            </TouchableOpacity>
+          ) : (
+            <>
+              <TouchableOpacity
+                onPress={() => dismiss(true)}
+                style={s.secondary}
+                activeOpacity={0.85}
+              >
+                <Text style={s.secondaryTx}>Skip — start fresh</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => dismiss(false)}
+                style={s.tertiary}
+              >
+                <Text style={s.tertiaryTx}>Not now</Text>
+              </TouchableOpacity>
+            </>
+          )}
 
           <Text style={s.fineprint}>
             We never see your PIN or messages. The backup is end-to-end encrypted —
@@ -261,8 +276,23 @@ const s = StyleSheet.create({
     borderRadius: 3, overflow: 'hidden',
   },
   progressFill: { height: '100%', backgroundColor: PURPLE },
-  secondary: { alignItems: 'center', paddingVertical: 12, marginTop: 2 },
-  secondaryTx: { color: 'rgba(255,255,255,0.55)', fontSize: 14 },
+  // 1.0.17: secondary is now a prominent gray button (was a small
+  // link). Tapping it sets the offered flag so the prompt never re-
+  // presents on this install. Visually de-emphasised vs the purple
+  // primary but unmistakable as a real action.
+  secondary: {
+    backgroundColor: '#2a2a3e',
+    paddingVertical: 13,
+    borderRadius: 14,
+    alignItems: 'center',
+    marginTop: 8,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
+  },
+  secondaryTx: { color: 'rgba(255,255,255,0.85)', fontSize: 14, fontWeight: '700', letterSpacing: 0.2 },
+  // Tertiary = the small "Not now" / "Stop" link below the secondary.
+  // Keeps the deferral option alive without shouting.
+  tertiary:   { alignItems: 'center', paddingVertical: 10, marginTop: 2 },
+  tertiaryTx: { color: 'rgba(255,255,255,0.45)', fontSize: 13 },
   fineprint: {
     color: 'rgba(255,255,255,0.4)', fontSize: 11.5, textAlign: 'center',
     marginTop: 14, lineHeight: 16,
