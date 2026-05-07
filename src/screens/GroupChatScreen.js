@@ -315,22 +315,46 @@ function Bubble({ item, currentUserId, colors, onFullScreen, onPlay, onLongPress
           // Media-only (no caption) → transparent so the photo's own
           // accent border IS the visual frame. Same treatment as 1:1.
           isMedia && !cap && { backgroundColor: 'transparent', shadowOpacity: 0, elevation: 0, padding: 0 },
+          // 1.0.19+ photo-reactions overlap: position:relative on the
+          // bubble for media so the absolute-positioned ReactionBar
+          // overlay can anchor to it. Mirrors the 1:1 ChatRoomScreen
+          // pattern.
+          isMedia && reactions?.length > 0 && { position: 'relative' },
         ]}>
           {body()}
           {/* Caption-message bubbles keep the timestamp INSIDE the
               bubble (where it has a tinted ground). Media-only bubbles
               push the timestamp out as a sibling — the bubble's bottom
-              edge IS the photo edge then, so the ReactionBar's -14
-              negative-margin pull-up actually overlaps the photo's
-              corner instead of just hovering over the timestamp.
-              Matches the 1:1 layout exactly. */}
+              edge IS the photo edge then, so reactions can overlap
+              cleanly via the absolute overlay below. */}
           {(!isMedia || cap) && (
             <Text style={[g.msgTime, { color: isMe ? 'rgba(255,255,255,0.6)' : sub }]}>
               {showFull ? fullTimeStr : shortTimeStr}{item.edited ? '  ✎' : ''}
             </Text>
           )}
+          {/* 1.0.19+ photo-reactions overlap (media only). For text/
+              caption bubbles we keep the inline ReactionBar below the
+              bubble (next sibling). pointerEvents=box-none lets taps
+              pass through the wrapper to the chip TouchableOpacity. */}
+          {reactions?.length > 0 && isMedia && (
+            <View
+              pointerEvents="box-none"
+              style={[
+                g.mediaReactOverlay,
+                isMe ? { right: 14 } : { left: 14 },
+              ]}>
+              <ReactionBar
+                reactions={reactions}
+                myUserId={currentUserId}
+                onReact={onReact}
+                accent={accent}
+                card={card}
+                overlayMode
+              />
+            </View>
+          )}
         </View>
-        {reactions?.length > 0 && (
+        {reactions?.length > 0 && !isMedia && (
           <ReactionBar
             reactions={reactions}
             myUserId={currentUserId}
@@ -2038,6 +2062,12 @@ const g = StyleSheet.create({
   senderHandle:   { fontSize: 11, fontWeight: '700', marginBottom: 2, marginLeft: 4 },
   bubble:         { borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10 },
   mediaPad:       { paddingHorizontal: 4, paddingVertical: 4 },
+  // 1.0.19+ photo-reactions overlap. PhotoStack's deckArea adds a
+  // 25px buffer below the actual photo card (for swipe animations),
+  // so a positive `bottom: 15` lifts the chip up to straddle the
+  // photo's true bottom edge: top 20px INSIDE the photo, bottom
+  // 10px past it. Matches the 1:1 ChatRoomScreen styling exactly.
+  mediaReactOverlay: { position: 'absolute', bottom: 15, zIndex: 5 },
   cap:            { fontSize: 13, paddingHorizontal: 6, paddingTop: 4 },
   msgTx:          { fontSize: 15, lineHeight: 21 },
   msgTime:        { fontSize: 10, marginTop: 4, textAlign: 'right' },

@@ -318,7 +318,7 @@ function VideoBubble({ uri, onPlay, onLongPress }) {
 }
 
 // ── Message bubble ────────────────────────────────────────────
-function Bubble({ item, myId, tx, sub, card, accent, bubbleOut, bubbleIn, bubbleOutTx, bubbleInTx, onOpenImg, onPlayVid, onReply, onLongPress, tappedId, onTap, reactions, onReact }) {
+function Bubble({ item, myId, tx, sub, card, accent, bubbleOut, bubbleIn, bubbleOutTx, bubbleInTx, onOpenImg, onPlayVid, onConsumeVonceView, onReply, onLongPress, tappedId, onTap, reactions, onReact }) {
   const me      = item.sender_id === myId;
   const raw     = item.content || '';
   const nlIdx   = raw.indexOf('\n');
@@ -369,9 +369,16 @@ function Bubble({ item, myId, tx, sub, card, accent, bubbleOut, bubbleIn, bubble
       </>;
     }
     if (main.startsWith('LOCALIMG:') || main.startsWith('IMG:')) {
+      // 1.0.19+ size fix: route legacy IMG: / LOCALIMG: messages
+      // through ResolvedPhotoStack instead of the small SinglePhoto
+      // bubble. PhotoStack handles both http URLs and local
+      // AsyncStorage keys in its resolver, so passing the key as a
+      // single-element array works for both cases. Historical chat
+      // history with IMG:/LOCALIMG: messages now renders at the
+      // same large size as new GALLERY: photos.
       const key = main.replace('LOCALIMG:', '').replace('IMG:', '');
       return <>
-        <SinglePhoto msgKey={key} isLocal={main.startsWith('LOCALIMG:')} onOpen={onOpenImg} onLongPress={() => onLongPress && onLongPress(item)} accent={accent} />
+        <ResolvedPhotoStack keys={[key]} onLongPress={() => onLongPress && onLongPress(item)} />
         {cap ? <Text style={[s.cap, { color: me ? 'rgba(255,255,255,0.9)' : tx }]}>{cap}</Text> : null}
       </>;
     }
@@ -389,20 +396,41 @@ function Bubble({ item, myId, tx, sub, card, accent, bubbleOut, bubbleIn, bubble
       </>;
     }
     if (main.startsWith('VONCE:')) {
-      // Format: VONCE:<url>|<kind>  where kind is 'image' | 'video'
-      const rest = main.slice('VONCE:'.length);
-      const sep  = rest.lastIndexOf('|');
-      const url  = sep >= 0 ? rest.slice(0, sep) : rest;
-      const kind = sep >= 0 ? rest.slice(sep + 1) : 'image';
+      // 1.0.18+ format: VONCE:<url>|<kind>|<viewLimit>
+      //   - kind = 'image' | 'video'
+      //   - viewLimit = '1' (View Once) | '3' (Replay), optional
+      // v1 backwards-compat: VONCE:<url>|<kind> (no viewLimit) is
+      // treated as viewLimit=1, matching the original semantic.
+      // URLs in practice never contain '|', but we still split
+      // defensively from the right so the URL is preserved even
+      // if it ever did.
+      const rest  = main.slice('VONCE:'.length);
+      const parts = rest.split('|');
+      let url, kind, viewLimit;
+      if (parts.length >= 3) {
+        viewLimit = parseInt(parts[parts.length - 1], 10) || 1;
+        kind      = parts[parts.length - 2];
+        url       = parts.slice(0, parts.length - 2).join('|');
+      } else if (parts.length === 2) {
+        url       = parts[0];
+        kind      = parts[1];
+        viewLimit = 1;
+      } else {
+        url       = parts[0] || '';
+        kind      = 'image';
+        viewLimit = 1;
+      }
       return <>
         <ViewOncePhoto
           messageId={item.id}
           url={url}
           kind={kind}
+          viewLimit={viewLimit}
           isMe={me}
           accent={accent}
           onOpenImage={onOpenImg}
           onPlayVideo={onPlayVid}
+          onConsumeView={onConsumeVonceView}
         />
         {cap ? <Text style={[s.cap, { color: me ? 'rgba(255,255,255,0.9)' : tx }]}>{cap}</Text> : null}
       </>;
@@ -451,26 +479,51 @@ function Bubble({ item, myId, tx, sub, card, accent, bubbleOut, bubbleIn, bubble
   return (
     <SwipeableRow onReply={() => { taptic(); onReply && onReply(); }}>
       <View style={[s.bWrap, me ? s.myWrap : s.theirWrap]}>
-        <TouchableOpacity
-          style={[
-            s.bubble,
-            me
-              ? [s.myBubble,    { backgroundColor: bubbleOut }]
-              : [s.theirBubble, { backgroundColor: bubbleIn  }],
-            isMedia && s.mediaPad,
-            // Media-only bubbles (photo/video, no caption) get a
-            // transparent background — the photo's own accent border
-            // is the visual frame, the colored bubble was redundant
-            // and looked like an iMessage chat bubble around an iMessage
-            // photo. Caption messages keep the colored bubble so the
-            // text still has a tinted ground to sit on.
-            isMedia && !cap && { backgroundColor: 'transparent', shadowOpacity: 0, elevation: 0, padding: 0 },
-          ]}
-          onPress={() => onTap && onTap(item.id)}
-          onLongPress={() => onLongPress && onLongPress(item)} delayLongPress={450} activeOpacity={0.88}>
-          {body()}
-        </TouchableOpacity>
-        {reactions?.length > 0 && (
+        {/* 1.0.19+ photo-reactions overlap: for media bubbles we wrap
+            the TouchableOpacity in a relative-positioned View so the
+            ReactionBar can absolutely position over the photo's
+            bottom corner (matches iMessage / WhatsApp UX). For text
+            bubbles we keep the existing inline layout where reactions
+            sit below with a small marginTop:-14 overlap into the bubble. */}
+        <View style={isMedia && reactions?.length > 0 ? s.mediaReactWrap : null}>
+          <TouchableOpacity
+            style={[
+              s.bubble,
+              me
+                ? [s.myBubble,    { backgroundColor: bubbleOut }]
+                : [s.theirBubble, { backgroundColor: bubbleIn  }],
+              isMedia && s.mediaPad,
+              // Media-only bubbles (photo/video, no caption) get a
+              // transparent background — the photo's own accent border
+              // is the visual frame, the colored bubble was redundant
+              // and looked like an iMessage chat bubble around an iMessage
+              // photo. Caption messages keep the colored bubble so the
+              // text still has a tinted ground to sit on.
+              isMedia && !cap && { backgroundColor: 'transparent', shadowOpacity: 0, elevation: 0, padding: 0 },
+            ]}
+            onPress={() => onTap && onTap(item.id)}
+            onLongPress={() => onLongPress && onLongPress(item)} delayLongPress={450} activeOpacity={0.88}>
+            {body()}
+          </TouchableOpacity>
+          {reactions?.length > 0 && isMedia && (
+            <View
+              pointerEvents="box-none"
+              style={[
+                s.mediaReactOverlay,
+                me ? { right: 14 } : { left: 14 },
+              ]}>
+              <ReactionBar
+                reactions={reactions}
+                myUserId={myId}
+                onReact={onReact}
+                accent={accent}
+                card={card}
+                overlayMode
+              />
+            </View>
+          )}
+        </View>
+        {reactions?.length > 0 && !isMedia && (
           <ReactionBar
             reactions={reactions}
             myUserId={myId}
@@ -624,6 +677,15 @@ export default function ChatRoomScreen({ route, navigation }) {
   const [attachModal,  setAttachModal]  = useState(false);
   const [gifModal,     setGifModal]     = useState(false);
   const [emojiModal,   setEmojiModal]   = useState(false);
+  // 1.0.18+ View-Once v2: post-pick mode chooser (View Once /
+  // Replay / Keep in Chat). pendingVonceAsset is the picked
+  // ImagePicker asset waiting on the user's mode choice.
+  const [vonceModeModal,    setVonceModeModal]    = useState(false);
+  const [pendingVonceAsset, setPendingVonceAsset] = useState(null);
+  // Sender notification toast — set by the realtime subscription on
+  // view_events. Auto-dismisses after 3.5s. Format:
+  // { isFinal, viewNumber }.
+  const [vonceViewToast,    setVonceViewToast]    = useState(null);
   const [emojiTab,     setEmojiTab]     = useState('emoji');
 
   const listRef       = useRef(null);
@@ -935,11 +997,45 @@ export default function ChatRoomScreen({ route, navigation }) {
 
     // Fallback poll (slower) in case Realtime not enabled
     const poll = setInterval(fetchMessages, 8000);
+
+    // 1.0.18+ View-Once v2: subscribe to view_events INSERTs so the
+    // SENDER sees a "your photo was viewed" toast in real time.
+    // RLS already restricts SELECT on view_events to rows whose
+    // underlying message was sent by auth.uid(), so we don't need
+    // any client-side filter — every event delivered through this
+    // channel is for one of MY messages.
+    //
+    // We dismiss the toast after 3.5s. Cross-room views (recipient
+    // viewed my photo in chat A while I'm in chat B) still arrive
+    // here because the subscription isn't scoped to room — but for
+    // v1 we just render the toast in whichever chat is mounted.
+    // Out-of-room toast escalation can come later if usage warrants.
+    let vonceToastTimer = null;
+    const vonceViewSub = supabase
+      .channel(`vonce_view_events:${myId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'view_events' },
+        (payload) => {
+          const ev = payload?.new;
+          if (!ev) return;
+          setVonceViewToast({
+            viewNumber: ev.view_number,
+            isFinal:    !!ev.is_final,
+          });
+          if (vonceToastTimer) clearTimeout(vonceToastTimer);
+          vonceToastTimer = setTimeout(() => setVonceViewToast(null), 3500);
+        },
+      )
+      .subscribe();
+
     return () => {
       clearInterval(poll);
       unsubRoom();
       unsubTyping();
       supabase.removeChannel(reactionSub);
+      try { supabase.removeChannel(vonceViewSub); } catch {}
+      if (vonceToastTimer) clearTimeout(vonceToastTimer);
     };
   }, [roomId, myId]);
 
@@ -1663,28 +1759,31 @@ export default function ChatRoomScreen({ route, navigation }) {
 
       let content;
       if (httpUrls.length === urls.length) {
-        // All uploaded successfully — use permanent URLs
-        content = httpUrls.length === 1
-          ? `IMG:${httpUrls[0]}`
-          : `GALLERY:${httpUrls.join('|')}`;
+        // All uploaded successfully — use permanent URLs.
+        // 1.0.19+ size fix: always use GALLERY: prefix regardless of
+        // photo count. PhotoStack/ResolvedPhotoStack renders single
+        // photos at the same large CARD_W (~78% screen width, dynamic
+        // aspect-ratio-aware height) as multi-photo galleries. The
+        // legacy IMG: prefix used a fixed 220x180 SinglePhoto bubble
+        // that looked dramatically smaller — Harold confirmed the
+        // big version is the desired UX.
+        content = `GALLERY:${httpUrls.join('|')}`;
       } else if (httpUrls.length > 0) {
-        // Partial upload — use what we have
-        content = httpUrls.length === 1
-          ? `IMG:${httpUrls[0]}`
-          : `GALLERY:${httpUrls.join('|')}`;
+        content = `GALLERY:${httpUrls.join('|')}`;
       } else {
-        // All uploads failed — fall back to local (only visible on this device)
-        content = stagedPhotos.length === 1
-          ? `LOCALIMG:${stagedPhotos[0].key}`
-          : `GALLERY:${stagedPhotos.map(p => p.key).join('|')}`;
+        // All uploads failed — fall back to local AsyncStorage keys
+        // (only visible on this device). PhotoStack handles both
+        // http URLs AND local keys via AsyncStorage.getItem in its
+        // resolver, so GALLERY: with keys works the same as with URLs.
+        content = `GALLERY:${stagedPhotos.map(p => p.key).join('|')}`;
       }
       if (caption) content += '\n' + caption;
       await postMsg(content);
     } catch {
-      // Last-resort fallback
-      let content = stagedPhotos.length === 1
-        ? `LOCALIMG:${stagedPhotos[0].key}`
-        : `GALLERY:${stagedPhotos.map(p => p.key).join('|')}`;
+      // Last-resort fallback — same GALLERY: prefix policy as the
+      // happy path so the recipient renders single photos at the
+      // same large size.
+      let content = `GALLERY:${stagedPhotos.map(p => p.key).join('|')}`;
       if (caption) content += '\n' + caption;
       await postMsg(content);
     }
@@ -1788,35 +1887,102 @@ export default function ChatRoomScreen({ route, navigation }) {
     // Intentionally don't upload — discarded.
   }
 
+  // 1.0.18+ View-Once v2: handle the user's mode selection from the
+  // post-pick chooser modal. mode ∈ { 'once', 'replay', 'keep' }.
+  //   - 'once'   → upload + post `VONCE:url|kind|1`
+  //   - 'replay' → upload + post `VONCE:url|kind|3`
+  //   - 'keep'   → upload + post `GALLERY:url`  (regular photo, persists)
+  // After the upload, clears the staged asset and closes the modal.
+  async function handleVonceMode(mode) {
+    setVonceModeModal(false);
+    const asset = pendingVonceAsset;
+    if (!asset) return;
+    setPendingVonceAsset(null);
+    const isVideo = (asset.type || '').startsWith('video')
+                    || /\.(mp4|mov|m4v)$/i.test(asset.uri || '');
+    setSending(true);
+    try {
+      const url = await uploadMedia(asset.uri, isVideo ? 'video' : 'image');
+      if (!url) {
+        Alert.alert('Upload failed', 'Could not send the media. Check Metro logs.');
+        return;
+      }
+      const kind = isVideo ? 'video' : 'image';
+      if (mode === 'keep') {
+        // Regular photo bubble — same wire format as multi-select Gallery.
+        await postMsg(`GALLERY:${url}`);
+      } else {
+        const viewLimit = (mode === 'replay') ? 3 : 1;
+        await postMsg(`VONCE:${url}|${kind}|${viewLimit}`);
+      }
+    } finally {
+      setSending(false);
+    }
+  }
+
+  // Recipient-side callback fired by ViewOncePhoto each time the
+  // user opens the bubble. Inserts a row into `view_events` so the
+  // sender's realtime subscription fires (notification UX), and on
+  // the FINAL view also calls the consume-vonce-view edge function
+  // which deletes the underlying Supabase Storage object so the
+  // URL is no longer fetchable by anyone.
+  //
+  // Best-effort: failures are swallowed because the local AsyncStorage
+  // counter has already advanced and we don't want to roll it back if
+  // the network round-trip fails. Worst case: sender misses one
+  // notification or the storage object lingers a bit longer.
+  async function onConsumeVonceView({ messageId, viewsConsumed, viewsRemaining, isFinal }) {
+    if (!myId || !messageId) return;
+    // 1. Record the view event so the sender's realtime listener
+    //    can render a "your message was viewed" toast.
+    try {
+      await supabase.from('view_events').insert({
+        message_id:    messageId,
+        viewer_id:     myId,
+        view_number:   viewsConsumed,
+        is_final:      isFinal,
+      });
+    } catch (e) {
+      if (__DEV__) console.warn('view_events insert failed:', e?.message);
+    }
+    // 2. On the final view, ask the edge function to delete the
+    //    underlying Supabase Storage object. The function authenticates
+    //    the caller, double-checks the view count vs limit, and
+    //    performs the storage delete server-side. After this returns,
+    //    the URL in the message body returns 404 forever.
+    if (isFinal) {
+      try {
+        await supabase.functions.invoke('consume-vonce-view', {
+          body: { messageId },
+        });
+      } catch (e) {
+        if (__DEV__) console.warn('consume-vonce-view invoke failed:', e?.message);
+      }
+    }
+  }
+
   function pickAttach(type) { pendingAttach.current = type; setAttachModal(false); }
 
   async function handleAttachType(type) {
     if (type === 'vonce') {
-      // View-once flow: pick ONE photo (or video), upload, post
-      // immediately as VONCE — bypasses staging since the whole point
-      // of view-once is a single shot the recipient can open exactly
-      // one time. Single-select keeps the UX a clean snap-and-send.
+      // 1.0.18+ View-Once v2 flow:
+      //   1. Pick ONE photo/video (single-select for clean snap-and-send)
+      //   2. Show mode chooser modal: View Once / Replay (3) / Keep in Chat
+      //   3. handleVonceMode() uploads + posts based on the choice
+      // Quality 0.7 = ~50% smaller payload than quality 1 with
+      // imperceptible visual difference. Cuts Supabase Storage bills
+      // and matches iMessage's defaults.
       const p = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!p.granted) { Alert.alert('Permission needed'); return; }
-      // quality: 0.7 → ~50% smaller upload payload than quality 1 with
-      // no perceptible visual difference. Cuts Supabase Storage bills
-      // when users send 12MP phone photos. iMessage uses similar.
       const r = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images', 'videos'],
         quality: 0.7, allowsMultipleSelection: false,
       });
       if (r.canceled || !r.assets?.[0]) return;
-      const asset = r.assets[0];
-      const isVideo = (asset.type || '').startsWith('video') || /\.(mp4|mov|m4v)$/i.test(asset.uri || '');
-      setSending(true);
-      const url = await uploadMedia(asset.uri, isVideo ? 'video' : 'image');
-      if (!url) {
-        Alert.alert('Upload failed', 'Could not send the view-once media. Check Metro logs.');
-        setSending(false);
-        return;
-      }
-      await postMsg(`VONCE:${url}|${isVideo ? 'video' : 'image'}`);
-      setSending(false);
+      // Stash the asset and open the mode chooser. The actual
+      // upload happens in handleVonceMode after the user picks.
+      setPendingVonceAsset(r.assets[0]);
+      setVonceModeModal(true);
       return;
     }
     if (type === 'photo') {
@@ -2032,6 +2198,23 @@ export default function ChatRoomScreen({ route, navigation }) {
               register when the keyboard is up
             - keyboardDismissMode='interactive' matches iMessage:
               swipe down on the message list to dismiss the keyboard */}
+
+      {/* 1.0.18+ View-Once v2: sender notification banner. Appears
+          for ~3.5s when a view_events row arrives via realtime,
+          then auto-dismisses. Differentiates VaultChat from
+          Instagram DMs which only notify the sender for the
+          first view of a view-once. */}
+      {vonceViewToast && (
+        <View style={[vs.toastBanner, { backgroundColor: accent + 'EE' }]}>
+          <Text style={{ fontSize: 14 }}>👁️</Text>
+          <Text style={vs.toastText}>
+            {vonceViewToast.isFinal
+              ? `Your photo was viewed (final view)`
+              : `Your photo was viewed (#${vonceViewToast.viewNumber})`}
+          </Text>
+        </View>
+      )}
+
       <FlatList
         ref={listRef}
         data={(() => {
@@ -2139,6 +2322,7 @@ export default function ChatRoomScreen({ route, navigation }) {
                 bubbleOutTx={bubbleOutTx} bubbleInTx={bubbleInTx}
                 onOpenImg={uri => setFullImgUri(uri)}
                 onPlayVid={uri => setVidUri(uri)}
+                onConsumeVonceView={onConsumeVonceView}
                 onLongPress={item => { longPressFeedback(); setPickerMsg(item); }}
                 onReply={() => setReplyTo(item)}
                 tappedId={tappedId}
@@ -2405,6 +2589,66 @@ export default function ChatRoomScreen({ route, navigation }) {
         </TouchableOpacity>
       </Modal>
 
+      {/* 1.0.18+ View-Once v2 mode chooser. Shown after the user
+          picks a photo/video from the View Once attachment. Three
+          options: View Once (1 view), Replay (3 views), Keep in Chat
+          (regular photo). Differentiates VaultChat from Instagram
+          DMs (2-view replay, no visible counter, no E2E). */}
+      <Modal visible={vonceModeModal} transparent animationType="slide" onRequestClose={() => { setVonceModeModal(false); setPendingVonceAsset(null); }}>
+        <TouchableOpacity style={s.overlay} activeOpacity={1} onPress={() => { setVonceModeModal(false); setPendingVonceAsset(null); }}>
+          <View style={[s.sheet, { backgroundColor: card }]}>
+            <View style={[s.handle, { backgroundColor: border }]} />
+            <Text style={[s.sheetTitle, { color: tx }]}>How should this be shown?</Text>
+
+            <TouchableOpacity
+              style={[vs.modeRow, { borderColor: border }]}
+              onPress={() => handleVonceMode('once')}
+              activeOpacity={0.7}>
+              <View style={[vs.modeIcon, { backgroundColor: accent + '22' }]}>
+                <Text style={{ fontSize: 26 }}>👁️</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[vs.modeTitle, { color: tx }]}>View Once</Text>
+                <Text style={[vs.modeSub, { color: sub }]}>Recipient sees it once, then it's gone.</Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[vs.modeRow, { borderColor: border }]}
+              onPress={() => handleVonceMode('replay')}
+              activeOpacity={0.7}>
+              <View style={[vs.modeIcon, { backgroundColor: accent + '22' }]}>
+                <Text style={{ fontSize: 26 }}>🔄</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[vs.modeTitle, { color: tx }]}>Allow Replay</Text>
+                <Text style={[vs.modeSub, { color: sub }]}>Recipient can re-watch up to 3 times. Counter shown.</Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[vs.modeRow, { borderColor: border }]}
+              onPress={() => handleVonceMode('keep')}
+              activeOpacity={0.7}>
+              <View style={[vs.modeIcon, { backgroundColor: accent + '22' }]}>
+                <Text style={{ fontSize: 26 }}>💾</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[vs.modeTitle, { color: tx }]}>Keep in Chat</Text>
+                <Text style={[vs.modeSub, { color: sub }]}>Always viewable, like a regular photo.</Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={vs.cancelBtn}
+              onPress={() => { setVonceModeModal(false); setPendingVonceAsset(null); }}
+              activeOpacity={0.7}>
+              <Text style={[vs.cancelText, { color: sub }]}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       {/* GIFs & Memes — real Giphy-powered search picker. Replaces
           the previous inline modal that only showed the static
           emoji-shortcut grid. URL-based GIFs are sent with the
@@ -2661,6 +2905,32 @@ export default function ChatRoomScreen({ route, navigation }) {
   );
 }
 
+// 1.0.18+ View-Once v2 mode chooser styles. Kept in their own
+// stylesheet object so future view-once UX evolution doesn't churn
+// the giant `s` stylesheet below.
+const vs = StyleSheet.create({
+  modeRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    paddingHorizontal: 16, paddingVertical: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  modeIcon: {
+    width: 44, height: 44, borderRadius: 22,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  modeTitle: { fontSize: 16, fontWeight: '700', marginBottom: 2 },
+  modeSub:   { fontSize: 12, lineHeight: 16 },
+  cancelBtn: { alignItems: 'center', paddingVertical: 14, marginTop: 4 },
+  cancelText:{ fontSize: 15, fontWeight: '600' },
+  toastBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingHorizontal: 14, paddingVertical: 10,
+    marginHorizontal: 14, marginTop: 8, marginBottom: 4,
+    borderRadius: 12,
+  },
+  toastText: { color: '#fff', fontSize: 13, fontWeight: '600', flex: 1 },
+});
+
 const s = StyleSheet.create({
   container:   { flex: 1 },
   header:      { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, borderBottomWidth: 1, gap: 8 },
@@ -2683,6 +2953,23 @@ const s = StyleSheet.create({
   myBubble:    { borderBottomRightRadius: 4 },
   theirBubble: { borderBottomLeftRadius: 4 },
   mediaPad:    { paddingHorizontal: 4, paddingVertical: 4 },
+  // 1.0.19+ photo-reactions overlap. mediaReactWrap is a positioned
+  // wrapper around the bubble TouchableOpacity so the absolute-
+  // positioned ReactionBar can float over the photo's corner.
+  // mediaReactOverlay positions the chip row near the bottom edge,
+  // pulled out toward the bubble's outer side (right for "me",
+  // left for "them") — same anchoring as iMessage/WhatsApp.
+  //
+  // bottom: 15 — accounts for the 25px deckArea buffer that
+  // PhotoStack uses internally for its swipe-animation card stack.
+  // The actual photo card sits 25px above the bubble's bottom edge,
+  // so a positive `bottom: 15` value lifts the chip up by 15px from
+  // the bubble bottom, landing the chip's bottom edge at
+  // photo_bottom + 10. With chip height ~30px the chip straddles
+  // the photo's bottom edge: top 20px INSIDE the photo, bottom
+  // 10px past it — the iMessage / WhatsApp floating-chip look.
+  mediaReactWrap:    { position: 'relative' },
+  mediaReactOverlay: { position: 'absolute', bottom: 15, zIndex: 5 },
   msgTx:       { fontSize: 15, lineHeight: 21 },
   cap:         { fontSize: 13, lineHeight: 19, paddingHorizontal: 6, paddingTop: 5, paddingBottom: 2 },
   time:        { fontSize: 11, color: '#8e8e93', marginTop: 3, marginBottom: 8 },
