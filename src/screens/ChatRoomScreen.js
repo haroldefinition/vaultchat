@@ -1082,8 +1082,14 @@ export default function ChatRoomScreen({ route, navigation }) {
       // Contact buttons do nothing" because their handlers run
       // after this throws.
       try {
-        const r = await supabase.from('profiles').select('handle').eq('id', data.user.id).single();
-        if (r?.data?.handle) setMyHandle(r.data.handle);
+        // 1.0.18+ fix: column is `vault_handle`, not `handle`. Same bug
+        // as tonight's GroupChatScreen.initUser fix — pre-fix this query
+        // returned data.handle=undefined so setMyHandle never fired,
+        // making the 1:1 typing indicator broadcast an empty handle to
+        // peers ("is typing…" with no name). Mirrored across 1:1 +
+        // group screens for parity.
+        const r = await supabase.from('profiles').select('vault_handle').eq('id', data.user.id).single();
+        if (r?.data?.vault_handle) setMyHandle(r.data.vault_handle);
       } catch {}
       // Mark existing messages as read
       markRoomAsRead(roomId, data.user.id);
